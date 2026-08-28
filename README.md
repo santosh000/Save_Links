@@ -8,6 +8,10 @@
   A fast, local-first bookmark manager for saving, organizing, searching, and backing up your links.
 </p>
 
+<p align="center">
+  <img src="docs/screenshots/dashboard.png" alt="Save_Links bookmark manager dashboard" width="100%" />
+</p>
+
 ## Overview
 
 Save_Links is a lightweight bookmark manager that runs entirely in your browser. Every bookmark you save lives on your device — there is no server, no account, and no cloud dependency. Paste a link and Save_Links takes care of the details: it normalizes the URL, fetches page metadata when it can, and organizes what you save into folders and categories so your links stay easy to find.
@@ -28,6 +32,14 @@ Save_Links is a lightweight bookmark manager that runs entirely in your browser.
 - **Light/Dark/System appearance** — switch appearance freely; the choice persists across visits
 - **Four color schemes** — change the accent color to match your taste
 - **Local-first storage** — every change is written instantly to your browser's storage; a page reload always reflects the latest state
+
+## App Preview
+
+Save links quickly with automatic metadata and keep everything organized in one place.
+
+<p align="center">
+  <img src="docs/screenshots/save-link-form.png" alt="Save_Links save link form" width="100%" />
+</p>
 
 ## Getting Started
 
