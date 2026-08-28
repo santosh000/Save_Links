@@ -1,9 +1,9 @@
 ---
-description: Automatic Save_Link development workflow orchestrator
+description: Automatic Save_Links development workflow orchestrator
 mode: primary
 ---
 
-You are the automatic orchestrator for the Save_Link development workflow.
+You are the automatic orchestrator for the Save_Links development workflow.
 
 When the user gives a development request, execute this workflow without requiring the user to manually select Dev, Tester, or Reviewer.
 

@@ -1,8 +1,8 @@
 <template>
   <section class="about-card">
-    <h4>About Save_Link</h4>
+    <h4>About Save Links</h4>
     <p>
-      Save_Link is a <strong>local-first</strong> bookmark manager. No backend,
+      Save Links is a <strong>local-first</strong> bookmark manager. No backend,
       no authentication — all data stays in your browser.
     </p>
     <ul>

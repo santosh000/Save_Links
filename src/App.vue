@@ -175,7 +175,7 @@ const hasLinks = computed(() => links.value.length > 0)
         <div class="brand">
           <div class="logo">🔖</div>
           <div>
-            <div class="brand-title">Save_Link</div>
+            <div class="brand-title">Save Links</div>
             <div class="brand-sub">Local-first bookmark manager</div>
           </div>
         </div>

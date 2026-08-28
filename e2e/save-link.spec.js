@@ -35,14 +35,14 @@ async function saveLink(page, { url, title, description, image, tags, category, 
   await expect(page.getByText('Link saved')).toBeVisible({ timeout: 3000 }).catch(() => {})
 }
 
-test.describe('Save_Link E2E', () => {
+test.describe('Save Links E2E', () => {
   test.beforeEach(async ({ page }) => {
     await clearStorage(page)
   })
 
   test('A. Application load', async ({ page }) => {
     await page.goto('/')
-    await expect(page.locator('.brand-title')).toHaveText('Save_Link')
+    await expect(page.locator('.brand-title')).toHaveText('Save Links')
     await expect(page.locator('.brand-sub')).toHaveText('Local-first bookmark manager')
     // the Save Link form is a collapsed bar; expand it to assert the form
     await page.getByRole('button', { name: 'Save a link', exact: true }).click()
@@ -59,7 +59,7 @@ test.describe('Save_Link E2E', () => {
     await expect(page.locator('.profile')).toBeVisible()
     await expect(page.getByText('Local User')).toBeVisible()
     // about
-    await expect(page.getByText('About Save_Link')).toBeVisible()
+    await expect(page.getByText('About Save Links')).toBeVisible()
   })
 
   test('B. Save link', async ({ page }) => {

@@ -46,7 +46,7 @@ function triggerExport() {
     const a = document.createElement('a')
     a.href = url
     const date = new Date().toISOString().slice(0, 10)
-    a.download = `save-link-backup-${date}.json`
+    a.download = `save-links-backup-${date}.json`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
@@ -116,7 +116,7 @@ async function handleImport(event) {
     return
   }
 
-  const confirmed = window.confirm('This will replace your current Save_Link data. Your existing data may be lost. Continue?')
+  const confirmed = window.confirm('This will replace your current Save Links data. Your existing data may be lost. Continue?')
   if (!confirmed) return
 
   emit('imported', normalized)

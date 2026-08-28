@@ -189,7 +189,7 @@ test.describe('Backup E2E', () => {
     }
 
     page.once('dialog', async (d) => {
-      expect(d.message()).toContain('This will replace your current Save_Link data')
+      expect(d.message()).toContain('This will replace your current Save Links data')
       await d.accept()
     })
     await page.locator('.backup-card input[type="file"]').setInputFiles({
@@ -335,7 +335,7 @@ test.describe('Backup E2E', () => {
     await expect(page.locator('article.card')).toHaveCount(1)
     await expect(page.locator('article.card').first()).toContainText('Good Link')
     // ensure app didn't crash
-    await expect(page.getByText('Save_Link', { exact: false }).first()).toBeVisible()
+    await expect(page.getByText('Save Links', { exact: false }).first()).toBeVisible()
   })
 
   test('10. Persistence after import', async ({ page }) => {
