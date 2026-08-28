@@ -161,66 +161,66 @@ test.describe('Folders, Appearance, Color Schemes, Backup v2', () => {
   test('Appearance Light/Dark/System persistence and system follows', async ({page}) => {
     await page.goto('/')
     // default with no saved preference should be system
-    await expect(page.getByLabel('System')).toBeChecked()
+    await expect(page.getByLabel('System theme')).toBeChecked()
     // switch to Dark
-    await page.getByLabel('Dark').click()
+    await page.getByLabel('Dark theme').click()
     await expect(page.locator('html')).toHaveAttribute('data-appearance','dark')
     await page.reload()
-    await expect(page.getByLabel('Dark')).toBeChecked()
+    await expect(page.getByLabel('Dark theme')).toBeChecked()
     await expect(page.locator('html')).toHaveAttribute('data-appearance','dark')
     // switch to Light
-    await page.getByLabel('Light').click()
+    await page.getByLabel('Light theme').click()
     await expect(page.locator('html')).toHaveAttribute('data-appearance','light')
     await page.reload()
-    await expect(page.getByLabel('Light')).toBeChecked()
+    await expect(page.getByLabel('Light theme')).toBeChecked()
     // System follows prefers-color-scheme is tested via setting system and checking attribute matches media query; we just verify system sets based on dark/light mock by checking that system option checked and attribute is either light or dark
-    await page.getByLabel('System').click()
-    await expect(page.getByLabel('System')).toBeChecked()
+    await page.getByLabel('System theme').click()
+    await expect(page.getByLabel('System theme')).toBeChecked()
     const appearance = await page.getAttribute('html','data-appearance')
     expect(['light','dark']).toContain(appearance)
     // existing data intact after theme switch: create link then switch theme still visible
     await saveLink(page, {url:'https://example.com/themeTest', title:'Theme Persist'})
-    await page.getByLabel('Dark').click()
+    await page.getByLabel('Dark theme').click()
     await expect(page.locator('article.card').first()).toContainText('Theme Persist')
   })
 
   test('Color schemes all 4 and independence', async ({page}) => {
     await page.goto('/')
-    // default Ocean Blue
-    await expect(page.getByLabel('Ocean Blue')).toBeChecked()
-    for (const scheme of ['Forest Green','Lavender','Warm Amber','Ocean Blue']) {
+    // default Ocean
+    await expect(page.getByLabel('Ocean color scheme')).toBeChecked()
+    for (const scheme of ['Forest color scheme','Lavender color scheme','Amber color scheme','Ocean color scheme']) {
       await page.getByLabel(scheme).click()
       await expect(page.getByLabel(scheme)).toBeChecked()
       const cs = await page.getAttribute('html','data-color-scheme')
       // map labels to values
-      const map={ 'Ocean Blue':'ocean','Forest Green':'forest','Lavender':'lavender','Warm Amber':'amber'}
+      const map={ 'Ocean color scheme':'ocean','Forest color scheme':'forest','Lavender color scheme':'lavender','Amber color scheme':'amber'}
       expect(cs).toBe(map[scheme])
       // each works with light/dark
-      await page.getByLabel('Light').click()
+      await page.getByLabel('Light theme').click()
       await expect(page.locator('html')).toHaveAttribute('data-appearance','light')
-      await page.getByLabel('Dark').click()
+      await page.getByLabel('Dark theme').click()
       await expect(page.locator('html')).toHaveAttribute('data-appearance','dark')
-      await page.getByLabel('System').click()
+      await page.getByLabel('System theme').click()
       // readable check: card still visible
       await expect(page.getByText('Appearance')).toBeVisible()
     }
     // persistence after reload for forest
-    await page.getByLabel('Forest Green').click()
+    await page.getByLabel('Forest color scheme').click()
     await page.reload()
-    await expect(page.getByLabel('Forest Green')).toBeChecked()
+    await expect(page.getByLabel('Forest color scheme')).toBeChecked()
     // independence from appearance
-    await page.getByLabel('Light').click()
-    await page.getByLabel('Lavender').click()
-    await expect(page.getByLabel('Light')).toBeChecked()
-    await expect(page.getByLabel('Lavender')).toBeChecked()
+    await page.getByLabel('Light theme').click()
+    await page.getByLabel('Lavender color scheme').click()
+    await expect(page.getByLabel('Light theme')).toBeChecked()
+    await expect(page.getByLabel('Lavender color scheme')).toBeChecked()
   })
 
   test('Backup v2 export/import and v1 migrate, invalid rejected', async ({page}) => {
     await page.goto('/')
     await page.getByLabel('New folder name').fill('BackupFolder')
     await page.getByRole('button', { name:'Create folder', exact:true }).click()
-    await page.getByLabel('Forest Green').click()
-    await page.getByLabel('Dark').click()
+    await page.getByLabel('Forest color scheme').click()
+    await page.getByLabel('Dark theme').click()
     await saveLink(page, {url:'https://example.com/backupF', title:'Backup Folder Link'})
     // assign folder via edit
     const card = page.locator('article.card').first()
@@ -242,16 +242,16 @@ test.describe('Folders, Appearance, Color Schemes, Backup v2', () => {
     await expect(page.getByText('Backup imported')).toBeVisible()
     await expect(page.locator('article.card').first()).toContainText('Backup Folder Link')
     await expect(page.locator('.folder-item', {hasText:'BackupFolder'})).toBeVisible()
-    await expect(page.getByLabel('Dark')).toBeChecked()
-    await expect(page.getByLabel('Forest Green')).toBeChecked()
+    await expect(page.getByLabel('Dark theme')).toBeChecked()
+    await expect(page.getByLabel('Forest color scheme')).toBeChecked()
     // v1 still imports with defaults
     const v1 = { app:'Save_Link', version:1, exportedAt:new Date().toISOString(), profile:{name:'V1 User'}, links:[{ id:'v1id', originalUrl:'https://example.com/v1', normalizedUrl:'https://example.com/v1', url:'https://example.com/v1', title:'V1 Link'}]}
     page.once('dialog', async d=>await d.accept())
     await page.locator('.backup-card input[type="file"]').setInputFiles({ name:'v1.json', mimeType:'application/json', buffer:Buffer.from(JSON.stringify(v1))})
     await expect(page.getByText('Backup imported')).toBeVisible()
     await expect(page.locator('article.card').first()).toContainText('V1 Link')
-    await expect(page.getByLabel('System')).toBeChecked()
-    await expect(page.getByLabel('Ocean Blue')).toBeChecked()
+    await expect(page.getByLabel('System theme')).toBeChecked()
+    await expect(page.getByLabel('Ocean color scheme')).toBeChecked()
     await expect(page.locator('.folder-item', {hasText:'Unfiled'})).toBeVisible()
     // invalid backup rejected
     await saveLink(page, {url:'https://example.com/keepInvalid', title:'KeepInvalid'})

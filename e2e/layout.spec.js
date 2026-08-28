@@ -40,7 +40,7 @@ test.describe('Layout redesign', () => {
     await expect(page.getByRole('button', { name: 'Toggle filters and tools' })).toBeHidden()
     // left area: folders + appearance
     await expect(page.getByRole('button', { name: 'All links' })).toBeInViewport()
-    await expect(page.getByLabel('Ocean Blue')).toBeInViewport()
+    await expect(page.getByLabel('Ocean color scheme')).toBeInViewport()
     // right area: backup, search, stats
     await expect(page.getByRole('button', { name: 'Export Backup' })).toBeInViewport()
     await expect(page.getByLabel('Search links')).toBeInViewport()
@@ -146,7 +146,7 @@ test.describe('Layout redesign', () => {
       // nav drawer: folders + appearance settings
       await page.getByRole('button', { name: 'Toggle folders navigation' }).click()
       await expect(page.getByRole('button', { name: 'All links' })).toBeInViewport()
-      await expect(page.getByLabel('Dark')).toBeInViewport()
+      await expect(page.getByLabel('Dark theme')).toBeInViewport()
       // folder create input and Create button are equal height
       const inputBox = await page.locator('#new-folder-input').boundingBox()
       const createBtnBox = await page.getByRole('button', { name: 'Create folder', exact: true }).boundingBox()

@@ -141,6 +141,7 @@ function handleDelete(id) {
   text-align:left;
 }
 .nav-item:hover { border-color: var(--accent-border); }
+.nav-item + .nav-item { margin-top: 8px; }
 .nav-item.active { background: var(--accent-bg); border-color: var(--accent-border); color: var(--accent); }
 .nav-icon { font-size:14px; }
 .input {
