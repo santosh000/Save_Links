@@ -8,87 +8,75 @@
   A fast, local-first bookmark manager for saving, organizing, searching, and backing up your links.
 </p>
 
-## Local-first architecture
+## Overview
 
-Everything is stored in the browser's `localStorage` under namespaced keys (separate namespaces per environment: development, test, production). There is no backend. The app boots from local data and writes to it on every change, so a page reload always reflects the latest state.
+Save_Links is a lightweight bookmark manager that runs entirely in your browser. Every bookmark you save lives on your device — there is no server, no account, and no cloud dependency. Paste a link and Save_Links takes care of the details: it normalizes the URL, fetches page metadata when it can, and organizes what you save into folders and categories so your links stay easy to find.
 
-## Main functionality
+## Features
 
-- **Add links** — paste a URL; title/description are fetched automatically when possible (best-effort, debounced, never blocks saving). Optional image and tags.
-- **Organize** — folders (with counts), auto-categorization by domain (GitHub, YouTube, X/Twitter, Amazon, etc.), plus Unfiled and Favorites views.
-- **Flag links** — independent **important**, **must have**, and **favorite** flags.
-- **Search & filters** — full-text search; filter by status (important / must have / favorites / no favorite), category, and folder. Filters combine.
-- **Edit & delete** — change any field, move to another folder, or remove a link.
-- **Profile & stats** — optional profile name/bio shown in the header; dashboard with totals and per-category breakdown.
-- **Appearance** — light / dark / system appearance, plus four color schemes (ocean, forest, sunset, lavender).
-- **Backup & restore** — export all data to a JSON file, import it back later (with validation, migration of older formats, and sanitization of untrusted fields).
+- **Save links** — add a bookmark in seconds; the URL is validated and normalized automatically
+- **Automatic URL/source metadata handling** — title and description are fetched best-effort when available (never blocks saving)
+- **Automatic categorization where currently supported** — domains like GitHub, YouTube, X/Twitter, Amazon, and others are tagged automatically; everything else falls into "Other"
+- **Folders** — keep related links together; folders show live counts and can be reorganized at any time
+- **Favorites** — mark links you want quick access to
+- **Important** — flag links that matter most
+- **Must Have** — separate the links you can't live without
+- **Search** — full-text search across every saved link
+- **Filtering** — combine filters by flag (important, must have, favorites), category, and folder
+- **Backup/export** — export all data to a JSON file
+- **Import/restore** — restore from a backup file later, with validation, migration of older formats, and sanitization of untrusted fields
+- **Light/Dark/System appearance** — switch appearance freely; the choice persists across visits
+- **Four color schemes** — change the accent color to match your taste
+- **Local-first storage** — every change is written instantly to your browser's storage; a page reload always reflects the latest state
 
-## Tech stack
+## Getting Started
 
-- Vue 3 (Composition API, `<script setup>`)
-- Vite (build + dev server)
-- Vitest + jsdom (unit tests)
-- Playwright (browser end-to-end tests)
+### Prerequisites
 
-## Install
+- Node.js
+- npm
+- Git
 
-```sh
+### Run locally
+
+```bash
+git clone https://github.com/santosh000/Save_Links.git
+cd Save_Links
 npm install
-```
-
-The E2E suite runs against the installed **Chrome** browser (`channel: 'chrome'` in `playwright.config.js`).
-
-## Development
-
-```sh
 npm run dev
 ```
 
-Starts the Vite dev server (default `http://localhost:5173`).
+The dev server is available at `http://localhost:5173` by default.
 
-## Unit tests
+## 🗺️ Roadmap
 
-```sh
-npm test
-```
+- [x] Local-first link management
+- [x] Folders and organization
+- [x] Search and filtering
+- [x] Backup and restore
+- [ ] User authentication
+- [ ] Backend integration
+- [ ] Cloud synchronization
 
-Runs the Vitest suite (app logic: URL normalization, categorization, metadata, storage/environment, backup v1/v2, composables).
+## Tech stack
 
-## E2E tests
+- **Vue 3** (Composition API, `<script setup>`)
+- **Vite** for the dev server and production builds
+- **Vitest + jsdom** for unit tests
+- **Playwright** for browser end-to-end tests (runs against Chrome)
 
-```sh
-npm run test:e2e
-```
+## Scripts
 
-Runs the Playwright suite against a dedicated test server (`vite --mode test`) on port 5173. Make sure port 5173 is free before running; the suite covers saving, editing, filtering, folders, backups, layout, and responsive behavior across desktop/tablet/mobile viewports.
+| Script | Description |
+| ------ | ----------- |
+| `npm run dev` | Start the Vite dev server |
+| `npm test` | Run the unit test suite |
+| `npm run test:e2e` | Run the Playwright end-to-end suite (uses a dedicated test server on port 5173) |
+| `npm run build` | Create a static production build in `dist/` |
+| `npm run preview` | Preview the production build locally |
 
-## Build
+## Storage & privacy
 
-```sh
-npm run build
-```
-
-Produces a static production build in `dist/`. Preview it locally with `npm run preview`.
-
-## Storage & privacy model
-
-- All data lives in `localStorage` on your device, prefixed per environment.
-- Nothing is sent anywhere: no analytics, no telemetry, no external requests except the optional best-effort metadata fetch of the URL you explicitly paste (metadata is extracted client-side in the browser).
-- Clearing browser storage (or a fresh profile) starts the app empty. Use **Backup & restore** to move data between browsers or machines.
-
-## Backup & restore
-
-The **Data & backup** panel exports a JSON backup of everything (links, folders, profile, settings, appearance) and imports it back on demand. Imports are validated: wrong app identifier, unsupported versions, and malformed records are rejected; every imported field is sanitized (URLs are restricted to `http`/`https`, arbitrary fields are never executed). Both legacy (v1) and current (v2) formats are supported.
-
-## Appearance & color options
-
-Switch between **Light**, **Dark**, and **System** (follows OS preference), independently of the four **color schemes**. The choice persists across sessions.
-
-## Project layout
-
-```
-src/            Application code (components, composables, utilities)
-src/utils/      Pure logic: categorization, metadata, backup, storage, environment
-e2e/            Playwright end-to-end tests
-public/         Static assets (favicon, icons)
-```
+- All data is stored locally in your browser under namespaced keys (separate per environment), and nothing is sent anywhere — no analytics, no telemetry, no accounts.
+- The only external request is the optional, best-effort metadata fetch for a URL you explicitly paste; metadata extraction happens client-side in your browser.
+- Clearing browser storage (or using a fresh profile) starts the app empty — use Backup & restore to move your data between browsers or machines.
