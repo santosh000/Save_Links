@@ -173,7 +173,7 @@ const hasLinks = computed(() => links.value.length > 0)
     <header class="topbar">
       <div class="topbar-inner">
         <div class="brand">
-          <div class="logo">🔖</div>
+          <img src="/logo.png" class="logo-img" alt="Save Links logo" />
           <div>
             <div class="brand-title">Save Links</div>
             <div class="brand-sub">Local-first bookmark manager</div>
@@ -281,15 +281,11 @@ const hasLinks = computed(() => links.value.length > 0)
   justify-content: space-between;
 }
 .brand { display: flex; gap: 12px; align-items: center; }
-.logo {
-  width: 40px;
+.logo-img {
   height: 40px;
-  border-radius: 12px;
-  background: var(--text-h);
-  color: var(--bg);
-  display: grid;
-  place-items: center;
-  font-size: 18px;
+  width: auto;
+  flex-shrink: 0;
+  display: block;
 }
 .brand-title { font-weight: 800; color: var(--text-h); line-height: 1; }
 .brand-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }

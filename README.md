@@ -1,6 +1,12 @@
-# Save_Links
+<p align="center">
+  <img src="public/logo.png" alt="Save_Links" width="140" />
+</p>
 
-Save Links is a local-first bookmark app: store, organize, and search your links entirely in your browser. No account, no server, no tracking — your data never leaves your machine.
+<h1 align="center">Save_Links</h1>
+
+<p align="center">
+  A fast, local-first bookmark manager for saving, organizing, searching, and backing up your links.
+</p>
 
 ## Local-first architecture
 
