@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/dashboard.png" alt="Save_Links bookmark manager dashboard" width="100%" />
+  <img src="docs/screenshots/showcase.png" alt="Save_Links bookmark manager" width="100%" />
 </p>
 
 ## Overview
