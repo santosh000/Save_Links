@@ -1,4 +1,4 @@
-import { getDomain, categorizeUrl } from './categorize.js'
+import { normalizeLink as normalizeCanonicalLink } from '../domain/link.js'
 import { getStorageKey } from './environment.js'
 
 export const BACKUP_APP = 'Save_Link'
@@ -115,56 +115,14 @@ export function validateBackupPayload(data) {
 }
 
 function normalizeLink(raw, validFolderIds = null) {
-  if (typeof raw !== 'object' || raw === null) return null
-  // Only trust known fields, do not execute arbitrary code
-  // The href-bound URL must be http(s) — the app only ever creates those; this also
-  // rejects javascript:/data:/etc. from crafted backups. originalUrl may stay
-  // scheme-less because it is display text only and never becomes an href.
-  const httpUrl = (x) => (typeof x === 'string' && /^https?:\/\//i.test(x.trim())) ? x.trim() : ''
-  const normalized = httpUrl(raw.normalizedUrl) || httpUrl(raw.url) || httpUrl(raw.originalUrl) || ''
-  const original = typeof raw.originalUrl === 'string' && raw.originalUrl.trim() ? raw.originalUrl.trim().slice(0, 2000) : normalized
-  // skip records with no usable http(s) URL
-  if (!normalized) return null
-
-  const id = typeof raw.id === 'string' && raw.id ? raw.id : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
-  const title = typeof raw.title === 'string' ? raw.title.slice(0, 200) : ''
-  const description = typeof raw.description === 'string' ? raw.description.slice(0, 400) : ''
-  const image = typeof raw.image === 'string' ? raw.image.trim() : ''
-  const tags = Array.isArray(raw.tags) ? raw.tags.filter((t) => typeof t === 'string').map((t) => t.trim()).filter(Boolean) : []
-  const category = typeof raw.category === 'string' && raw.category ? raw.category : categorizeUrl(normalized || original) || 'Other'
-  const important = !!raw.important
-  const mustHave = !!raw.mustHave
-  const favorite = !!raw.favorite
-  const domain = typeof raw.domain === 'string' && raw.domain ? raw.domain : getDomain(normalized || original) || ''
-  const createdAt = typeof raw.createdAt === 'string' ? raw.createdAt : new Date().toISOString()
-  let folderId = null
-  if (typeof raw.folderId === 'string' && raw.folderId.trim()) {
-    const fid = raw.folderId.trim()
-    if (!validFolderIds || validFolderIds.has(fid)) folderId = fid
-    else folderId = null
-  }
-
-  // url compatibility field
-  const url = normalized || original
-
-  return {
-    id,
-    originalUrl: original,
-    normalizedUrl: normalized || original,
-    url,
-    title,
-    description,
-    image,
-    tags,
-    category,
-    important,
-    mustHave,
-    favorite,
-    folderId,
-    domain,
-    status: important && mustHave ? 'both' : important ? 'important' : mustHave ? 'must-have' : null,
-    createdAt,
-  }
+  // Canonical shape comes from src/domain/link.js (the single link normalizer
+  // shared with useLinks and the IndexedDB adapter). Backup-specific policy on
+  // top: drop records with no usable http(s) href, and clear folder ids that
+  // don't exist in the imported folder set.
+  const n = normalizeCanonicalLink(raw)
+  if (!n || !n.normalizedUrl) return null
+  if (validFolderIds && n.folderId && !validFolderIds.has(n.folderId)) n.folderId = null
+  return n
 }
 
 export function normalizeBackupData(data) {

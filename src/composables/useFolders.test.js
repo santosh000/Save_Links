@@ -1,6 +1,10 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { nextTick } from 'vue'
 import { getStorageKey } from '../utils/environment.js'
+import 'fake-indexeddb/auto'
+import { repository } from '../storage/repository.js'
+import { boot, bootState } from '../storage/migration.js'
+import { defaultDBName } from '../storage/indexeddb.js'
 
 function getLS() {
   if (typeof window !== 'undefined' && window.localStorage) return window.localStorage
@@ -18,12 +22,47 @@ function getLS() {
 }
 
 describe('useFolders', () => {
-  beforeEach(() => {
+  function deleteDB(name) {
+    return new Promise((resolve) => {
+      const req = indexedDB.deleteDatabase(name)
+      req.onsuccess = () => resolve()
+      req.onerror = () => resolve()
+      req.onblocked = () => {}
+    })
+  }
+
+  function resetBootState() {
+    bootState.ready = false
+    bootState.links = []
+    bootState.folders = []
+    bootState.profile = null
+    bootState.settings = null
+  }
+
+  // fake-indexeddb resolves open + transaction completion across separate
+  // macrotask turns, so flushing needs more than one setTimeout(0) hop
+  async function flush() {
+    await nextTick()
+    await new Promise((r) => setTimeout(r, 0))
+    await new Promise((r) => setTimeout(r, 0))
+    await new Promise((r) => setTimeout(r, 0))
+  }
+
+  beforeEach(async () => {
+    await repository.close()
+    await deleteDB(defaultDBName())
+    resetBootState()
     const mock = getLS()
     if (!globalThis.localStorage) globalThis.localStorage = mock
     if (typeof window !== 'undefined' && !window.localStorage) window.localStorage = mock
     try { if (typeof localStorage === 'undefined') global.localStorage = mock } catch {}
     getLS().clear()
+  })
+
+  afterEach(async () => {
+    await flush()
+    await repository.close()
+    await deleteDB(defaultDBName())
   })
 
   it('creates folder and persists', async () => {
@@ -34,10 +73,8 @@ describe('useFolders', () => {
     expect(f.name).toBe('Work')
     expect(f.id).toBeTruthy()
     expect(folders.value.length).toBe(1)
-    await nextTick()
-    await new Promise(r=>setTimeout(r,0))
-    // check persistence via storage key
-    const stored = JSON.parse(getLS().getItem(getStorageKey('folders')))
+    await flush()
+    const stored = await repository.getAllFolders()
     expect(stored.length).toBe(1)
     expect(stored[0].name).toBe('Work')
   })
@@ -76,6 +113,7 @@ describe('useFolders', () => {
 
   it('sanitizes invalid folders on load', async () => {
     getLS().setItem(getStorageKey('folders'), JSON.stringify([{ id: '', name: '' }, { id: '1', name: 'Valid' }, null, 'string']))
+    await boot(repository)
     const { useFolders } = await import('./useFolders.js')
     const { folders } = useFolders()
     expect(folders.value.length).toBe(1)
