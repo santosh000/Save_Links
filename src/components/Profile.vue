@@ -29,7 +29,8 @@ function cancel() {
 }
 
 function initials(name) {
-  return (name || 'L').split(' ').map(s => s[0]).join('').slice(0, 2).toUpperCase()
+  const parts = (name || '').trim().split(/\s+/).filter(Boolean)
+  return parts.map(s => s[0]).join('').slice(0, 2).toUpperCase() || 'L'
 }
 </script>
 
