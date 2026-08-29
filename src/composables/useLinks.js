@@ -1,59 +1,30 @@
 import { ref, computed, watch } from 'vue'
-import { loadLinks, saveLinks } from '../utils/storage.js'
+import { repository } from '../storage/repository.js'
+import { bootState } from '../storage/migration.js'
 import { categorizeUrl, getDomain, normalizeUrl } from '../utils/categorize.js'
+import { normalizeLink } from '../domain/link.js'
 import { fetchMetadata } from '../utils/metadata.js'
 
 export const STATUSES = ['important', 'must-have']
 
-function migrateLink(l) {
-  // handle old shape with url/status -> new shape with originalUrl/normalizedUrl/important/mustHave/favorite
-  const normalized = l.normalizedUrl || l.url || ''
-  const original = l.originalUrl || l.url || normalized
-  let important = false
-  let mustHave = false
-  if (typeof l.important === 'boolean') important = l.important
-  else if (l.status === 'important') important = true
-  if (typeof l.mustHave === 'boolean') mustHave = l.mustHave
-  else if (l.status === 'must-have' || l.status === 'must_have') mustHave = true
-  const favorite = typeof l.favorite === 'boolean' ? l.favorite : false
-  // folder migration: existing links without folderId go to Unfiled (null)
-  let folderId = null
-  if (typeof l.folderId === 'string' && l.folderId.trim()) folderId = l.folderId.trim()
-  else if (l.folderId === null) folderId = null
-  else folderId = null
-  return {
-    id: l.id,
-    originalUrl: original,
-    normalizedUrl: normalized,
-    url: normalized, // keep alias for backward compat
-    domain: l.domain || getDomain(normalized),
-    title: l.title || '',
-    description: l.description || '',
-    image: l.image || '',
-    category: l.category || categorizeUrl(normalized),
-    tags: Array.isArray(l.tags) ? l.tags : [],
-    important,
-    mustHave,
-    favorite,
-    folderId,
-    status: important && mustHave ? 'both' : important ? 'important' : mustHave ? 'must-have' : null, // legacy compat
-    createdAt: l.createdAt || new Date().toISOString()
-  }
-}
-
 export function useLinks() {
-  const raw = loadLinks()
-  const links = ref(raw.map(migrateLink))
+  // Initial state comes from the boot snapshot (filled by boot() in main.js
+  // BEFORE Vue mounts from migrated IndexedDB data) — the app never starts
+  // from an empty/IndexedDB state ahead of migration, and never reads
+  // localStorage at runtime anymore.
+  const links = ref(bootState.ready ? bootState.links : [])
   const storageError = ref('')
 
-  // persist automatically — store new shape, keep in-memory state on quota failure
+  // persist automatically — keep in-memory state on storage failure
   watch(links, (val) => {
-    const ok = saveLinks(val)
-    if (!ok) {
-      storageError.value = 'Storage full — changes not saved. Delete some links or clear browser data.'
-    } else if (storageError.value) {
-      storageError.value = ''
-    }
+    repository.setAllLinks(val)
+      .then(() => {
+        if (storageError.value) storageError.value = ''
+      })
+      .catch((err) => {
+        console.warn('setAllLinks failed', err)
+        storageError.value = 'Storage full — changes not saved. Delete some links or clear browser data.'
+      })
   }, { deep: true })
 
   const total = computed(() => links.value.length)
@@ -191,7 +162,7 @@ export function useLinks() {
 
   function setLinks(newLinks) {
     // Replace all links (used by backup import) — keep in-memory state, persist via watch
-    links.value = Array.isArray(newLinks) ? newLinks.map(migrateLink) : []
+    links.value = Array.isArray(newLinks) ? newLinks.map(normalizeLink).filter(Boolean) : []
   }
 
   function moveLinksFromFolder(folderId) {

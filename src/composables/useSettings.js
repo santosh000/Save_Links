@@ -1,11 +1,14 @@
 import { ref, watch, computed, onMounted, onUnmounted } from 'vue'
-import { loadAppearance, saveAppearance, loadColorScheme, saveColorScheme, DEFAULT_APPEARANCE, DEFAULT_COLOR_SCHEME, APPEARANCE_VALUES, COLOR_SCHEME_VALUES } from '../utils/storage.js'
+import { DEFAULT_APPEARANCE, DEFAULT_COLOR_SCHEME, APPEARANCE_VALUES, COLOR_SCHEME_VALUES } from '../utils/storage.js'
+import { repository } from '../storage/repository.js'
+import { bootState } from '../storage/migration.js'
 
 export { APPEARANCE_VALUES, COLOR_SCHEME_VALUES, DEFAULT_APPEARANCE, DEFAULT_COLOR_SCHEME }
 
 export function useSettings() {
-  const appearance = ref(loadAppearance())
-  const colorScheme = ref(loadColorScheme())
+  const bootSettings = bootState.ready && bootState.settings ? bootState.settings : null
+  const appearance = ref(bootSettings ? bootSettings.appearance : DEFAULT_APPEARANCE)
+  const colorScheme = ref(bootSettings ? bootSettings.colorScheme : DEFAULT_COLOR_SCHEME)
 
   const resolvedAppearance = computed(() => {
     if (appearance.value === 'system') {
@@ -26,18 +29,24 @@ export function useSettings() {
     root.style.colorScheme = resolvedAppearance.value
   }
 
-  // watch and persist
-  watch(appearance, (v) => {
-    saveAppearance(v)
+  // watch and persist — both settings are written together in one settings
+  // blob, so an appearance change can never clobber a colorScheme change
+  watch(appearance, () => {
+    persistSettings()
     applyTheme()
   })
-  watch(colorScheme, (v) => {
-    saveColorScheme(v)
+  watch(colorScheme, () => {
+    persistSettings()
     applyTheme()
   })
   watch(resolvedAppearance, () => {
     applyTheme()
   })
+
+  function persistSettings() {
+    repository.saveSettings({ appearance: appearance.value, colorScheme: colorScheme.value })
+      .catch((err) => console.warn('saveSettings failed', err))
+  }
 
   let mql = null
   let handler = null

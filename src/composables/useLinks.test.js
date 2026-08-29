@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { nextTick } from 'vue'
 import { getStorageKey } from '../utils/environment.js'
+import 'fake-indexeddb/auto'
+import { repository } from '../storage/repository.js'
+import { boot, bootState } from '../storage/migration.js'
+import { defaultDBName } from '../storage/indexeddb.js'
 
 describe('useLinks', () => {
   let originalFetch
@@ -21,7 +25,36 @@ describe('useLinks', () => {
   }
   const ls = getLS
 
-  beforeEach(() => {
+  function deleteDB(name) {
+    return new Promise((resolve) => {
+      const req = indexedDB.deleteDatabase(name)
+      req.onsuccess = () => resolve()
+      req.onerror = () => resolve()
+      req.onblocked = () => {}
+    })
+  }
+
+  function resetBootState() {
+    bootState.ready = false
+    bootState.links = []
+    bootState.folders = []
+    bootState.profile = null
+    bootState.settings = null
+  }
+
+  // fake-indexeddb resolves open + transaction completion across separate
+  // macrotask turns, so flushing needs more than one setTimeout(0) hop
+  async function flush() {
+    await nextTick()
+    await new Promise((r) => setTimeout(r, 0))
+    await new Promise((r) => setTimeout(r, 0))
+    await new Promise((r) => setTimeout(r, 0))
+  }
+
+  beforeEach(async () => {
+    await repository.close()
+    await deleteDB(defaultDBName())
+    resetBootState()
     originalFetch = global.fetch
     // ensure storage mock is installed for storage.js (which uses bare localStorage)
     const mock = getLS()
@@ -42,17 +75,16 @@ describe('useLinks', () => {
     )
   })
 
-  afterEach(() => {
+  afterEach(async () => {
+    // let any queued watch writes settle before closing so no write races the
+    // deleteDatabase below
+    await flush()
+    await repository.close()
+    await deleteDB(defaultDBName())
     global.fetch = originalFetch
     ls().clear()
     vi.restoreAllMocks()
   })
-
-  async function getFreshUseLinks() {
-    // dynamic import ensures fresh module but we can just call useLinks after clearing storage
-    const { useLinks } = await import('./useLinks.js')
-    return useLinks()
-  }
 
   describe('migration & initialization', () => {
     it('migrates legacy status important → important flag', async () => {
@@ -60,6 +92,7 @@ describe('useLinks', () => {
         getStorageKey('links'),
         JSON.stringify([{ id: '1', url: 'https://example.com/a', status: 'important', title: 'T' }])
       )
+      await boot(repository)
       const { useLinks } = await import('./useLinks.js')
       const { links } = useLinks()
       expect(links.value[0].important).toBe(true)
@@ -73,6 +106,7 @@ describe('useLinks', () => {
         getStorageKey('links'),
         JSON.stringify([{ id: '2', url: 'https://example.com/b', status: 'must-have' }])
       )
+      await boot(repository)
       const { useLinks } = await import('./useLinks.js')
       const { links } = useLinks()
       expect(links.value[0].mustHave).toBe(true)
@@ -84,6 +118,7 @@ describe('useLinks', () => {
         getStorageKey('links'),
         JSON.stringify([{ id: '3', url: 'https://example.com/c', title: 'C' }])
       )
+      await boot(repository)
       const { useLinks } = await import('./useLinks.js')
       const { links } = useLinks()
       expect(links.value[0].favorite).toBe(false)
@@ -91,6 +126,7 @@ describe('useLinks', () => {
 
     it('handles corrupted localStorage gracefully', async () => {
       ls().setItem(getStorageKey('links'), 'not-json')
+      await boot(repository)
       const { useLinks } = await import('./useLinks.js')
       const { links } = useLinks()
       expect(links.value).toEqual([])
@@ -98,6 +134,7 @@ describe('useLinks', () => {
 
     it('preserves url alias and domain fallback on migration', async () => {
       ls().setItem(getStorageKey('links'), JSON.stringify([{ id: '4', url: 'https://www.github.com/user', title: 'T' }]))
+      await boot(repository)
       const { useLinks } = await import('./useLinks.js')
       const { links } = useLinks()
       expect(links.value[0].normalizedUrl).toBe('https://www.github.com/user')
@@ -367,12 +404,12 @@ describe('useLinks', () => {
   })
 
   describe('persistence & storageError', () => {
-    it('persists to localStorage on add', async () => {
+    it('persists to IndexedDB on add', async () => {
       const { useLinks } = await import('./useLinks.js')
       const { addLink } = useLinks()
       await addLink({ originalUrl: 'https://example.com/persist', _prefetchedMeta: { title: 'P', description: '', image: '', domain: 'example.com' }, _prefetchedUrl: 'https://example.com/persist' })
-      await nextTick()
-      const stored = JSON.parse(ls().getItem(getStorageKey('links')))
+      await flush()
+      const stored = await repository.getAllLinks()
       expect(stored.length).toBe(1)
       expect(stored[0].originalUrl).toBe('https://example.com/persist')
     })
@@ -381,24 +418,17 @@ describe('useLinks', () => {
       const { useLinks } = await import('./useLinks.js')
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
       const { links, addLink, storageError } = useLinks()
-      // mock the actual storage instance used by saveLinks (ls() mock)
-      const storage = ls()
-      const spy = vi.spyOn(storage, 'setItem').mockImplementation(() => {
-        throw new Error('QuotaExceededError')
-      })
+      const spy = vi.spyOn(repository, 'setAllLinks').mockRejectedValue(new Error('QuotaExceededError'))
       await addLink({ originalUrl: 'https://example.com/quota', _prefetchedMeta: { title: 'Q', description: '', image: '', domain: 'example.com' }, _prefetchedUrl: 'https://example.com/quota' })
-      await nextTick()
-      // allow watch to run (deep watch is async)
-      await new Promise((r) => setTimeout(r, 0))
+      await flush()
       expect(storageError.value).toMatch(/Storage full/)
       expect(links.value.length).toBe(1) // in-memory not lost
       expect(links.value[0].originalUrl).toBe('https://example.com/quota')
       spy.mockRestore()
       warnSpy.mockRestore()
-      // trigger another watch by updating – should clear error on successful save
+      // trigger another watch by updating — should clear error on successful save
       links.value[0].title = 'changed'
-      await nextTick()
-      await new Promise((r) => setTimeout(r, 0))
+      await flush()
       expect(storageError.value).toBe('')
     })
   })

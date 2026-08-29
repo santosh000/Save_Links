@@ -1,5 +1,6 @@
 import { ref, watch, computed } from 'vue'
-import { loadFolders, saveFolders } from '../utils/storage.js'
+import { repository } from '../storage/repository.js'
+import { bootState } from '../storage/migration.js'
 
 function sanitizeFolder(raw) {
   if (typeof raw !== 'object' || raw === null) return null
@@ -26,11 +27,10 @@ function sanitizeFolders(arr) {
 }
 
 export function useFolders() {
-  const raw = loadFolders()
-  const folders = ref(sanitizeFolders(raw))
+  const folders = ref(bootState.ready ? sanitizeFolders(bootState.folders) : [])
 
   watch(folders, (val) => {
-    saveFolders(val)
+    repository.setAllFolders(val).catch((err) => console.warn('setAllFolders failed', err))
   }, { deep: true })
 
   const folderMap = computed(() => {

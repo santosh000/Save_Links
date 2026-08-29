@@ -151,6 +151,9 @@ test.describe('Folders, Appearance, Color Schemes, Backup v2', () => {
       const links=[{ id:'old1', originalUrl:'https://example.com/old', normalizedUrl:'https://example.com/old', url:'https://example.com/old', title:'Old Link', domain:'example.com', tags:[], category:'Other', important:false, mustHave:false, favorite:false, createdAt:new Date().toISOString()}]
       localStorage.setItem(key, JSON.stringify(links))
       localStorage.removeItem('save_link:test:folders')
+      // the localStorage->IndexedDB migration must see this as a first run:
+      // without removing the marker the seed would be skipped as 'complete'
+      localStorage.removeItem('save_link:test:migration')
     })
     await page.reload()
     await expect(page.locator('article.card').first()).toContainText('Old Link')

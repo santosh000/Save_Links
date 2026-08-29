@@ -1,10 +1,11 @@
 import { ref, watch } from 'vue'
-import { loadProfile, saveProfile } from '../utils/storage.js'
+import { repository } from '../storage/repository.js'
+import { bootState } from '../storage/migration.js'
 
 export function useProfile() {
-  const profile = ref(loadProfile())
+  const profile = ref(bootState.ready && bootState.profile ? { ...bootState.profile } : { name: 'Local User', bio: 'Local-first bookmark manager' })
 
-  watch(profile, (val) => saveProfile(val), { deep: true })
+  watch(profile, (val) => repository.saveProfile(val).catch((err) => console.warn('saveProfile failed', err)), { deep: true })
 
   function updateProfile(patch) {
     profile.value = { ...profile.value, ...patch }
