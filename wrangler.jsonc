@@ -1,0 +1,14 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "save-links",
+  // Workers Static Assets deployment of the Vite production build.
+  // No `main` = assets-only deployment, no Worker script required.
+  // Set to the date this config was authored.
+  "compatibility_date": "2026-08-30",
+  "assets": {
+    "directory": "./dist",
+    // Save_Links is a single-page application: serve the app shell
+    // (index.html) for any path that does not match a static file.
+    "not_found_handling": "single-page-application"
+  }
+}
