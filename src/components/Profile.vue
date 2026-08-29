@@ -43,8 +43,8 @@ function initials(name) {
         <button class="link-btn" @click="editing = true">Edit</button>
       </template>
       <template v-else>
-        <input v-model="draftName" placeholder="Name" class="input sm" />
-        <input v-model="draftBio" placeholder="Bio" class="input sm" />
+        <input v-model="draftName" placeholder="Name" class="input sm" aria-label="Profile name" />
+        <input v-model="draftBio" placeholder="Bio" class="input sm" aria-label="Profile bio" />
         <div class="row">
           <button class="btn primary sm" @click="save">Save</button>
           <button class="btn ghost sm" @click="cancel">Cancel</button>
