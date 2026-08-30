@@ -22,50 +22,33 @@ Save_Links is under active development: the `master` branch always carries the l
 | Contains | verified, released features | the latest work in progress |
 | May contain | — | unfinished features, bugs, or breaking changes |
 
-- **Stable** — the latest **released** version, verified by the project's automated tests and recommended for everyday use. The current stable release is v2.0.1, available at **https://savelinks.pages.dev** — normal users just open that address; no installation is required.
-- **Development** — the latest **unreleased** code on the `master` branch, for developers and testers who want to preview upcoming work. It may contain unfinished features, bugs, or breaking changes, and there is currently **no permanent public development URL**. To run it locally:
+- **Stable** — the latest **released** version. Use it if you simply want to use Save_Links. The current stable release is v2.0.1, available at **https://savelinks.pages.dev** — just open the address; there is nothing to install. Features on the `master` branch are not part of v2.0.1 and are not released yet.
+- **Development** — the latest **unreleased** code on the repository's `master` branch. Use it if you want to test upcoming work or contribute to the project. It may contain unfinished features, bugs, or breaking changes, and there is currently **no permanent public development URL** — developers and testers run it locally (see [Development](#development)). Temporary Cloudflare preview deployments may be created when specifically needed for testing; they are not permanent and are never created automatically.
 
-  ```bash
-  git clone https://github.com/santosh000/Save_Links.git
-  cd Save_Links
-  npm install
-  npm run dev
-  ```
+Save_Links is hosted on Cloudflare Pages. The stable version is available at savelinks.pages.dev.
 
-  To test a local production build instead:
+## What Save Links Does
 
-  ```bash
-  npm run build
-  npm run preview
-  ```
+Save_Links is a bookmark manager that lives in your browser. There is no server, no account, and no cloud database — your links stay on your device. Paste a link and Save_Links cleans common tracking parameters, catches duplicates, fetches a title, description, and preview image when the site allows it, and lets you organize your links into folders and categories.
 
-  Temporary Cloudflare preview deployments may be created manually when needed for testing; they are never created automatically.
-
-## Overview
-
-Save_Links is a lightweight bookmark manager that runs entirely in your browser. Every bookmark you save lives on your device — there is no server, no account, and no cloud dependency. Paste a link and Save_Links takes care of the details: it cleans common tracking parameters, catches duplicates, fetches a title, description, and preview image when the site allows it, and organizes what you save into folders and categories so your links stay easy to find.
-
-Your data is persisted in the browser's **IndexedDB** (older data saved by v1 versions is migrated safely on first launch), and because Save_Links is a **Progressive Web App**, the app shell and assets are precached by a service worker — the app loads and stays usable **offline**, and links can even be created, edited, and deleted while you're offline.
+Save_Links is a Progressive Web App, so once you have opened it online it also works offline: links can still be added, edited, and deleted without a connection. Data saved by very old versions of the app is migrated automatically on first launch, so nothing is lost.
 
 ## Features
 
-- **Save links** — add a bookmark in seconds; the URL is validated, normalized, and cleaned of common tracking parameters
-- **Automatic metadata** — title, description, and preview image are filled in when a site provides them; saving is never blocked, and metadata is fetched in the background when needed
-- **Duplicate detection** — if the cleaned URL is already saved, Save_Links offers **Replace existing**, **Add another**, or **Cancel**
-- **Automatic categorization where currently supported** — domains like GitHub, YouTube, X/Twitter, Amazon, and others are tagged automatically; everything else falls into "Other"
-- **Folders** — keep related links together; folders show live counts and can be renamed, deleted, or reorganized at any time
-- **Favorites, Important, Must Have** — mark links for quick access and priority
+- **Save links** — paste a URL and save a bookmark in seconds
+- **Automatic metadata** — title, description, and preview image are filled in when the site provides them; saving is never blocked
+- **Duplicate detection** — if the cleaned URL is already saved, you can replace the existing link, add another copy, or cancel
+- **Automatic categories** — known sites (GitHub, YouTube, X/Twitter, Amazon, and others) are tagged automatically; everything else falls into "Other"
+- **Folders** — keep related links together, with live counts; folders can be renamed, deleted, or reorganized at any time
+- **Favorites, Important, Must Have** — mark links for quick access or priority
 - **Search** — full-text search across every saved link
-- **Filtering** — combine filters by flag, category, folder, and status
-- **Backup/export** — export all data to a JSON file
-- **Import/restore** — restore from a backup file later, with validation, migration of older formats, and sanitization of untrusted fields
-- **IndexedDB persistence** — every change is written instantly to the browser's IndexedDB; a page reload always reflects the latest state
-- **PWA + offline support** — installable from the browser; the app shell and assets are precached by a service worker
-- **Offline CRUD** — links can be created, edited, and deleted while offline (data lives only in IndexedDB, never in the service-worker cache)
-- **Light/Dark/System appearance and four color schemes** — switch freely; your choice persists across visits
-- **Responsive layouts** — clean desktop, tablet, and mobile layouts; on smaller screens the folders and filters/tools drawers open independently, one at a time
+- **Filters** — combine filters by flag (important, must have, favorite), category, folder, and status
+- **Appearance** — light, dark, or system theme with a choice of four accent colors; your preference is remembered
+- **Installable app** — Save_Links can be installed on your device like a native app
+- **Responsive layouts** — clean desktop, tablet, and mobile layouts; on smaller screens the folders and filters/tools panels open one at a time
+- **Saves instantly** — every change is written immediately to your browser's storage, so a page reload always shows the latest state
 
-## URL cleaning
+## URL Cleaning
 
 When you save a link, common tracking parameters are removed while normal functional parameters are kept. One example:
 
@@ -75,7 +58,7 @@ https://example.com/article?id=123&utm_source=newsletter&utm_campaign=spring
 Saved:
 https://example.com/article?id=123
 
-## Duplicate links
+## Duplicate Links
 
 If the cleaned URL you are saving is already in your collection, Save_Links lets you choose:
 
@@ -87,7 +70,20 @@ The original URL you entered is still shown, while the saved navigation URL is t
 
 ## Metadata
 
-Save_Links saves your link immediately — metadata never blocks saving. Title, description, and preview image are filled in when a site provides usable metadata, and retrieval happens in the background when needed. Some websites do not provide usable metadata or block browser requests (for example through browser/CORS restrictions or dynamically generated content), so not every link will have a description or preview image.
+Save_Links saves your link immediately, so metadata never delays saving. Title, description, and preview image are filled in when a site provides usable information, and retrieval happens in the background when needed. Some websites do not allow their page information to be read, so the title, description, or preview image may not always be available. The link is still saved either way, and you can edit any of these fields yourself.
+
+## Backup and Restore
+
+All your data can be exported to a JSON file and imported again later — which is also how you move your links between browsers or machines. Backups made by older versions of Save_Links can still be imported.
+
+## Offline and Privacy
+
+- **Offline.** After a first visit online, the app shell is cached by your browser, and Save_Links keeps working without a connection, including adding, editing, and deleting links.
+- **Your data stays in your browser.** Saved links, folders, and settings are stored on your device. There is no account, no cloud database, and no synchronization.
+- **No analytics or telemetry.** Save_Links does not collect usage data.
+- **The website is just where the app comes from.** The app is served from savelinks.pages.dev; it is not a backend, and no data is uploaded to it.
+- **One optional external request.** When you save a URL, your browser may ask that website for its title, description, and preview image. Some websites block this, in which case the link is saved with just what you entered.
+- **Backups are your safety net.** Clearing your browser's data removes your saved links, so export a backup first if you want to move or protect them.
 
 ## App Preview
 
@@ -97,7 +93,7 @@ Save links quickly with automatic metadata and keep everything organized in one 
   <img src="docs/screenshots/save-link-form.png" alt="Save_Links save link form" width="100%" />
 </p>
 
-## Getting Started
+## Development
 
 ### Prerequisites
 
@@ -116,76 +112,47 @@ npm run dev
 
 The dev server is available at `http://localhost:5173` by default.
 
+### Other useful commands
+
+- `npm test` — run the unit tests
+- `npm run test:e2e` — run the end-to-end browser tests
+- `npm run build` — create a production build in `dist/`
+- `npm run preview` — preview the production build locally
+
+### Tech stack
+
+Save_Links is built with **Vue 3** and **Vite**, stores data in the browser's **IndexedDB**, and uses a **service worker and PWA manifest** for installation and offline support. Unit tests use **Vitest**, and end-to-end tests use **Playwright**.
+
 ## Roadmap
 
 ### Completed
 
-- [x] Local-first link management (IndexedDB persistence, offline PWA)
-- [x] Safe migration of older localStorage data to IndexedDB
-- [x] Backup and restore (including older backup formats)
-- [x] Search and filtering (status, category, folder)
-- [x] Folders with live counts (create, rename, delete)
+- [x] Save, organize, search, and filter links
+- [x] Folders with live counts
 - [x] URL cleaning of common tracking parameters
 - [x] Duplicate detection with Replace / Add another / Cancel
 - [x] Background metadata (title, description, preview image)
-- [x] Responsive desktop/tablet/mobile UI with mutually exclusive drawers
-- [x] PWA manifest, offline shell, and service-worker asset precaching
+- [x] Backup and restore, including older backup formats
+- [x] Offline use, installation, and safe migration of older data
+- [x] Responsive desktop, tablet, and mobile layouts
 
 ### Future
 
-Near-term (local-only improvements):
+Planned (local improvements):
 
 - [ ] Sorting saved links
 - [ ] Smart tag suggestions
-- [ ] Improved metadata coverage and manual refresh
+- [ ] Improved metadata coverage and a way to refresh it
 - [ ] Link health checking
 - [ ] Bulk actions
 
-Longer-term (accounts and sync):
+Later (accounts and sync):
 
 - [ ] Authentication
 - [ ] Cloud backup
-- [ ] Multi-device synchronization
-- [ ] Sync queue and conflict resolution
-- [ ] Desktop packaging
-- [ ] Mobile packaging
+- [ ] Syncing across devices
+- [ ] Desktop and mobile packaging
 
-## Tech stack
+## License
 
-- **Vue 3** (Composition API, `<script setup>`)
-- **Vite** for the dev server and production builds
-- **IndexedDB** for runtime persistence, with a localStorage → IndexedDB migration path for older data
-- **Service worker + PWA manifest** for installation and the offline application shell
-- **Vitest + jsdom** for unit tests
-- **Playwright** for browser end-to-end tests, including offline/PWA verification against the production build (runs against Chrome)
-
-## Scripts
-
-| Script | Description |
-| ------ | ----------- |
-| `npm run dev` | Start the Vite dev server |
-| `npm test` | Run the unit test suite |
-| `npm run test:e2e` | Run the Playwright end-to-end suite |
-| `npm run build` | Create a static production build in `dist/` |
-| `npm run preview` | Preview the production build locally |
-| `npm run deploy:production` | Build and deploy the stable build to Cloudflare Pages (`savelinks.pages.dev`) |
-| `npm run deploy:preview` | Build and deploy to a temporary Cloudflare Pages preview deployment |
-
-## Deployment
-
-Save_Links is deployed to **Cloudflare Pages** as static files (no server, no database).
-
-- **Stable** — `npm run deploy:production` builds and deploys to the production URL: **https://savelinks.pages.dev**
-- **Development** — `npm run deploy:preview` creates a **temporary preview deployment**; Cloudflare generates a unique preview URL each time. Preview deployments are for testing, not everyday use.
-
-Deployments are manual — there is currently no GitHub integration and no CI/CD, so nothing deploys automatically. There is no permanent development URL; every preview deployment gets its own temporary URL. (The Cloudflare Pages project's production branch is named `main` — a Cloudflare setting, unrelated to this repository's `master` branch.)
-
-## Storage & privacy
-
-- **Runtime store: IndexedDB.** All application data — links, folders, profile, and settings — is persisted in your browser's IndexedDB. It stays on your device; there is no account, no backend, and no cloud database. The Cloudflare-hosted website is only where the application is served from.
-- **No analytics or telemetry.** Save_Links does not collect usage data.
-- **localStorage is a migration/recovery source only.** Data that older v1 versions kept in localStorage is migrated safely into IndexedDB on first launch; localStorage is no longer the runtime store.
-- **No user data in the service-worker cache.** The service worker caches only static application assets to power the offline shell. Your links are never written to Cache Storage.
-- **The only external request** is the optional, best-effort metadata fetch for a URL you explicitly paste; metadata extraction happens client-side in your browser. Some websites prevent this because of browser/CORS restrictions or because their content is generated dynamically — in that case only your manually entered details are saved.
-- **Backup & restore** — export all data to a JSON file and restore it later, which is also how you move data between browsers or machines.
-- Clearing browser storage (or using a fresh profile) starts the app empty — keep a backup if you want to move or protect your links.
+Save_Links is released under the MIT License. See [LICENSE](LICENSE).
