@@ -174,4 +174,65 @@ test.describe('Layout redesign', () => {
       await expectNoHorizontalScroll(page)
     }
   })
+
+  test('Tablet & mobile: folders and filters drawers are mutually exclusive', async ({ page }) => {
+    for (const width of [768, 375]) {
+      await clearStorage(page)
+      await page.setViewportSize({ width, height: 800 })
+      await page.goto('/')
+      const navToggle = page.getByRole('button', { name: 'Toggle folders navigation' })
+      const utilToggle = page.getByRole('button', { name: 'Toggle filters and tools' })
+      const navMarker = page.getByRole('button', { name: 'All links' })
+      const utilMarker = page.getByRole('button', { name: 'Export Backup' })
+
+      // neither drawer open initially
+      await expect(navToggle).toHaveAttribute('aria-expanded', 'false')
+      await expect(utilToggle).toHaveAttribute('aria-expanded', 'false')
+      await expect(navMarker).not.toBeInViewport()
+      await expect(utilMarker).not.toBeInViewport()
+
+      // A. Folders → Filters & tools: Folders closes, only Filters is open
+      await navToggle.click()
+      await expect(navMarker).toBeInViewport()
+      await utilToggle.click()
+      await expect(navMarker).not.toBeInViewport()
+      await expect(utilMarker).toBeInViewport()
+      await expect(navToggle).toHaveAttribute('aria-expanded', 'false')
+      await expect(utilToggle).toHaveAttribute('aria-expanded', 'true')
+
+      // B. Filters & tools → Folders: Filters closes, only Folders is open
+      await navToggle.click()
+      await expect(utilMarker).not.toBeInViewport()
+      await expect(navMarker).toBeInViewport()
+      await expect(utilToggle).toHaveAttribute('aria-expanded', 'false')
+      await expect(navToggle).toHaveAttribute('aria-expanded', 'true')
+
+      // C. Folders → Folders: closes
+      await navToggle.click()
+      await expect(navMarker).not.toBeInViewport()
+      await expect(navToggle).toHaveAttribute('aria-expanded', 'false')
+      await expect(utilMarker).not.toBeInViewport()
+
+      // D. Filters & tools → Filters & tools: opens then closes
+      await utilToggle.click()
+      await expect(utilMarker).toBeInViewport()
+      await utilToggle.click()
+      await expect(utilMarker).not.toBeInViewport()
+      await expect(utilToggle).toHaveAttribute('aria-expanded', 'false')
+
+      // G. backdrop click closes the active drawer (click the clear side —
+      // drawers sit on the left/right edges, backdrop is full-screen under them)
+      await navToggle.click()
+      await expect(navMarker).toBeInViewport()
+      await page.locator('.nav-backdrop').click({ position: { x: width - 8, y: 400 } })
+      await expect(navMarker).not.toBeInViewport()
+      await utilToggle.click()
+      await expect(utilMarker).toBeInViewport()
+      await page.locator('.util-backdrop').click({ position: { x: 8, y: 400 } })
+      await expect(utilMarker).not.toBeInViewport()
+
+      // H. no horizontal overflow at these widths
+      await expectNoHorizontalScroll(page)
+    }
+  })
 })

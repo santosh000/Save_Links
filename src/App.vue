@@ -27,8 +27,14 @@ const search = ref('')
 const filterCategory = ref('')
 const filterStatus = ref('')
 const filterFolder = ref('')
-const navOpen = ref(false)
-const utilitiesOpen = ref(false)
+// ONE source of truth for the responsive drawers: 'folders' | 'filters' | null.
+// The two drawers are mutually exclusive by construction — toggling one open
+// can never leave the other open (a single assignment per interaction).
+const activeDrawer = ref(null)
+
+function toggleDrawer(name) {
+  activeDrawer.value = activeDrawer.value === name ? null : name
+}
 
 const navView = computed(() => {
   if (filterFolder.value) return filterFolder.value
@@ -47,13 +53,12 @@ function handleSelectFolder(value) {
     filterFolder.value = value
     filterStatus.value = ''
   }
-  navOpen.value = false
+  activeDrawer.value = null
 }
 
 function onKeydown(e) {
   if (e.key === 'Escape') {
-    navOpen.value = false
-    utilitiesOpen.value = false
+    activeDrawer.value = null
   }
 }
 onMounted(() => window.addEventListener('keydown', onKeydown))
@@ -285,16 +290,16 @@ const hasLinks = computed(() => links.value.length > 0)
         </div>
         <div class="top-actions">
           <span class="pill-count">{{ total }} links</span>
-          <button type="button" class="nav-toggle" :aria-expanded="navOpen" aria-controls="nav-col" aria-label="Toggle folders navigation" @click="navOpen = !navOpen">☰ Folders</button>
-          <button type="button" class="util-toggle" :aria-expanded="utilitiesOpen" aria-controls="side-col" aria-label="Toggle filters and tools" @click="utilitiesOpen = !utilitiesOpen">⚙<span class="util-toggle-name">Filters &amp; tools</span></button>
+          <button type="button" class="nav-toggle" :aria-expanded="activeDrawer === 'folders'" aria-controls="nav-col" aria-label="Toggle folders navigation" @click="toggleDrawer('folders')">☰ Folders</button>
+          <button type="button" class="util-toggle" :aria-expanded="activeDrawer === 'filters'" aria-controls="side-col" aria-label="Toggle filters and tools" @click="toggleDrawer('filters')">⚙<span class="util-toggle-name">Filters &amp; tools</span></button>
           <Profile :profile="profile" compact @update="updateProfile" />
         </div>
       </div>
     </header>
 
-    <div class="layout" :class="{ 'nav-open': navOpen, 'util-open': utilitiesOpen }">
-      <div v-if="navOpen" class="nav-backdrop" @click="navOpen = false" aria-hidden="true"></div>
-      <div v-if="utilitiesOpen" class="util-backdrop" @click="utilitiesOpen = false" aria-hidden="true"></div>
+    <div class="layout" :class="{ 'nav-open': activeDrawer === 'folders', 'util-open': activeDrawer === 'filters' }">
+      <div v-if="activeDrawer === 'folders'" class="nav-backdrop" @click="activeDrawer = null" aria-hidden="true"></div>
+      <div v-if="activeDrawer === 'filters'" class="util-backdrop" @click="activeDrawer = null" aria-hidden="true"></div>
 
       <div id="nav-col" class="nav-col">
         <FolderManager :folders="folders" :links="links" :active-view="navView" @create="handleCreateFolder" @rename="handleRenameFolder" @delete="requestDeleteFolder" @select="handleSelectFolder" />
