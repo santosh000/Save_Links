@@ -114,10 +114,10 @@ test.describe('Layout redesign', () => {
       await page.keyboard.press('Escape')
       await expect(page.getByRole('button', { name: 'All links' })).not.toBeInViewport()
 
-      // utilities drawer holds backup, search and stats
+      // utilities drawer holds backup, filters and stats (search lives in the Saved links header)
       await utilToggle.click()
       await expect(page.getByRole('button', { name: 'Export Backup' })).toBeInViewport()
-      await expect(page.locator('#filter-search')).toBeInViewport()
+      await expect(page.locator('#side-col #filter-search')).toHaveCount(0)
       await expect(page.getByRole('heading', { name: 'Statistics' })).toBeInViewport()
       await page.keyboard.press('Escape')
 
@@ -153,10 +153,10 @@ test.describe('Layout redesign', () => {
       expect(Math.abs(inputBox.height - createBtnBox.height)).toBeLessThanOrEqual(2)
       await page.keyboard.press('Escape')
 
-      // utilities drawer: Data & Backup, search, filters, stats
+      // utilities drawer: Data & Backup, filters, stats (search lives in the Saved links header)
       await page.getByRole('button', { name: 'Toggle filters and tools' }).click()
       await expect(page.getByRole('button', { name: 'Export Backup' })).toBeInViewport()
-      await expect(page.locator('#filter-search')).toBeInViewport()
+      await expect(page.locator('#side-col #filter-search')).toHaveCount(0)
       await expect(page.getByLabel('Filter by category')).toBeInViewport()
       await expect(page.getByRole('heading', { name: 'Statistics' })).toBeInViewport()
       await page.keyboard.press('Escape')

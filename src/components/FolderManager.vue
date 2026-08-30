@@ -96,13 +96,13 @@ function handleDelete(id) {
           <span class="folder-count" :aria-label="`Unfiled ${unfiledCount()} links`">{{ unfiledCount() }}</span>
         </button>
       </li>
-      <li v-for="f in folders" :key="f.id" class="folder-item" :class="{ active: activeView === f.id }">
-        <button type="button" class="folder-row" @click="emit('select', f.id)" :aria-label="`Show folder ${f.name}`" :aria-current="activeView === f.id ? 'true' : undefined">
+      <li v-for="f in folders" :key="f.id" class="folder-item" :class="{ active: activeView === f.id, editing: editingId === f.id }">
+        <button v-if="editingId !== f.id" type="button" class="folder-row" @click="emit('select', f.id)" :aria-label="`Show folder ${f.name}`" :aria-current="activeView === f.id ? 'true' : undefined">
           <span class="folder-name">{{ f.name }}</span>
           <span class="folder-count">{{ counts(f.id) }}</span>
         </button>
         <template v-if="editingId === f.id">
-          <input v-model="editingName" class="input sm flex1" :aria-label="`Rename folder ${f.name}`" @keydown.enter="saveEdit(f.id)" @keydown.escape="cancelEdit" />
+          <input v-model="editingName" class="input sm" :aria-label="`Rename folder ${f.name}`" @keydown.enter="saveEdit(f.id)" @keydown.escape="cancelEdit" />
           <button class="btn primary sm" @click="saveEdit(f.id)" aria-label="Save folder name">Save</button>
           <button class="btn ghost sm" @click="cancelEdit" aria-label="Cancel rename">Cancel</button>
         </template>
@@ -169,6 +169,11 @@ function handleDelete(id) {
 .folder-item:hover { border-color: var(--accent-border); }
 .folder-item.active { background: var(--accent-bg); border-color: var(--accent-border); }
 .folder-item.active .folder-name { color: var(--accent); }
+/* editing: the name row is hidden, so the input owns the line; Save/Cancel wrap
+   to their own row when the edit controls cannot all share one line */
+.folder-item.editing { flex-wrap: wrap; }
+.folder-item.editing .input { flex: 1 1 150px; min-width: 0; }
+.folder-item.editing .btn { flex: 0 0 auto; white-space: nowrap; }
 .folder-row {
   display:flex; align-items:center; gap:8px; flex:1; min-width:0;
   background:none; border:none; padding:2px 2px; cursor:pointer; text-align:left;
@@ -180,7 +185,6 @@ function handleDelete(id) {
 }
 .icon-btn:hover { border-color: var(--accent-border); }
 .icon-btn.delete:hover { background:#fee2e2; border-color:#fecaca; color:#dc2626; }
-.flex1 { flex:1; }
 .error { color:#ef4444; font-size:12px; margin-top:8px; }
 .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
 </style>
