@@ -2,7 +2,16 @@ import { test, expect } from '@playwright/test'
 
 async function clearStorage(page) {
   await page.goto('/')
-  await page.evaluate(() => localStorage.clear())
+  await page.evaluate(async () => {
+    localStorage.clear()
+    // links live in IndexedDB (localStorage is only the v1 recovery source);
+    // without this, a "clear" silently keeps the previous data
+    const dbs = await (indexedDB.databases ? indexedDB.databases() : Promise.resolve([]))
+    await Promise.all(dbs.map((d) => new Promise((resolve) => {
+      const req = indexedDB.deleteDatabase(d.name)
+      req.onsuccess = req.onerror = req.onblocked = () => resolve()
+    })))
+  })
   await page.reload()
 }
 

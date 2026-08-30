@@ -2,7 +2,16 @@ import { test, expect } from '@playwright/test'
 
 async function clearStorage(page) {
   await page.goto('/')
-  await page.evaluate(() => localStorage.clear())
+  await page.evaluate(async () => {
+    localStorage.clear()
+    // links live in IndexedDB (localStorage is only the v1 recovery source);
+    // without this, a "clear" silently keeps the previous data
+    const dbs = await (indexedDB.databases ? indexedDB.databases() : Promise.resolve([]))
+    await Promise.all(dbs.map((d) => new Promise((resolve) => {
+      const req = indexedDB.deleteDatabase(d.name)
+      req.onsuccess = req.onerror = req.onblocked = () => resolve()
+    })))
+  })
   await page.reload()
 }
 
@@ -86,9 +95,16 @@ test.describe('Folders, Appearance, Color Schemes, Backup v2', () => {
     await expect(page.getByText('Work link')).toBeVisible()
     // folder count should be 1 for Office, Unfiled 0? check UI
     await expect(page.locator('.folder-item', {hasText:'Office'})).toContainText('1')
-    // delete folder moves to Unfiled
-    page.once('dialog', async d=>await d.accept())
+    // delete folder moves to Unfiled (in-app dialog; cancel returns focus to the trigger)
     await page.getByRole('button', { name: 'Delete folder Office' }).click()
+    const folderDialog = page.getByRole('dialog')
+    await expect(folderDialog).toBeVisible()
+    await folderDialog.getByRole('button', { name: 'Cancel' }).click()
+    await expect(page.locator('.folder-item', { hasText: 'Office' })).toBeVisible()
+    await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute('aria-label'))).toBe('Delete folder Office')
+    await page.getByRole('button', { name: 'Delete folder Office' }).click()
+    await expect(folderDialog).toBeVisible()
+    await folderDialog.getByRole('button', { name: 'Delete', exact: true }).click()
     await expect(page.getByText('Office')).toHaveCount(0)
     await expect(page.locator('.folder-item', {hasText:'Unfiled'})).toContainText('1')
     // link still exists and folder badge shows Unfiled
@@ -240,8 +256,9 @@ test.describe('Folders, Appearance, Color Schemes, Backup v2', () => {
     // clear and import v2
     await clearStorage(page)
     await page.goto('/')
-    page.once('dialog', async d=>await d.accept())
     await page.locator('.backup-card input[type="file"]').setInputFiles({ name:'backup.json', mimeType:'application/json', buffer:Buffer.from(JSON.stringify(json))})
+    await expect(page.getByRole('dialog')).toBeVisible()
+    await page.getByRole('dialog').getByRole('button', { name: 'Import', exact: true }).click()
     await expect(page.getByText('Backup imported')).toBeVisible()
     await expect(page.locator('article.card').first()).toContainText('Backup Folder Link')
     await expect(page.locator('.folder-item', {hasText:'BackupFolder'})).toBeVisible()
@@ -249,8 +266,9 @@ test.describe('Folders, Appearance, Color Schemes, Backup v2', () => {
     await expect(page.getByLabel('Forest color scheme')).toBeChecked()
     // v1 still imports with defaults
     const v1 = { app:'Save_Link', version:1, exportedAt:new Date().toISOString(), profile:{name:'V1 User'}, links:[{ id:'v1id', originalUrl:'https://example.com/v1', normalizedUrl:'https://example.com/v1', url:'https://example.com/v1', title:'V1 Link'}]}
-    page.once('dialog', async d=>await d.accept())
     await page.locator('.backup-card input[type="file"]').setInputFiles({ name:'v1.json', mimeType:'application/json', buffer:Buffer.from(JSON.stringify(v1))})
+    await expect(page.getByRole('dialog')).toBeVisible()
+    await page.getByRole('dialog').getByRole('button', { name: 'Import', exact: true }).click()
     await expect(page.getByText('Backup imported')).toBeVisible()
     await expect(page.locator('article.card').first()).toContainText('V1 Link')
     await expect(page.getByLabel('System theme')).toBeChecked()
@@ -263,8 +281,9 @@ test.describe('Folders, Appearance, Color Schemes, Backup v2', () => {
     await expect(page.locator('article.card', {hasText:'KeepInvalid'})).toBeVisible()
     // security: v-html not executed
     const malicious = { app:'Save_Link', version:2, exportedAt:new Date().toISOString(), profile:{}, settings:{appearance:'system', colorScheme:'ocean'}, folders:[], links:[{ id:'sec', originalUrl:'https://example.com/sec', normalizedUrl:'https://example.com/sec', title:'<script>alert(1)</script>', description:'<img onerror=alert(1)>'}]}
-    page.once('dialog', async d=>await d.accept())
     await page.locator('.backup-card input[type="file"]').setInputFiles({ name:'mal.json', mimeType:'application/json', buffer:Buffer.from(JSON.stringify(malicious))})
+    await expect(page.getByRole('dialog')).toBeVisible()
+    await page.getByRole('dialog').getByRole('button', { name: 'Import', exact: true }).click()
     await expect(page.getByText('Backup imported')).toBeVisible()
     await expect(page.locator('article.card').first()).toContainText('<script>alert(1)</script>')
     await expect(page.locator('article.card').first().locator('script')).toHaveCount(0)

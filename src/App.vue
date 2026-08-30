@@ -1,9 +1,10 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
-import { useLinks } from './composables/useLinks.js'
+import { useLinks, DuplicateLinkError } from './composables/useLinks.js'
 import { useProfile } from './composables/useProfile.js'
 import { useFolders } from './composables/useFolders.js'
 import { useSettings } from './composables/useSettings.js'
+import AppDialog from './components/AppDialog.vue'
 import Profile from './components/Profile.vue'
 import AddLink from './components/AddLink.vue'
 import LinkCard from './components/LinkCard.vue'
@@ -17,7 +18,7 @@ import pkg from '../package.json'
 
 const appVersion = pkg.version
 
-const { links, total, importantCount, mustHaveCount, favoriteCount, byCategory, storageError, addLink, toggleImportant, toggleMustHave, toggleFavorite, setStatus, removeLink, updateLink, setLinks, moveLinksFromFolder } = useLinks()
+const { links, total, importantCount, mustHaveCount, favoriteCount, byCategory, storageError, addLink, replaceLink, toggleImportant, toggleMustHave, toggleFavorite, setStatus, removeLink, updateLink, setLinks, moveLinksFromFolder } = useLinks()
 const { profile, updateProfile, setProfile } = useProfile()
 const { folders, createFolder, renameFolder, deleteFolder, setFolders } = useFolders()
 const { appearance, colorScheme, setAppearance, setColorScheme, setSettings } = useSettings()
@@ -79,14 +80,124 @@ async function handleAdd(payload) {
     await addLink(payload)
     showToast('Link saved')
   } catch (e) {
-    showToast(e.message || 'Failed to save')
+    if (e instanceof DuplicateLinkError) {
+      pendingDuplicate.value = { payload, existing: e.existing }
+      openDialog({
+        kind: 'duplicate',
+        title: 'Link already saved',
+        message: 'This link is already in your saved links. Do you want to replace the existing link or save another copy?',
+        buttons: [
+          { label: 'Replace existing', variant: 'primary', value: 'replace', default: true },
+          { label: 'Add another', variant: 'ghost', value: 'add-another' },
+          { label: 'Cancel', variant: 'ghost', value: 'cancel' }
+        ]
+      })
+    } else {
+      showToast(e.message || 'Failed to save')
+    }
   }
 }
 
-function handleDelete(id) {
-  if (confirm('Delete this link?')) {
-    removeLink(id)
-    showToast('Link deleted')
+async function handleDuplicateChoice(value) {
+  const { payload, existing } = pendingDuplicate.value
+  pendingDuplicate.value = null
+  if (value === 'replace') {
+    try {
+      await replaceLink(existing.id, payload)
+      showToast('Link updated')
+    } catch (e) {
+      showToast(e.message || 'Failed to update')
+    }
+  } else if (value === 'add-another') {
+    try {
+      await addLink(payload, { allowDuplicate: true })
+      showToast('Link saved')
+    } catch (e) {
+      showToast(e.message || 'Failed to save')
+    }
+  }
+  // cancel: no record created, nothing modified
+}
+
+function requestDeleteLink(id) {
+  openDialog({
+    kind: 'delete-link',
+    id,
+    title: 'Delete this link?',
+    message: '',
+    buttons: [
+      { label: 'Delete', variant: 'danger', value: 'confirm' },
+      { label: 'Cancel', variant: 'ghost', value: 'cancel', default: true }
+    ]
+  })
+}
+
+function requestDeleteFolder(id) {
+  openDialog({
+    kind: 'delete-folder',
+    id,
+    title: 'Delete this folder?',
+    message: 'Links will move to Unfiled.',
+    buttons: [
+      { label: 'Delete', variant: 'danger', value: 'confirm' },
+      { label: 'Cancel', variant: 'ghost', value: 'cancel', default: true }
+    ]
+  })
+}
+
+function requestImport(data) {
+  pendingImport.value = data
+  openDialog({
+    kind: 'import',
+    title: 'Import backup?',
+    message: 'This will replace your current Save Links data. Your existing data may be lost. Continue?',
+    buttons: [
+      { label: 'Import', variant: 'danger', value: 'confirm' },
+      { label: 'Cancel', variant: 'ghost', value: 'cancel', default: true }
+    ]
+  })
+}
+
+const dialog = ref(null)
+const pendingDuplicate = ref(null)
+const pendingImport = ref(null)
+const lastTrigger = ref(null)
+
+function openDialog(cfg) {
+  lastTrigger.value = document.activeElement
+  dialog.value = cfg
+}
+
+function closeDialog() {
+  dialog.value = null
+  const el = lastTrigger.value
+  lastTrigger.value = null
+  // return focus to whatever opened the dialog (no-op if it was torn down, e.g. collapsed form)
+  if (el && document.body.contains(el)) el.focus()
+}
+
+function onDialogChoose(value) {
+  const cfg = dialog.value
+  closeDialog()
+  if (!cfg) return
+  if (cfg.kind === 'duplicate') {
+    handleDuplicateChoice(value)
+  } else if (cfg.kind === 'delete-link') {
+    if (value === 'confirm') {
+      removeLink(cfg.id)
+      showToast('Link deleted')
+    }
+  } else if (cfg.kind === 'delete-folder') {
+    if (value === 'confirm') {
+      deleteFolder(cfg.id)
+      moveLinksFromFolder(cfg.id)
+      // if filtered folder was deleted, reset filter
+      if (filterFolder.value === cfg.id) filterFolder.value = ''
+      showToast('Folder deleted')
+    }
+  } else if (cfg.kind === 'import') {
+    if (value === 'confirm' && pendingImport.value) handleImportBackup(pendingImport.value)
+    pendingImport.value = null
   }
 }
 
@@ -129,13 +240,6 @@ function handleRenameFolder({ id, name }) {
     showToast(e.message || 'Failed')
     throw e
   }
-}
-function handleDeleteFolder(id) {
-  deleteFolder(id)
-  moveLinksFromFolder(id)
-  // if filtered folder was deleted, reset filter
-  if (filterFolder.value === id) filterFolder.value = ''
-  showToast('Folder deleted')
 }
 
 const filteredLinks = computed(() => {
@@ -193,7 +297,7 @@ const hasLinks = computed(() => links.value.length > 0)
       <div v-if="utilitiesOpen" class="util-backdrop" @click="utilitiesOpen = false" aria-hidden="true"></div>
 
       <div id="nav-col" class="nav-col">
-        <FolderManager :folders="folders" :links="links" :active-view="navView" @create="handleCreateFolder" @rename="handleRenameFolder" @delete="handleDeleteFolder" @select="handleSelectFolder" />
+        <FolderManager :folders="folders" :links="links" :active-view="navView" @create="handleCreateFolder" @rename="handleRenameFolder" @delete="requestDeleteFolder" @select="handleSelectFolder" />
         <div class="nav-divider" role="separator" aria-hidden="true"></div>
         <SettingsPanel :appearance="appearance" :color-scheme="colorScheme" @update:appearance="setAppearance" @update:color-scheme="setColorScheme" />
       </div>
@@ -244,7 +348,7 @@ const hasLinks = computed(() => links.value.length > 0)
             @toggle-must-have="toggleMustHave"
             @toggle-favorite="toggleFavorite"
             @set-status="setStatus"
-            @delete="handleDelete"
+            @delete="requestDeleteLink"
             @edit="handleEdit"
             @set-folder="handleSetFolder"
           />
@@ -252,7 +356,7 @@ const hasLinks = computed(() => links.value.length > 0)
       </div>
 
       <div id="side-col" class="side-col">
-        <DataBackup :links="links" :profile="profile" :folders="folders" :appearance="appearance" :color-scheme="colorScheme" @imported="handleImportBackup" @show-toast="showToast" />
+        <DataBackup :links="links" :profile="profile" :folders="folders" :appearance="appearance" :color-scheme="colorScheme" @import-request="requestImport" @show-toast="showToast" />
         <SearchFilter
           v-model:category="filterCategory"
           v-model:folder="filterFolder"
@@ -270,6 +374,15 @@ const hasLinks = computed(() => links.value.length > 0)
     </div>
 
     <div v-if="toast" class="toast" role="status" aria-live="polite">{{ toast }}</div>
+
+    <AppDialog
+      :open="!!dialog"
+      :title="dialog?.title || ''"
+      :message="dialog?.message || ''"
+      :buttons="dialog?.buttons || []"
+      @choose="onDialogChoose"
+      @close="closeDialog"
+    />
 
     <footer class="footer">Local storage only • No backend • No auth • Data stays in this browser • v{{ appVersion }}</footer>
   </div>

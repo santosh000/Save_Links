@@ -11,7 +11,16 @@ import { test, expect } from '@playwright/test'
 
 async function clearStorage(page) {
   await page.goto('/')
-  await page.evaluate(() => localStorage.clear())
+  await page.evaluate(async () => {
+    localStorage.clear()
+    // links live in IndexedDB (localStorage is only the v1 recovery source);
+    // without this, a "clear" silently keeps the previous data
+    const dbs = await (indexedDB.databases ? indexedDB.databases() : Promise.resolve([]))
+    await Promise.all(dbs.map((d) => new Promise((resolve) => {
+      const req = indexedDB.deleteDatabase(d.name)
+      req.onsuccess = req.onerror = req.onblocked = () => resolve()
+    })))
+  })
   await page.reload()
 }
 
@@ -120,11 +129,10 @@ test.describe('localStorage → IndexedDB migration', () => {
     await card.locator('.edit-form').getByRole('button', { name: 'Save' }).click()
     await expect(page.locator('article.card', { hasText: 'Updated Link' })).toBeVisible()
 
-    // Delete the migrated seeded link (confirm the dialog)
-    page.once('dialog', async (dialog) => {
-      await dialog.accept()
-    })
+    // Delete the migrated seeded link (confirm via the in-app dialog)
     await page.locator('article.card', { hasText: 'Seeded Link' }).getByRole('button', { name: 'Delete link' }).click()
+    await expect(page.getByRole('dialog')).toBeVisible()
+    await page.getByRole('dialog').getByRole('button', { name: 'Delete', exact: true }).click()
     await expect(page.locator('article.card', { hasText: 'Seeded Link' })).toHaveCount(0)
 
     // Reload -> the migrated seed was deleted, the runtime edit survived

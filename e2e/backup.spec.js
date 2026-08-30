@@ -2,7 +2,16 @@ import { test, expect } from '@playwright/test'
 
 async function clearStorage(page) {
   await page.goto('/')
-  await page.evaluate(() => localStorage.clear())
+  await page.evaluate(async () => {
+    localStorage.clear()
+    // links live in IndexedDB (localStorage is only the v1 recovery source);
+    // without this, a "clear" silently keeps the previous data
+    const dbs = await (indexedDB.databases ? indexedDB.databases() : Promise.resolve([]))
+    await Promise.all(dbs.map((d) => new Promise((resolve) => {
+      const req = indexedDB.deleteDatabase(d.name)
+      req.onsuccess = req.onerror = req.onblocked = () => resolve()
+    })))
+  })
   await page.reload()
 }
 
@@ -188,15 +197,15 @@ test.describe('Backup E2E', () => {
       ],
     }
 
-    page.once('dialog', async (d) => {
-      expect(d.message()).toContain('This will replace your current Save Links data')
-      await d.accept()
-    })
     await page.locator('.backup-card input[type="file"]').setInputFiles({
       name: 'backup.json',
       mimeType: 'application/json',
       buffer: Buffer.from(JSON.stringify(backup)),
     })
+    const importDialog = page.getByRole('dialog')
+    await expect(importDialog).toBeVisible()
+    await expect(importDialog).toContainText('This will replace your current Save Links data')
+    await importDialog.getByRole('button', { name: 'Import', exact: true }).click()
 
     await expect(page.getByText('Backup imported')).toBeVisible()
     await expect(page.locator('article.card')).toHaveCount(2)
@@ -220,17 +229,15 @@ test.describe('Backup E2E', () => {
       links: [{ id: 'new', originalUrl: 'https://example.com/new', normalizedUrl: 'https://example.com/new', url: 'https://example.com/new', title: 'New Title' }],
     }
 
-    page.once('dialog', async (d) => {
-      await d.dismiss()
-    })
     await page.locator('.backup-card input[type="file"]').setInputFiles({
       name: 'backup.json',
       mimeType: 'application/json',
       buffer: Buffer.from(JSON.stringify(backup)),
     })
+    const importDialog = page.getByRole('dialog')
+    await expect(importDialog).toBeVisible()
+    await importDialog.getByRole('button', { name: 'Cancel' }).click()
 
-    // give time for dialog handling
-    await page.waitForTimeout(500)
     await expect(page.locator('article.card').first()).toContainText('Keep Me')
     await expect(page.locator('article.card')).toHaveCount(1)
     await expect(page.getByText('New Title')).toHaveCount(0)
@@ -324,12 +331,13 @@ test.describe('Backup E2E', () => {
       ],
     }
 
-    page.once('dialog', async (d) => await d.accept())
     await page.locator('.backup-card input[type="file"]').setInputFiles({
       name: 'backup.json',
       mimeType: 'application/json',
       buffer: Buffer.from(JSON.stringify(backup)),
     })
+    await expect(page.getByRole('dialog')).toBeVisible()
+    await page.getByRole('dialog').getByRole('button', { name: 'Import', exact: true }).click()
 
     await expect(page.getByText('Backup imported')).toBeVisible()
     await expect(page.locator('article.card')).toHaveCount(1)
@@ -365,12 +373,13 @@ test.describe('Backup E2E', () => {
       ],
     }
 
-    page.once('dialog', async (d) => await d.accept())
     await page.locator('.backup-card input[type="file"]').setInputFiles({
       name: 'backup.json',
       mimeType: 'application/json',
       buffer: Buffer.from(JSON.stringify(backup)),
     })
+    await expect(page.getByRole('dialog')).toBeVisible()
+    await page.getByRole('dialog').getByRole('button', { name: 'Import', exact: true }).click()
     await expect(page.getByText('Backup imported')).toBeVisible()
     await expect(page.locator('article.card').first()).toContainText('Persist Link')
 
@@ -433,12 +442,13 @@ test.describe('Backup E2E', () => {
       ],
     }
 
-    page.once('dialog', async (d) => await d.accept())
     await page.locator('.backup-card input[type="file"]').setInputFiles({
       name: 'backup.json',
       mimeType: 'application/json',
       buffer: Buffer.from(JSON.stringify(backup)),
     })
+    await expect(page.getByRole('dialog')).toBeVisible()
+    await page.getByRole('dialog').getByRole('button', { name: 'Import', exact: true }).click()
     await expect(page.getByText('Backup imported')).toBeVisible()
     const card = page.locator('article.card').first()
     // title should be rendered as text, not HTML

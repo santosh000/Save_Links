@@ -56,9 +56,7 @@ function saveEdit(id) {
   }
 }
 function handleDelete(id) {
-  if (confirm('Delete this folder? Links will move to Unfiled.')) {
-    emit('delete', id)
-  }
+  emit('delete', id) // App opens the confirmation dialog
 }
 </script>
 

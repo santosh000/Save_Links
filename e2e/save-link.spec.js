@@ -2,7 +2,16 @@ import { test, expect } from '@playwright/test'
 
 async function clearStorage(page) {
   await page.goto('/')
-  await page.evaluate(() => localStorage.clear())
+  await page.evaluate(async () => {
+    localStorage.clear()
+    // links live in IndexedDB (localStorage is only the v1 recovery source);
+    // without this, a "clear" silently keeps the previous data
+    const dbs = await (indexedDB.databases ? indexedDB.databases() : Promise.resolve([]))
+    await Promise.all(dbs.map((d) => new Promise((resolve) => {
+      const req = indexedDB.deleteDatabase(d.name)
+      req.onsuccess = req.onerror = req.onblocked = () => resolve()
+    })))
+  })
   await page.reload()
 }
 
@@ -237,12 +246,24 @@ test.describe('Save Links E2E', () => {
     await expect(page.locator('article.card')).toHaveCount(1)
     await expect(page.locator('.stat-card', { hasText: 'Total saved' }).locator('.num')).toHaveText('1')
 
-    page.once('dialog', async (dialog) => {
-      expect(dialog.message()).toContain('Delete')
-      await dialog.accept()
-    })
+    // deletion confirms via the in-app dialog, never a browser-native one
+    let nativeDialog = false
+    page.on('dialog', () => { nativeDialog = true })
     await page.locator('article.card').first().getByRole('button', { name: 'Delete link' }).click()
+    const deleteDialog = page.getByRole('dialog')
+    await expect(deleteDialog).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Delete this link?' })).toBeVisible()
+    expect(nativeDialog).toBe(false)
 
+    // cancel keeps the link
+    await deleteDialog.getByRole('button', { name: 'Cancel' }).click()
+    await expect(page.locator('article.card')).toHaveCount(1)
+    await expect(page.locator('.stat-card', { hasText: 'Total saved' }).locator('.num')).toHaveText('1')
+
+    // confirm deletes
+    await page.locator('article.card').first().getByRole('button', { name: 'Delete link' }).click()
+    await expect(deleteDialog).toBeVisible()
+    await deleteDialog.getByRole('button', { name: 'Delete', exact: true }).click()
     await expect(page.locator('article.card')).toHaveCount(0)
     await expect(page.getByRole('heading', { name: 'No links yet' })).toBeVisible()
     await expect(page.locator('.stat-card', { hasText: 'Total saved' }).locator('.num')).toHaveText('0')
@@ -366,5 +387,118 @@ test.describe('Save Links E2E', () => {
     await utilToggle.click()
     await saveLink(page, { url: 'https://example.com/mobile', title: 'Mobile Test' })
     await expect(page.locator('article.card').first()).toBeVisible()
+  })
+
+  test('O. URL cleaning', async ({ page }) => {
+    await page.goto('/')
+    const raw = 'https://example.com/page?utm_source=x&id=5#top'
+    const cleaned = 'https://example.com/page?id=5#top'
+    await saveLink(page, { url: raw, title: 'Cleaned URL' })
+    const card = page.locator('article.card').first()
+    await expect(card).toBeVisible()
+
+    // visible/original URL stays the user's raw input
+    await expect(card.locator('a.url')).toContainText(raw)
+    // hrefs use the cleaned URL
+    expect(await card.locator('a.url').getAttribute('href')).toBe(cleaned)
+    expect(await card.locator('a.title').getAttribute('href')).toBe(cleaned)
+    // normalized hint shows the cleaned URL
+    await expect(card.locator('.normalized-hint')).toContainText(cleaned)
+  })
+
+  test('P. Duplicate link — in-app dialog with Replace / Add another / Cancel / Escape', async ({ page }) => {
+    await page.goto('/')
+    await saveLink(page, { url: 'https://example.com/page?id=5', title: 'Original' })
+    await expect(page.locator('article.card')).toHaveCount(1)
+
+    let nativeDialog = false
+    page.on('dialog', () => { nativeDialog = true })
+
+    // tracking-only difference normalizes to the same URL -> duplicate dialog
+    await saveLink(page, { url: 'https://example.com/page?utm_source=google&id=5', title: 'Fresh' })
+    const appDialog = page.getByRole('dialog')
+    await expect(appDialog).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Link already saved' })).toBeVisible()
+    await expect(appDialog).toContainText('This link is already in your saved links. Do you want to replace the existing link or save another copy?')
+    await expect(appDialog.getByRole('button', { name: 'Replace existing' })).toBeVisible()
+    await expect(appDialog.getByRole('button', { name: 'Add another' })).toBeVisible()
+    await expect(appDialog.getByRole('button', { name: 'Cancel' })).toBeVisible()
+    expect(nativeDialog).toBe(false)
+
+    // Cancel: no new record, nothing changed
+    await appDialog.getByRole('button', { name: 'Cancel' }).click()
+    await expect(appDialog).toHaveCount(0)
+    await expect(page.locator('article.card')).toHaveCount(1)
+    await expect(page.locator('article.card').first()).toContainText('Original')
+
+    // Escape behaves like Cancel
+    await saveLink(page, { url: 'https://example.com/page?id=5', title: 'Fresh 2' })
+    await expect(appDialog).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(appDialog).toHaveCount(0)
+    await expect(page.locator('article.card')).toHaveCount(1)
+
+    // Add another: a second record is saved
+    await saveLink(page, { url: 'https://example.com/page?id=5', title: 'Copy' })
+    await expect(appDialog).toBeVisible()
+    await appDialog.getByRole('button', { name: 'Add another' }).click()
+    await expect(appDialog).toHaveCount(0)
+    await expect(page.locator('article.card')).toHaveCount(2)
+  })
+
+  test('R. Duplicate link — Replace existing updates the record in place', async ({ page }) => {
+    await page.goto('/')
+    await saveLink(page, { url: 'https://example.com/page?id=5', title: 'Original Title' })
+    await saveLink(page, { url: 'https://example.com/page?utm_source=google&id=5', title: 'Updated Title' })
+    const appDialog = page.getByRole('dialog')
+    await expect(appDialog).toBeVisible()
+    await appDialog.getByRole('button', { name: 'Replace existing' }).click()
+    // still exactly one record, refreshed with the new submission
+    await expect(page.locator('article.card')).toHaveCount(1)
+    const card = page.locator('article.card').first()
+    await expect(card).toContainText('Updated Title')
+    await expect(card.locator('.url')).toContainText('utm_source=google')
+    await expect(card.locator('.normalized-hint')).toContainText('https://example.com/page?id=5')
+  })
+
+  test('S. Functional query difference is not a duplicate', async ({ page }) => {
+    await page.goto('/')
+    await saveLink(page, { url: 'https://example.com/page?id=5', title: 'One' })
+    await saveLink(page, { url: 'https://example.com/page?id=6', title: 'Two' })
+    await expect(page.locator('article.card')).toHaveCount(2)
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+  })
+
+  test('T. Duplicate dialog on mobile (320px and 375px)', async ({ page }) => {
+    for (const width of [320, 375]) {
+      await clearStorage(page)
+      await page.setViewportSize({ width, height: 700 })
+      await page.goto('/')
+      await saveLink(page, { url: 'https://example.com/page?id=5', title: 'Mobile Dup' })
+
+      let nativeDialog = false
+      page.on('dialog', () => { nativeDialog = true })
+      await saveLink(page, { url: 'https://example.com/page?utm_source=google&id=5', title: 'Again' })
+      const appDialog = page.getByRole('dialog')
+      await expect(appDialog).toBeVisible()
+      expect(nativeDialog).toBe(false)
+
+      // fits the viewport with no horizontal overflow
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)
+      expect(overflow).toBe(false)
+
+      // all three actions are visible and tappable
+      await expect(appDialog.getByRole('button', { name: 'Replace existing' })).toBeVisible()
+      await expect(appDialog.getByRole('button', { name: 'Add another' })).toBeVisible()
+      await expect(appDialog.getByRole('button', { name: 'Cancel' })).toBeVisible()
+
+      // focus moves into the dialog, landing on the default primary action
+      await expect.poll(() => page.evaluate(() => document.activeElement?.textContent?.trim())).toBe('Replace existing')
+
+      // Escape cancels
+      await page.keyboard.press('Escape')
+      await expect(appDialog).toHaveCount(0)
+      await expect(page.locator('article.card')).toHaveCount(1)
+    }
   })
 })

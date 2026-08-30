@@ -160,6 +160,153 @@ describe('useLinks', () => {
       expect(links.value[0].originalUrl).toBe('example.com/page')
     })
 
+    it('cleans tracking parameters from saved URLs, keeps original input', async () => {
+      const { useLinks } = await import('./useLinks.js')
+      const { links, addLink } = useLinks()
+      const link = await addLink({
+        originalUrl: 'https://example.com/page?utm_source=x&id=5&fbclid=abc#top',
+        _prefetchedMeta: { title: 'T', description: '', image: '', domain: 'example.com' },
+        _prefetchedUrl: 'https://example.com/page?id=5#top',
+      })
+      expect(link.originalUrl).toBe('https://example.com/page?utm_source=x&id=5&fbclid=abc#top')
+      expect(link.normalizedUrl).toBe('https://example.com/page?id=5#top')
+      expect(link.url).toBe('https://example.com/page?id=5#top')
+      expect(links.value[0].originalUrl).toBe('https://example.com/page?utm_source=x&id=5&fbclid=abc#top')
+      expect(links.value[0].normalizedUrl).toBe('https://example.com/page?id=5#top')
+    })
+
+    it('rejects a duplicate cleaned normalized URL with DuplicateLinkError', async () => {
+      const { useLinks, DuplicateLinkError } = await import('./useLinks.js')
+      const { links, addLink } = useLinks()
+      await addLink({
+        originalUrl: 'https://example.com/page?id=5',
+        _prefetchedMeta: { title: 'T', description: '', image: '', domain: 'example.com' },
+        _prefetchedUrl: 'https://example.com/page?id=5',
+      })
+      await expect(addLink({ originalUrl: 'https://example.com/page?id=5' })).rejects.toMatchObject({
+        name: 'DuplicateLinkError',
+        existing: expect.objectContaining({ normalizedUrl: 'https://example.com/page?id=5' }),
+      })
+      expect(links.value).toHaveLength(1)
+    })
+
+    it('treats tracking-only differences as duplicates', async () => {
+      const { useLinks, DuplicateLinkError } = await import('./useLinks.js')
+      const { addLink } = useLinks()
+      await addLink({
+        originalUrl: 'https://example.com/page?id=5',
+        _prefetchedMeta: { title: 'T', description: '', image: '', domain: 'example.com' },
+        _prefetchedUrl: 'https://example.com/page?id=5',
+      })
+      await expect(addLink({
+        originalUrl: 'https://example.com/page?utm_source=google&id=5',
+        _prefetchedMeta: { title: 'T', description: '', image: '', domain: 'example.com' },
+        _prefetchedUrl: 'https://example.com/page?id=5',
+      })).rejects.toBeInstanceOf(DuplicateLinkError)
+    })
+
+    it('keeps functional query differences distinct', async () => {
+      const { useLinks } = await import('./useLinks.js')
+      const { links, addLink } = useLinks()
+      await addLink({
+        originalUrl: 'https://example.com/page?id=5',
+        _prefetchedMeta: { title: 'A', description: '', image: '', domain: 'example.com' },
+        _prefetchedUrl: 'https://example.com/page?id=5',
+      })
+      await addLink({
+        originalUrl: 'https://example.com/page?id=6',
+        _prefetchedMeta: { title: 'B', description: '', image: '', domain: 'example.com' },
+        _prefetchedUrl: 'https://example.com/page?id=6',
+      })
+      expect(links.value).toHaveLength(2)
+    })
+
+    it('allowDuplicate:true saves a second record with a new id', async () => {
+      const { useLinks } = await import('./useLinks.js')
+      const { links, addLink } = useLinks()
+      const first = await addLink({
+        originalUrl: 'https://example.com/page?id=5',
+        _prefetchedMeta: { title: 'T', description: '', image: '', domain: 'example.com' },
+        _prefetchedUrl: 'https://example.com/page?id=5',
+      })
+      const second = await addLink({
+        originalUrl: 'https://example.com/page?id=5',
+        title: 'Copy',
+        _prefetchedMeta: { title: 'T', description: '', image: '', domain: 'example.com' },
+        _prefetchedUrl: 'https://example.com/page?id=5',
+      }, { allowDuplicate: true })
+      expect(links.value).toHaveLength(2)
+      expect(second.id).not.toBe(first.id)
+    })
+
+    it('replaceLink preserves id, createdAt and user-managed fields', async () => {
+      const { useLinks } = await import('./useLinks.js')
+      const { links, addLink, replaceLink } = useLinks()
+      const original = await addLink({
+        originalUrl: 'https://example.com/page?id=5',
+        title: 'Old Title',
+        description: 'Old Desc',
+        image: 'https://img.example/old.jpg',
+        tags: ['keep'],
+        folderId: 'folder-1',
+        important: true,
+        favorite: true,
+        _prefetchedMeta: { title: 'Meta', description: '', image: '', domain: 'example.com' },
+        _prefetchedUrl: 'https://example.com/page?id=5',
+      })
+      const createdAt = original.createdAt
+      const updated = await replaceLink(original.id, {
+        originalUrl: 'https://example.com/page?utm_source=google&id=5',
+        title: 'New Title',
+        description: 'New Desc',
+        image: 'https://img.example/new.jpg',
+        _prefetchedMeta: { title: 'Meta 2', description: '', image: '', domain: 'example.com' },
+        _prefetchedUrl: 'https://example.com/page?id=5',
+      })
+      expect(links.value).toHaveLength(1)
+      expect(updated.id).toBe(original.id)
+      expect(updated.createdAt).toBe(createdAt)
+      expect(updated.folderId).toBe('folder-1')
+      expect(updated.tags).toEqual(['keep'])
+      expect(updated.important).toBe(true)
+      expect(updated.mustHave).toBe(false)
+      expect(updated.favorite).toBe(true)
+    })
+
+    it('replaceLink updates URL and metadata fields from the new submission', async () => {
+      const { useLinks } = await import('./useLinks.js')
+      const { addLink, replaceLink } = useLinks()
+      const original = await addLink({
+        originalUrl: 'https://example.com/page?id=5',
+        _prefetchedMeta: { title: 'Old Meta', description: '', image: '', domain: 'example.com' },
+        _prefetchedUrl: 'https://example.com/page?id=5',
+      })
+      const updated = await replaceLink(original.id, {
+        originalUrl: 'https://example.com/page?utm_source=google&id=5',
+        title: 'New Title',
+        description: 'New Desc',
+        image: 'https://img.example/new.jpg',
+        _prefetchedMeta: { title: 'New Meta', description: '', image: '', domain: 'example.com' },
+        _prefetchedUrl: 'https://example.com/page?id=5',
+      })
+      expect(updated.originalUrl).toBe('https://example.com/page?utm_source=google&id=5')
+      expect(updated.normalizedUrl).toBe('https://example.com/page?id=5')
+      expect(updated.url).toBe('https://example.com/page?id=5')
+      expect(updated.domain).toBe('example.com')
+      expect(updated.category).toBe('Other')
+      expect(updated.title).toBe('New Title')
+      expect(updated.description).toBe('New Desc')
+      expect(updated.image).toBe('https://img.example/new.jpg')
+    })
+
+    it('replaceLink returns null for a missing id', async () => {
+      const { useLinks } = await import('./useLinks.js')
+      const { replaceLink } = useLinks()
+      await expect(replaceLink('missing', {
+        originalUrl: 'https://example.com/page?id=5',
+      })).resolves.toBeNull()
+    })
+
     it('auto-categorizes when category not provided', async () => {
       const { useLinks } = await import('./useLinks.js')
       const { addLink } = useLinks()

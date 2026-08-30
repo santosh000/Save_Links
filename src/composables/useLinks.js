@@ -7,6 +7,75 @@ import { fetchMetadata } from '../utils/metadata.js'
 
 export const STATUSES = ['important', 'must-have']
 
+// Thrown by addLink() when a link with the same cleaned normalizedUrl is
+// already saved. Carries the existing link so the UI can offer
+// replace / add-another / cancel.
+export class DuplicateLinkError extends Error {
+  constructor(existing) {
+    super('Link already saved')
+    this.name = 'DuplicateLinkError'
+    this.existing = existing
+  }
+}
+
+function newLinkId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+}
+
+// Shared derivation for addLink() and replaceLink(): normalize -> validate ->
+// metadata -> link fields. Returns everything a new link needs EXCEPT id and
+// createdAt (replace reuses the existing ones).
+async function buildLinkSpec(payload, normalized) {
+  let parsed
+  try { parsed = new URL(normalized) } catch { throw new Error('Invalid URL') }
+
+  // reuse prefetched metadata if available and for same normalized URL (avoid double fetch)
+  let meta = null
+  const prefetchedUrl = payload._prefetchedUrl ? normalizeUrl(payload._prefetchedUrl) : null
+  if (payload._prefetchedMeta && prefetchedUrl === normalized) {
+    meta = payload._prefetchedMeta
+  } else {
+    meta = { title: '', description: '', image: '', domain: getDomain(normalized) }
+    try {
+      meta = await fetchMetadata(normalized)
+    } catch {
+      // fallback already handled inside fetchMetadata
+    }
+  }
+
+  const inputTitle = (payload.title ?? '').trim()
+  const inputDesc = (payload.description ?? '').trim()
+  const inputImage = (payload.image ?? '').trim()
+
+  const finalTitle = inputTitle || meta.title || parsed.hostname
+  const finalCategory = payload.category || categorizeUrl(normalized)
+  const finalDomain = meta.domain || getDomain(normalized)
+  const finalDescription = inputDesc || meta.description || ''
+  const finalImage = inputImage || meta.image || ''
+
+  const important = !!payload.important || payload.status === 'important'
+  const mustHave = !!payload.mustHave || payload.status === 'must-have'
+  const favorite = !!payload.favorite
+  const folderId = typeof payload.folderId === 'string' && payload.folderId.trim() ? payload.folderId.trim() : null
+
+  return {
+    originalUrl: (payload.originalUrl ?? payload.url ?? '').trim(),
+    normalizedUrl: normalized,
+    url: normalized,
+    domain: finalDomain,
+    title: finalTitle.slice(0, 200),
+    description: finalDescription.slice(0, 400),
+    image: finalImage.trim(),
+    category: finalCategory,
+    tags: Array.isArray(payload.tags) ? payload.tags.map(t => t.trim()).filter(Boolean) : [],
+    important,
+    mustHave,
+    favorite,
+    folderId,
+    status: important && mustHave ? 'both' : important ? 'important' : mustHave ? 'must-have' : null
+  }
+}
+
 export function useLinks() {
   // Initial state comes from the boot snapshot (filled by boot() in main.js
   // BEFORE Vue mounts from migrated IndexedDB data) — the app never starts
@@ -40,63 +109,47 @@ export function useLinks() {
     return map
   })
 
-  async function addLink(payload) {
-    // payload: { originalUrl, url?, title, description, image, category, tags, important, mustHave, status (legacy), _prefetchedMeta, _prefetchedUrl }
+  async function addLink(payload, options = {}) {
+    // payload: { originalUrl, url?, title, description, image, category, tags, important, mustHave, status (legacy), folderId, _prefetchedMeta, _prefetchedUrl }
+    // options: { allowDuplicate } — bypass the duplicate rejection (used by "Add another")
     const rawInput = (payload.originalUrl ?? payload.url ?? '').trim()
     if (!rawInput) throw new Error('URL required')
     const normalized = normalizeUrl(rawInput)
-    let parsed
-    try { parsed = new URL(normalized) } catch { throw new Error('Invalid URL') }
+    try { new URL(normalized) } catch { throw new Error('Invalid URL') }
 
-    // reuse prefetched metadata if available and for same normalized URL (avoid double fetch)
-    let meta = null
-    const prefetchedUrl = payload._prefetchedUrl ? normalizeUrl(payload._prefetchedUrl) : null
-    if (payload._prefetchedMeta && prefetchedUrl === normalized) {
-      meta = payload._prefetchedMeta
-    } else {
-      meta = { title: '', description: '', image: '', domain: getDomain(normalized) }
-      try {
-        meta = await fetchMetadata(normalized)
-      } catch {
-        // fallback already handled inside fetchMetadata
-      }
-    }
+    // duplicate detection AFTER normalization/validation but BEFORE metadata fetch
+    const existing = links.value.find(l => l.normalizedUrl === normalized)
+    if (existing && !options.allowDuplicate) throw new DuplicateLinkError(existing)
 
-    const inputTitle = (payload.title ?? '').trim()
-    const inputDesc = (payload.description ?? '').trim()
-    const inputImage = (payload.image ?? '').trim()
-
-    const finalTitle = inputTitle || meta.title || parsed.hostname
-    const finalCategory = payload.category || categorizeUrl(normalized)
-    const finalDomain = meta.domain || getDomain(normalized)
-    const finalDescription = inputDesc || meta.description || ''
-    const finalImage = inputImage || meta.image || ''
-
-    const important = !!payload.important || payload.status === 'important'
-    const mustHave = !!payload.mustHave || payload.status === 'must-have'
-    const favorite = !!payload.favorite
-    const folderId = typeof payload.folderId === 'string' && payload.folderId.trim() ? payload.folderId.trim() : null
-
-    const link = {
-      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-      originalUrl: rawInput,
-      normalizedUrl: normalized,
-      url: normalized,
-      domain: finalDomain,
-      title: finalTitle.slice(0, 200),
-      description: finalDescription.slice(0, 400),
-      image: finalImage.trim(),
-      category: finalCategory,
-      tags: Array.isArray(payload.tags) ? payload.tags.map(t => t.trim()).filter(Boolean) : [],
-      important,
-      mustHave,
-      favorite,
-      folderId,
-      status: important && mustHave ? 'both' : important ? 'important' : mustHave ? 'must-have' : null,
-      createdAt: new Date().toISOString()
-    }
+    const spec = await buildLinkSpec(payload, normalized)
+    const link = { id: newLinkId(), createdAt: new Date().toISOString(), ...spec }
     links.value.unshift(link)
     return link
+  }
+
+  // Replace an existing record with a fresh submission's URL/metadata.
+  // Preserves id, createdAt and user-managed fields (folderId, tags,
+  // important, mustHave, favorite); updates originalUrl, normalizedUrl, url,
+  // domain, category, title, description, image. Reuses updateLink() so alias
+  // synchronization and validation behave exactly as everywhere else.
+  async function replaceLink(id, payload) {
+    if (!links.value.some(l => l.id === id)) return null
+    const rawInput = (payload.originalUrl ?? payload.url ?? '').trim()
+    if (!rawInput) throw new Error('URL required')
+    const normalized = normalizeUrl(rawInput)
+    try { new URL(normalized) } catch { throw new Error('Invalid URL') }
+    const spec = await buildLinkSpec(payload, normalized)
+    updateLink(id, {
+      originalUrl: spec.originalUrl,
+      normalizedUrl: spec.normalizedUrl,
+      url: spec.url,
+      domain: spec.domain,
+      category: spec.category,
+      title: spec.title,
+      description: spec.description,
+      image: spec.image
+    })
+    return links.value.find(l => l.id === id) || null
   }
 
   function updateLink(id, patch) {
@@ -186,6 +239,7 @@ export function useLinks() {
     byCategory,
     storageError,
     addLink,
+    replaceLink,
     updateLink,
     setStatus,
     toggleImportant,

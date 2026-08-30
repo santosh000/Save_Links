@@ -17,7 +17,7 @@ const props = defineProps({
   colorScheme: { type: String, default: 'ocean' },
 })
 
-const emit = defineEmits(['imported', 'show-toast'])
+const emit = defineEmits(['import-request', 'show-toast'])
 
 const fileInput = ref(null)
 const lastBackupAt = ref(null)
@@ -116,10 +116,8 @@ async function handleImport(event) {
     return
   }
 
-  const confirmed = window.confirm('This will replace your current Save Links data. Your existing data may be lost. Continue?')
-  if (!confirmed) return
-
-  emit('imported', normalized)
+  // ask App to confirm the overwrite before importing
+  emit('import-request', normalized)
 }
 </script>
 

@@ -76,8 +76,9 @@ test.describe('PWA foundation (production build)', () => {
     await card.locator('.edit-form').getByRole('button', { name: 'Save' }).click()
     await expect(page.locator('article.card', { hasText: 'Offline Edited' })).toBeVisible()
 
-    page.once('dialog', async (dialog) => { await dialog.accept() })
     await page.locator('article.card', { hasText: 'Offline Seed' }).getByRole('button', { name: 'Delete link' }).click()
+    await expect(page.getByRole('dialog')).toBeVisible()
+    await page.getByRole('dialog').getByRole('button', { name: 'Delete', exact: true }).click()
     await expect(page.locator('article.card', { hasText: 'Offline Seed' })).toHaveCount(0)
 
     // 4. RELOAD OFFLINE: shell comes from cache, data survives from IndexedDB.
