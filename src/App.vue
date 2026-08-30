@@ -203,7 +203,22 @@ const hasLinks = computed(() => links.value.length > 0)
 
         <div class="content-head">
           <h2>Saved links</h2>
-          <span class="muted">{{ filteredLinks.length }} shown</span>
+          <span class="head-count">{{ filteredLinks.length }} {{ filteredLinks.length === 1 ? 'link' : 'links' }}</span>
+          <div class="search-wrap">
+            <span class="icon" aria-hidden="true">⌕</span>
+            <label for="filter-search" class="sr-only">Search</label>
+            <input id="filter-search" :value="search" @input="search = $event.target.value" placeholder="Search title, URL, domain, tags…" class="search-input" aria-label="Search links" />
+            <button v-if="search" class="clear" @click="search = ''" aria-label="Clear search">✕</button>
+          </div>
+          <label for="filter-status" class="sr-only">Filter by status</label>
+          <select id="filter-status" :value="filterStatus" @change="filterStatus = $event.target.value" class="header-status" aria-label="Filter by status">
+            <option value="">All status</option>
+            <option value="important">Important</option>
+            <option value="must-have">Must Have</option>
+            <option value="none">No status</option>
+            <option value="favorite">Favorites</option>
+            <option value="not-favorite">No favorite</option>
+          </select>
         </div>
 
         <div v-if="!hasLinks" class="empty-state">
@@ -239,9 +254,7 @@ const hasLinks = computed(() => links.value.length > 0)
       <div id="side-col" class="side-col">
         <DataBackup :links="links" :profile="profile" :folders="folders" :appearance="appearance" :color-scheme="colorScheme" @imported="handleImportBackup" @show-toast="showToast" />
         <SearchFilter
-          v-model:search="search"
           v-model:category="filterCategory"
-          v-model:status="filterStatus"
           v-model:folder="filterFolder"
           :folders="folders"
         />
@@ -347,9 +360,57 @@ const hasLinks = computed(() => links.value.length > 0)
   background: rgba(15, 23, 42, 0.4);
 }
 .main-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-.content-head { display: flex; align-items: baseline; justify-content: space-between; margin-top: 4px; }
-.content-head h2 { margin: 0; font-size: 18px; color: var(--text-h); }
-.muted { color: var(--muted); font-size: 13px; }
+.content-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
+.content-head h2 { margin: 0; font-size: 18px; color: var(--text-h); white-space: nowrap; }
+.search-wrap {
+  flex: 1 1 200px;
+  min-width: 180px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 8px 12px;
+}
+/* filtered count, mobile-only: hidden on desktop/tablet, shown right-aligned
+   beside "Saved links" on the narrow stacked layout */
+.head-count {
+  display: none;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+.icon { color: var(--muted); font-size: 16px; }
+.search-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text-h);
+  font-size: 14px;
+}
+.clear {
+  background: var(--muted-bg);
+  border: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  cursor: pointer;
+  color: var(--muted);
+}
+.header-status {
+  flex: 0 1 auto;
+  min-width: 140px;
+  padding: 9px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text-h);
+  font-size: 14px;
+}
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .empty-state {
   background: var(--card);
@@ -435,5 +496,10 @@ const hasLinks = computed(() => links.value.length > 0)
   .brand-sub { display: none; }
   .pill-count { display: none; }
   .util-toggle-name { display: none; }
+  /* narrow screens: Saved links on its own row, then full-width Search,
+     then full-width All status — always grouped under the header */
+  .content-head .search-wrap { flex: 1 1 100%; }
+  .content-head .header-status { flex: 1 1 100%; min-width: 0; }
+  .content-head .head-count { display: inline; margin-left: auto; }
 }
 </style>
