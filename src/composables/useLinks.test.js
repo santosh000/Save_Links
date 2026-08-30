@@ -420,6 +420,197 @@ describe('useLinks', () => {
     })
   })
 
+  describe('save-first & background enrichment', () => {
+    function ogHtml() {
+      global.fetch = vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          headers: { get: () => 'text/html' },
+          text: () => Promise.resolve(`<html><head>
+            <title>Doc</title>
+            <meta property="og:title" content="Real Title">
+            <meta property="og:description" content="Real Desc">
+            <meta property="og:image" content="https://img.example/preview.jpg">
+          </head></html>`),
+        })
+      )
+    }
+
+    it('addLink saves immediately without waiting for metadata', async () => {
+      // a fetch that never settles: if addLink awaited metadata it would hang
+      global.fetch = vi.fn(() => new Promise(() => {}))
+      const { useLinks } = await import('./useLinks.js')
+      const { links, addLink } = useLinks()
+      const link = await addLink({ originalUrl: 'https://example.com/some-article' })
+      expect(links.value).toHaveLength(1)
+      expect(link.title).toBe('Some Article') // URL-derived fallback, never undefined/null
+      expect(link.description).toBe('')
+      expect(link.image).toBe('')
+      expect(link.domain).toBe('example.com')
+    })
+
+    it('metadata failure still saves the link with fallback fields', async () => {
+      global.fetch = vi.fn(() => Promise.reject(new Error('network')))
+      const { useLinks } = await import('./useLinks.js')
+      const { links, addLink } = useLinks()
+      await addLink({ originalUrl: 'https://example.com/fail-page' })
+      await flush()
+      expect(links.value).toHaveLength(1)
+      expect(links.value[0].title).toBe('Fail Page')
+      expect(links.value[0].description).toBe('')
+      expect(links.value[0].image).toBe('')
+    })
+
+    it('reuses valid prefetched metadata without any fetch (even after flush)', async () => {
+      const { useLinks } = await import('./useLinks.js')
+      const { links, addLink } = useLinks()
+      const spy = vi.spyOn(global, 'fetch')
+      await addLink({
+        originalUrl: 'https://example.com/prefetched',
+        _prefetchedMeta: { title: 'Real Title', description: 'Real Desc', image: 'img.jpg', domain: 'example.com' },
+        _prefetchedUrl: 'https://example.com/prefetched',
+      })
+      await flush()
+      expect(spy).not.toHaveBeenCalled()
+      expect(links.value[0].title).toBe('Real Title')
+      expect(links.value[0].description).toBe('Real Desc')
+      expect(links.value[0].image).toBe('img.jpg')
+    })
+
+    it('background metadata updates the saved record after it exists', async () => {
+      ogHtml()
+      const { useLinks } = await import('./useLinks.js')
+      const { links, addLink } = useLinks()
+      await addLink({ originalUrl: 'https://example.com/post' })
+      // saved instantly with fallback
+      expect(links.value[0].title).toBe('Post')
+      expect(links.value[0].description).toBe('')
+      await flush()
+      expect(links.value[0].title).toBe('Real Title')
+      expect(links.value[0].description).toBe('Real Desc')
+      expect(links.value[0].image).toBe('https://img.example/preview.jpg')
+      expect(links.value[0].domain).toBe('example.com')
+    })
+
+    it('background update preserves tags, folder, flags, status and createdAt', async () => {
+      ogHtml()
+      const { useLinks } = await import('./useLinks.js')
+      const { links, addLink } = useLinks()
+      await addLink({
+        originalUrl: 'https://example.com/keep-page',
+        tags: ['a', 'b'],
+        folderId: 'folder-9',
+        important: true,
+        mustHave: true,
+        favorite: true,
+      })
+      const createdAt = links.value[0].createdAt
+      await flush()
+      const l = links.value[0]
+      expect(l.title).toBe('Real Title')
+      expect(l.tags).toEqual(['a', 'b'])
+      expect(l.folderId).toBe('folder-9')
+      expect(l.important).toBe(true)
+      expect(l.mustHave).toBe(true)
+      expect(l.favorite).toBe(true)
+      expect(l.status).toBe('both')
+      expect(l.createdAt).toBe(createdAt)
+    })
+
+    it('background partial metadata preserves existing fallback values', async () => {
+      // page with ONLY an og:image — title/description fallback must survive
+      global.fetch = vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          headers: { get: () => 'text/html' },
+          text: () => Promise.resolve('<html><head><meta property="og:image" content="/img.jpg"></head></html>'),
+        })
+      )
+      const { useLinks } = await import('./useLinks.js')
+      const { links, addLink } = useLinks()
+      await addLink({ originalUrl: 'https://example.com/gallery' })
+      await flush()
+      expect(links.value[0].title).toBe('Gallery')
+      expect(links.value[0].description).toBe('')
+      expect(links.value[0].image).toBe('https://example.com/img.jpg')
+    })
+
+    it('background enrichment never clobbers a user-typed title', async () => {
+      ogHtml()
+      const { useLinks } = await import('./useLinks.js')
+      const { links, addLink } = useLinks()
+      await addLink({ originalUrl: 'https://example.com/clobber-check', title: 'My Custom' })
+      await flush()
+      expect(links.value[0].title).toBe('My Custom')
+    })
+
+    it('duplicate detection still happens before any metadata work', async () => {
+      const { useLinks, DuplicateLinkError } = await import('./useLinks.js')
+      const { addLink } = useLinks()
+      const spy = vi.spyOn(global, 'fetch')
+      await addLink({
+        originalUrl: 'https://example.com/dup',
+        _prefetchedMeta: { title: 'T', description: '', image: '', domain: 'example.com' },
+        _prefetchedUrl: 'https://example.com/dup',
+      })
+      await expect(addLink({ originalUrl: 'https://example.com/dup?utm_source=x' }))
+        .rejects.toBeInstanceOf(DuplicateLinkError)
+      expect(spy).not.toHaveBeenCalled() // rejected duplicate never triggered a fetch
+    })
+
+    it('replaceLink enrichment preserves identity fields', async () => {
+      global.fetch = vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          headers: { get: () => 'text/html' },
+          text: () => Promise.resolve('<html><head><title>Replaced Real Title</title></head></html>'),
+        })
+      )
+      const { useLinks } = await import('./useLinks.js')
+      const { links, addLink, replaceLink } = useLinks()
+      const original = await addLink({
+        originalUrl: 'https://example.com/r?a=1',
+        tags: ['keep'],
+        folderId: 'folder-r',
+        important: true,
+        favorite: true,
+        _prefetchedMeta: { title: 'Old', description: '', image: '', domain: 'example.com' },
+        _prefetchedUrl: 'https://example.com/r?a=1',
+      })
+      const createdAt = original.createdAt
+      const updated = await replaceLink(original.id, { originalUrl: 'https://example.com/r?a=2' })
+      expect(updated.id).toBe(original.id)
+      expect(updated.createdAt).toBe(createdAt)
+      await flush()
+      const l = links.value.find(x => x.id === original.id)
+      expect(l.title).toBe('Replaced Real Title') // enrichment applied on top
+      expect(l.normalizedUrl).toBe('https://example.com/r?a=2')
+      expect(l.originalUrl).toBe('https://example.com/r?a=2')
+      expect(l.tags).toEqual(['keep'])
+      expect(l.folderId).toBe('folder-r')
+      expect(l.important).toBe(true)
+      expect(l.favorite).toBe(true)
+    })
+
+    it('tracking-cleaned URL remains unchanged by enrichment', async () => {
+      global.fetch = vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          headers: { get: () => 'text/html' },
+          text: () => Promise.resolve('<html><head><title>Clean Real</title></head></html>'),
+        })
+      )
+      const { useLinks } = await import('./useLinks.js')
+      const { links, addLink } = useLinks()
+      await addLink({ originalUrl: 'https://example.com/page?utm_source=x&id=5#top' })
+      await flush()
+      expect(links.value[0].originalUrl).toBe('https://example.com/page?utm_source=x&id=5#top')
+      expect(links.value[0].normalizedUrl).toBe('https://example.com/page?id=5#top')
+      expect(links.value[0].url).toBe('https://example.com/page?id=5#top')
+      expect(links.value[0].title).toBe('Clean Real')
+    })
+  })
+
   describe('updateLink & toggles', () => {
     it('updates title via patch', async () => {
       const { useLinks } = await import('./useLinks.js')

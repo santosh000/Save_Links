@@ -3,7 +3,7 @@ import { repository } from '../storage/repository.js'
 import { bootState } from '../storage/migration.js'
 import { categorizeUrl, getDomain, normalizeUrl } from '../utils/categorize.js'
 import { normalizeLink } from '../domain/link.js'
-import { fetchMetadata } from '../utils/metadata.js'
+import { fetchMetadata, guessTitleSync } from '../utils/metadata.js'
 
 export const STATUSES = ['important', 'must-have']
 
@@ -22,36 +22,35 @@ function newLinkId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
 }
 
+// True when the submission carries prefetched metadata for the SAME
+// normalized URL — reuse it and skip the background enrichment fetch.
+function hasValidPrefetch(payload, normalized) {
+  const prefetchedUrl = payload._prefetchedUrl ? normalizeUrl(payload._prefetchedUrl) : null
+  return !!payload._prefetchedMeta && prefetchedUrl === normalized
+}
+
 // Shared derivation for addLink() and replaceLink(): normalize -> validate ->
-// metadata -> link fields. Returns everything a new link needs EXCEPT id and
-// createdAt (replace reuses the existing ones).
-async function buildLinkSpec(payload, normalized) {
+// best-known metadata (prefetched only — NEVER fetched here) -> link fields.
+// Returns everything a new link needs EXCEPT id and createdAt (replace reuses
+// the existing ones). Saving must never wait for a network request, so this
+// is synchronous; missing metadata falls back immediately and the caller
+// starts background enrichment for what is still unknown.
+function buildLinkSpec(payload, normalized) {
   let parsed
   try { parsed = new URL(normalized) } catch { throw new Error('Invalid URL') }
 
   // reuse prefetched metadata if available and for same normalized URL (avoid double fetch)
-  let meta = null
-  const prefetchedUrl = payload._prefetchedUrl ? normalizeUrl(payload._prefetchedUrl) : null
-  if (payload._prefetchedMeta && prefetchedUrl === normalized) {
-    meta = payload._prefetchedMeta
-  } else {
-    meta = { title: '', description: '', image: '', domain: getDomain(normalized) }
-    try {
-      meta = await fetchMetadata(normalized)
-    } catch {
-      // fallback already handled inside fetchMetadata
-    }
-  }
+  const meta = hasValidPrefetch(payload, normalized) ? payload._prefetchedMeta : null
 
   const inputTitle = (payload.title ?? '').trim()
   const inputDesc = (payload.description ?? '').trim()
   const inputImage = (payload.image ?? '').trim()
 
-  const finalTitle = inputTitle || meta.title || parsed.hostname
+  const finalTitle = inputTitle || (meta && meta.title) || guessTitleSync(normalized) || parsed.hostname
   const finalCategory = payload.category || categorizeUrl(normalized)
-  const finalDomain = meta.domain || getDomain(normalized)
-  const finalDescription = inputDesc || meta.description || ''
-  const finalImage = inputImage || meta.image || ''
+  const finalDomain = (meta && meta.domain) || getDomain(normalized)
+  const finalDescription = inputDesc || (meta && meta.description) || ''
+  const finalImage = inputImage || (meta && meta.image) || ''
 
   const important = !!payload.important || payload.status === 'important'
   const mustHave = !!payload.mustHave || payload.status === 'must-have'
@@ -117,13 +116,15 @@ export function useLinks() {
     const normalized = normalizeUrl(rawInput)
     try { new URL(normalized) } catch { throw new Error('Invalid URL') }
 
-    // duplicate detection AFTER normalization/validation but BEFORE metadata fetch
+    // duplicate detection AFTER normalization/validation but BEFORE any
+    // metadata work — the save and the duplicate UX never wait on a fetch
     const existing = links.value.find(l => l.normalizedUrl === normalized)
     if (existing && !options.allowDuplicate) throw new DuplicateLinkError(existing)
 
-    const spec = await buildLinkSpec(payload, normalized)
+    const spec = buildLinkSpec(payload, normalized)
     const link = { id: newLinkId(), createdAt: new Date().toISOString(), ...spec }
     links.value.unshift(link)
+    enrichMetadata(link.id, normalized, payload)
     return link
   }
 
@@ -138,7 +139,7 @@ export function useLinks() {
     if (!rawInput) throw new Error('URL required')
     const normalized = normalizeUrl(rawInput)
     try { new URL(normalized) } catch { throw new Error('Invalid URL') }
-    const spec = await buildLinkSpec(payload, normalized)
+    const spec = buildLinkSpec(payload, normalized)
     updateLink(id, {
       originalUrl: spec.originalUrl,
       normalizedUrl: spec.normalizedUrl,
@@ -149,7 +150,34 @@ export function useLinks() {
       description: spec.description,
       image: spec.image
     })
-    return links.value.find(l => l.id === id) || null
+    const updated = links.value.find(l => l.id === id) || null
+    if (updated) enrichMetadata(updated.id, normalized, payload)
+    return updated
+  }
+
+  // Background metadata enrichment: runs only when the submission had NO valid
+  // prefetch (the prefetch flow already got its one fetch — never duplicate
+  // it, even if the prefetch was partial). The record is already saved with
+  // fallback values; when metadata lands it fills only fields still holding
+  // fallback/empty values, so user-typed data is never clobbered. Failures
+  // leave the fallback record untouched and are swallowed silently.
+  function enrichMetadata(linkId, normalized, payload) {
+    if (hasValidPrefetch(payload, normalized)) return
+    fetchMetadata(normalized)
+      .then((meta) => {
+        const cur = links.value.find(l => l.id === linkId)
+        if (!cur) return // link was deleted while fetching
+        const patch = {}
+        // only swap a URL-derived fallback title for a real one
+        if (meta.title && meta.title !== cur.title && cur.title === guessTitleSync(cur.normalizedUrl || cur.url)) {
+          patch.title = meta.title
+        }
+        if (meta.description && !cur.description) patch.description = meta.description
+        if (meta.image && !cur.image) patch.image = meta.image
+        if (meta.domain && cur.domain !== meta.domain) patch.domain = meta.domain
+        if (Object.keys(patch).length) updateLink(cur.id, patch)
+      })
+      .catch(() => {}) // enrichment is best-effort; never surface or interrupt
   }
 
   function updateLink(id, patch) {
