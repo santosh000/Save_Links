@@ -126,6 +126,17 @@ The dev server is available at `http://localhost:5173` by default.
 | `npm run test:e2e` | Run the Playwright end-to-end suite (uses a dedicated test server on port 5173) |
 | `npm run build` | Create a static production build in `dist/` |
 | `npm run preview` | Preview the production build locally |
+| `npm run deploy:production` | Build and deploy the stable build to Cloudflare Pages (`savelinks.pages.dev`) |
+| `npm run deploy:preview` | Build and deploy to a Cloudflare Pages preview deployment |
+
+## Deployment
+
+Save_Links is deployed to **Cloudflare Pages** as static files (no server, no database).
+
+- **Stable** — `npm run deploy:production` deploys the current build to the production URL: **https://savelinks.pages.dev**
+- **Development** — `npm run deploy:preview` creates a **preview deployment**; Cloudflare generates a unique preview URL for each deployment. Preview deployments may contain unfinished changes and are for testing, not everyday use.
+
+Deployments are manual — there is currently no GitHub integration and no CI/CD, so nothing deploys automatically. There is no permanent development URL; every preview deployment gets its own temporary URL.
 
 ## Storage & privacy
 
