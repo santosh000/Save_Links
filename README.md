@@ -22,7 +22,7 @@ Save_Links is under active development: the `master` branch always carries the l
 | Contains | verified, released features | the latest work in progress |
 | May contain | — | unfinished features, bugs, or breaking changes |
 
-- **Stable** — the latest **released** version. Use it if you simply want to use Save_Links. The current stable release is v2.0.1, available at **https://savelinks.pages.dev** — just open the address; there is nothing to install. Features on the `master` branch are not part of v2.0.1 and are not released yet.
+- **Stable** — the latest **released** version. Use it if you simply want to use Save_Links. The current stable release is v2.0.2, available at **https://savelinks.pages.dev** — just open the address; there is nothing to install. Features on the `master` branch are not part of v2.0.2 and are not released yet.
 - **Development** — the latest **unreleased** code on the repository's `master` branch. Use it if you want to test upcoming work or contribute to the project. It may contain unfinished features, bugs, or breaking changes, and there is currently **no permanent public development URL** — developers and testers run it locally (see [Development](#development)). Temporary Cloudflare preview deployments may be created when specifically needed for testing; they are not permanent and are never created automatically.
 
 Save_Links is hosted on Cloudflare Pages. The stable version is available at savelinks.pages.dev.
