@@ -6,7 +6,7 @@
       no authentication — all data stays in your browser.
     </p>
     <ul>
-      <li>Links, stats, and profile are saved to <code>localStorage</code>.</li>
+      <li>Links, folders, stats, and profile are stored locally on this device.</li>
       <li>Cards, filters, and categories update instantly and locally.</li>
       <li>Nothing leaves this device.</li>
     </ul>

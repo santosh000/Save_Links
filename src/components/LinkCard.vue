@@ -205,14 +205,13 @@ function platformIcon() {
 .thumb-wrap { display: block; aspect-ratio: 16/9; overflow: hidden; background: var(--muted-bg); }
 .thumb { width: 100%; height: 100%; object-fit: cover; display: block; }
 .body { padding: 12px 14px 12px; display: flex; flex-direction: column; gap: 6px; }
-.top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; font-size: 12px; flex-wrap: wrap; }
+.top { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 8px 12px; font-size: 12px; }
 .meta-left { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
 .meta-right {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 2px;
-  margin-left: auto;
   color: var(--muted);
   font-size: 11px;
   line-height: 1.3;

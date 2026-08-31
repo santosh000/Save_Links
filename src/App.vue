@@ -419,7 +419,7 @@ const hasLinks = computed(() => links.value.length > 0)
   border-bottom: 1px solid var(--border);
 }
 .topbar-inner {
-  max-width: 1280px;
+  max-width: 1600px;
   margin: 0 auto;
   padding: 12px 20px;
   display: flex;
@@ -446,12 +446,12 @@ const hasLinks = computed(() => links.value.length > 0)
   color: var(--text-h);
 }
 .layout {
-  max-width: 1280px;
+  max-width: 1600px;
   width: 100%;
   margin: 0 auto;
   padding: 20px;
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr) 300px;
+  grid-template-columns: 260px minmax(0, 1fr) 300px;
   gap: 20px;
   flex: 1;
   align-items: start;

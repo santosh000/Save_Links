@@ -86,7 +86,12 @@ function onSubmit() {
     _prefetchedMeta: usePrefetched ? lastMeta : null,
     _prefetchedUrl: usePrefetched ? lastMetaUrl : null
   })
-  // reset
+  resetForm()
+  // compact form: collapse after a successful save so cards stay dominant
+  open.value = false
+}
+
+function resetForm() {
   url.value = ''
   title.value = ''
   description.value = ''
@@ -98,9 +103,13 @@ function onSubmit() {
   folderId.value = ''
   lastMeta = null
   lastMetaUrl = ''
-  // compact form: collapse after a successful save so cards stay dominant
-  open.value = false
   moreOpen.value = false
+  error.value = ''
+}
+
+function cancelForm() {
+  resetForm()
+  open.value = false
 }
 
 function handlePaste(e) {
@@ -180,7 +189,10 @@ function handlePaste(e) {
 
         <p v-if="error" class="error">{{ error }}</p>
 
-        <button type="submit" class="btn primary block">Save link</button>
+        <div class="form-actions">
+          <button type="button" class="btn ghost" @click="cancelForm">Cancel</button>
+          <button type="submit" class="btn primary">Save link</button>
+        </div>
       </form>
     </div>
   </section>
@@ -264,6 +276,7 @@ textarea.input { resize: vertical; }
 .meta-hint { font-size: 11px; color: var(--muted); }
 .error { color: #ef4444; font-size: 13px; margin: 0 0 10px; }
 .btn.block { width: 100%; margin-top: 2px; }
+.form-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 14px; }
 .checks { display: flex; gap: 14px; align-items: center; padding-top: 9px; flex-wrap: wrap; }
 .check { font-size: 13px; color: var(--text-h); display: flex; gap: 6px; align-items: center; cursor: pointer; }
 .check input { accent-color: var(--accent); }
