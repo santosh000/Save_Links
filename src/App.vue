@@ -248,22 +248,37 @@ function handleImportBackup(data) {
   showToast('Backup imported')
 }
 
-function handleCreateFolder(name) {
+// Expected business errors (e.g. duplicate folder name) are reported to
+// FolderManager through a done callback carried on the event, instead of being
+// thrown through Vue's event system (which warns/handles dev and prod
+// differently). Unexpected programming errors still propagate so they are
+// never silently swallowed.
+function handleCreateFolder(name, done) {
   try {
     createFolder(name)
     showToast('Folder created')
+    done({ ok: true })
   } catch (e) {
     showToast(e.message || 'Failed')
-    throw e
+    if (e.message === 'Folder already exists' || e.message === 'Folder name required') {
+      done({ ok: false, error: e.message })
+    } else {
+      throw e
+    }
   }
 }
-function handleRenameFolder({ id, name }) {
+function handleRenameFolder({ id, name }, done) {
   try {
     renameFolder(id, name)
     showToast('Folder renamed')
+    done({ ok: true })
   } catch (e) {
     showToast(e.message || 'Failed')
-    throw e
+    if (e.message === 'Folder already exists' || e.message === 'Folder name required') {
+      done({ ok: false, error: e.message })
+    } else {
+      throw e
+    }
   }
 }
 

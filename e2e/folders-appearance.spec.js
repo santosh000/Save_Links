@@ -67,6 +67,11 @@ test.describe('Folders, Appearance, Color Schemes, Backup v2', () => {
   })
 
   test('Folders create/rename/delete and counts', async ({page}) => {
+    // collect any Vue "Unhandled error" warnings to assert they do not appear
+    const unhandledWarnings = []
+    page.on('console', (msg) => {
+      if (msg.type() === 'warning' && msg.text().includes('Unhandled error')) unhandledWarnings.push(msg.text())
+    })
     await page.goto('/')
     // create folder
     await page.getByLabel('New folder name').fill('Work')
@@ -76,16 +81,30 @@ test.describe('Folders, Appearance, Color Schemes, Backup v2', () => {
     await page.getByLabel('New folder name').fill('Personal')
     await page.getByRole('button', { name: 'Create folder', exact:true }).click()
     await expect(page.locator('.folder-item', {hasText:'Personal'})).toBeVisible()
-    // duplicate should show toast
+    // duplicate should show toast + inline error, and preserve the typed name
     await page.getByLabel('New folder name').fill('work')
     await page.getByRole('button', { name: 'Create folder', exact:true }).click()
     await expect(page.getByRole('status').getByText('Folder already exists')).toBeVisible()
+    await expect(page.locator('.folder-sidebar .error')).toHaveText('Folder already exists')
+    await expect(page.getByLabel('New folder name')).toHaveValue('work')
     // rename
     await page.getByRole('button', { name: 'Rename folder Work' }).click()
     await page.getByLabel('Rename folder Work').fill('Office')
     await page.getByRole('button', { name:'Save folder name' }).click()
     await expect(page.locator('.folder-item', {hasText:'Office'})).toBeVisible()
     await expect(page.getByText('Work')).toHaveCount(0)
+    // duplicate rename shows toast + inline error, stays in edit mode, preserves name
+    await page.getByRole('button', { name: 'Rename folder Office' }).click()
+    await page.getByLabel('Rename folder Office').fill('personal')
+    await page.getByRole('button', { name:'Save folder name' }).click()
+    await expect(page.getByRole('status').getByText('Folder already exists')).toBeVisible()
+    await expect(page.locator('.folder-sidebar .error')).toHaveText('Folder already exists')
+    await expect(page.getByLabel('Rename folder Office')).toBeVisible()
+    await expect(page.getByLabel('Rename folder Office')).toHaveValue('personal')
+    // a subsequent valid rename (back to Office) still works
+    await page.getByLabel('Rename folder Office').fill('Office')
+    await page.getByRole('button', { name:'Save folder name' }).click()
+    await expect(page.locator('.folder-item', {hasText:'Office'})).toBeVisible()
     // save link in folder
     await ensureSaveFormOpen(page)
     await page.locator('#save-url').fill('https://example.com/work1')
@@ -116,6 +135,12 @@ test.describe('Folders, Appearance, Color Schemes, Backup v2', () => {
       const a = document.activeElement
       return { isBody: a === document.body, isToggle: !!a?.classList?.contains('add-toggle') }
     })).toEqual({ isBody: false, isToggle: true })
+    // a subsequent valid create still works
+    await page.getByLabel('New folder name').fill('AfterDuplicate')
+    await page.getByRole('button', { name: 'Create folder', exact:true }).click()
+    await expect(page.locator('.folder-item', {hasText:'AfterDuplicate'})).toBeVisible()
+    // duplicate create/rename must never trigger Vue's unhandled-event warning
+    expect(unhandledWarnings).toEqual([])
   })
 
   test('Assign folder via edit and filtering + search', async ({page}) => {

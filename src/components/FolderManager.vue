@@ -26,9 +26,19 @@ function handleCreate() {
   error.value = ''
   const name = newFolderName.value.trim()
   if (!name) { error.value = 'Folder name required'; return }
+  // App reports the result synchronously through a done callback carried on the
+  // event, so expected business errors (duplicate name) stay an explicit
+  // result instead of being thrown through Vue's event system, where dev and
+  // production behave differently. The defensive catch only covers unexpected
+  // exceptions, never normal duplicate detection.
   try {
-    emit('create', name)
-    newFolderName.value = ''
+    emit('create', name, (result) => {
+      if (result && result.ok) {
+        newFolderName.value = ''
+      } else {
+        error.value = (result && result.error) || 'Failed'
+      }
+    })
   } catch (e) {
     error.value = e.message || 'Failed'
   }
@@ -47,10 +57,18 @@ function saveEdit(id) {
   error.value = ''
   const name = editingName.value.trim()
   if (!name) { error.value = 'Folder name required'; return }
+  // App reports the result synchronously through a done callback carried on the
+  // event; on failure we keep the input and stay in edit mode, on success we
+  // leave edit mode. Defensive catch only for unexpected exceptions.
   try {
-    emit('rename', { id, name })
-    editingId.value = null
-    editingName.value = ''
+    emit('rename', { id, name }, (result) => {
+      if (result && result.ok) {
+        editingId.value = null
+        editingName.value = ''
+      } else {
+        error.value = (result && result.error) || 'Failed'
+      }
+    })
   } catch (e) {
     error.value = e.message || 'Failed'
   }
