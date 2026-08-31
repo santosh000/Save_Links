@@ -107,10 +107,10 @@ export const COLOR_SCHEME_VALUES = ['ocean', 'forest', 'lavender', 'amber']
 export const DEFAULT_APPEARANCE = 'system'
 export const DEFAULT_COLOR_SCHEME = 'ocean'
 
-function sanitizeAppearance(v) {
+export function sanitizeAppearance(v) {
   return APPEARANCE_VALUES.includes(v) ? v : DEFAULT_APPEARANCE
 }
-function sanitizeColorScheme(v) {
+export function sanitizeColorScheme(v) {
   return COLOR_SCHEME_VALUES.includes(v) ? v : DEFAULT_COLOR_SCHEME
 }
 

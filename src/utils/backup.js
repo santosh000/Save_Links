@@ -1,21 +1,10 @@
 import { normalizeLink as normalizeCanonicalLink } from '../domain/link.js'
 import { getStorageKey } from './environment.js'
+import { DEFAULT_APPEARANCE, DEFAULT_COLOR_SCHEME, sanitizeAppearance, sanitizeColorScheme } from './storage.js'
 
 export const BACKUP_APP = 'Save_Link'
 export const BACKUP_VERSION = 2
 export const BACKUP_VERSION_MIN = 1
-
-export const APPEARANCE_VALUES = ['light', 'dark', 'system']
-export const COLOR_SCHEME_VALUES = ['ocean', 'forest', 'lavender', 'amber']
-export const DEFAULT_APPEARANCE = 'system'
-export const DEFAULT_COLOR_SCHEME = 'ocean'
-
-function sanitizeAppearance(v) {
-  return APPEARANCE_VALUES.includes(v) ? v : DEFAULT_APPEARANCE
-}
-function sanitizeColorScheme(v) {
-  return COLOR_SCHEME_VALUES.includes(v) ? v : DEFAULT_COLOR_SCHEME
-}
 
 function sanitizeFolder(raw) {
   if (typeof raw !== 'object' || raw === null) return null
