@@ -160,6 +160,20 @@ describe('useLinks', () => {
       expect(links.value[0].originalUrl).toBe('example.com/page')
     })
 
+    it('brands a newly saved link with savedFrom (broad platform, never a unique device)', async () => {
+      const { useLinks } = await import('./useLinks.js')
+      const { addLink } = useLinks()
+      const link = await addLink({
+        originalUrl: 'https://example.com/platform',
+        _prefetchedMeta: { title: 'T', description: '', image: '', domain: 'example.com' },
+        _prefetchedUrl: 'https://example.com/platform',
+      })
+      expect(link.createdAt).toBeTruthy()
+      expect(link.createdAt).toEqual(expect.any(String))
+      expect(typeof link.savedFrom).toBe('string')
+      expect(['Windows', 'macOS', 'Linux', 'Android', 'iOS', 'ChromeOS', 'Unknown']).toContain(link.savedFrom)
+    })
+
     it('cleans tracking parameters from saved URLs, keeps original input', async () => {
       const { useLinks } = await import('./useLinks.js')
       const { links, addLink } = useLinks()
@@ -255,6 +269,7 @@ describe('useLinks', () => {
         _prefetchedUrl: 'https://example.com/page?id=5',
       })
       const createdAt = original.createdAt
+      const savedFrom = original.savedFrom
       const updated = await replaceLink(original.id, {
         originalUrl: 'https://example.com/page?utm_source=google&id=5',
         title: 'New Title',
@@ -266,6 +281,7 @@ describe('useLinks', () => {
       expect(links.value).toHaveLength(1)
       expect(updated.id).toBe(original.id)
       expect(updated.createdAt).toBe(createdAt)
+      expect(updated.savedFrom).toBe(savedFrom)
       expect(updated.folderId).toBe('folder-1')
       expect(updated.tags).toEqual(['keep'])
       expect(updated.important).toBe(true)
@@ -505,6 +521,7 @@ describe('useLinks', () => {
         favorite: true,
       })
       const createdAt = links.value[0].createdAt
+      const savedFrom = links.value[0].savedFrom
       await flush()
       const l = links.value[0]
       expect(l.title).toBe('Real Title')
@@ -515,6 +532,7 @@ describe('useLinks', () => {
       expect(l.favorite).toBe(true)
       expect(l.status).toBe('both')
       expect(l.createdAt).toBe(createdAt)
+      expect(l.savedFrom).toBe(savedFrom)
     })
 
     it('background partial metadata preserves existing fallback values', async () => {

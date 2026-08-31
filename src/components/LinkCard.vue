@@ -2,6 +2,16 @@
 import { ref, watch } from 'vue'
 import { CATEGORIES } from '../utils/categorize.js'
 
+// Broad platform labels -> subtle, consistent icons (muted, not a large pill).
+const PLATFORM_ICONS = {
+  Windows: '💻',
+  macOS: '🍎',
+  Linux: '🐧',
+  Android: '📱',
+  iOS: '📱',
+  ChromeOS: '💻',
+}
+
 const props = defineProps({
   link: { type: Object, required: true },
   folders: { type: Array, default: () => [] }
@@ -51,6 +61,34 @@ function saveEdit() {
 function navUrl() {
   return props.link.normalizedUrl || props.link.url
 }
+
+function savedDateOf() {
+  const c = props.link.createdAt
+  if (!c) return null
+  const d = new Date(c)
+  return isNaN(d.getTime()) ? null : d
+}
+
+// Desktop: "Sep 1, 2026 · 12:18 AM"  /  narrow: "Sep 1 · 12:18 AM"
+function longDate() {
+  const d = savedDateOf()
+  if (!d) return ''
+  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(d)
+}
+function shortDate() {
+  const d = savedDateOf()
+  if (!d) return ''
+  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(d)
+}
+
+function platformName() {
+  return props.link.savedFrom && props.link.savedFrom !== 'Unknown' ? props.link.savedFrom : ''
+}
+function platformIcon() {
+  const n = platformName()
+  return n ? PLATFORM_ICONS[n] || '' : ''
+}
+
 </script>
 
 <template>
@@ -61,10 +99,19 @@ function navUrl() {
     <div class="body">
       <template v-if="!editing">
         <div class="top">
-          <span class="category">{{ link.category }}</span>
-          <span class="domain">{{ link.domain }}</span>
-          <span v-if="link.folderId" class="folder-badge">{{ folders.find(f=>f.id===link.folderId)?.name || 'Folder' }}</span>
-          <span v-else class="folder-badge muted-badge">Unfiled</span>
+          <div class="meta-left">
+            <span class="category">{{ link.category }}</span>
+            <span class="domain">{{ link.domain }}</span>
+            <span v-if="link.folderId" class="folder-badge">{{ folders.find(f=>f.id===link.folderId)?.name || 'Folder' }}</span>
+            <span v-else class="folder-badge muted-badge">Unfiled</span>
+          </div>
+          <div class="meta-right">
+            <span v-if="savedDateOf()" class="saved-when">
+              <time class="js-full" :datetime="link.createdAt">{{ longDate() }}</time>
+              <time class="js-short" :datetime="link.createdAt">{{ shortDate() }}</time>
+            </span>
+            <span v-if="platformName()" class="saved-from">{{ platformIcon() }} {{ platformName() }}</span>
+          </div>
         </div>
         <a :href="navUrl()" target="_blank" rel="noopener noreferrer" class="title">{{ link.title }}</a>
         <div class="url-line">
@@ -158,11 +205,27 @@ function navUrl() {
 .thumb-wrap { display: block; aspect-ratio: 16/9; overflow: hidden; background: var(--muted-bg); }
 .thumb { width: 100%; height: 100%; object-fit: cover; display: block; }
 .body { padding: 12px 14px 12px; display: flex; flex-direction: column; gap: 6px; }
-.top { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; font-size: 12px; flex-wrap: wrap; }
+.meta-left { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.meta-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.3;
+  text-align: right;
+  white-space: nowrap;
+}
+.saved-when { display: inline-flex; }
+.saved-from { display: inline-flex; align-items: center; gap: 4px; }
+.js-full { display: inline; }
+.js-short { display: none; }
 .category {
   background: var(--accent-bg);
   color: var(--accent);
-  border: 1px solid var(--accent-border);
   padding: 2px 8px;
   border-radius: 999px;
   font-weight: 600;
@@ -170,7 +233,7 @@ function navUrl() {
   letter-spacing: .02em;
 }
 .domain { color: var(--muted); font-size: 12px; }
-.folder-badge { background: var(--muted-bg); color: var(--text-h); border:1px solid var(--border); padding:2px 6px; border-radius:999px; font-size:11px; }
+.folder-badge { background: var(--muted-bg); color: var(--text-h); padding:2px 6px; border-radius:999px; font-size:11px; }
 .muted-badge { opacity:.7; }
 .title {
   font-weight: 700;
@@ -209,7 +272,6 @@ function navUrl() {
   color: var(--muted);
   padding: 3px 7px;
   border-radius: 999px;
-  border: 1px solid var(--border);
 }
 .actions {
   display: flex;
@@ -268,4 +330,9 @@ function navUrl() {
 .input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
 .edit-actions { display: flex; gap: 8px; margin-top: 6px; }
 .btn.sm { padding: 6px 10px; font-size: 13px; }
+
+@media (max-width: 520px) {
+  .js-full { display: none; }
+  .js-short { display: inline; }
+}
 </style>

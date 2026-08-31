@@ -23,12 +23,13 @@ describe('backup v2', () => {
 
   it('v2 export contains folders, appearance, colorScheme', () => {
     const folders = [{ id:'f1', name:'Work', createdAt:new Date().toISOString()}]
-    const links = [{ id:'1', originalUrl:'https://example.com', normalizedUrl:'https://example.com', url:'https://example.com', title:'T', description:'', image:'', tags:[], category:'Other', important:false, mustHave:false, favorite:false, folderId:'f1', domain:'example.com', createdAt:new Date().toISOString()}]
+    const links = [{ id:'1', originalUrl:'https://example.com', normalizedUrl:'https://example.com', url:'https://example.com', title:'T', description:'', image:'', tags:[], category:'Other', important:false, mustHave:false, favorite:false, folderId:'f1', domain:'example.com', createdAt:new Date().toISOString(), savedFrom:'Windows'}]
     const payload = createBackupPayload({ links, profile:{}, folders, appearance:'dark', colorScheme:'forest'})
     expect(payload.version).toBe(2)
     expect(payload.folders).toEqual(folders)
     expect(payload.settings).toEqual({ appearance:'dark', colorScheme:'forest'})
     expect(payload.links[0].folderId).toBe('f1')
+    expect(payload.links[0].savedFrom).toBe('Windows')
   })
 
   it('defaults when not provided', () => {
@@ -82,5 +83,22 @@ describe('backup v2', () => {
     const data = { app:'Save_Link', version:2, exportedAt:new Date().toISOString(), profile:{}, folders:[{id:'f1', name:'F'}], links:[{ originalUrl:'https://example.com', folderId:'f1', title:'T'}]}
     const norm = normalizeBackupData(data)
     expect(norm.links[0].folderId).toBe('f1')
+  })
+
+  it('export -> import round-trips savedFrom and createdAt', () => {
+    const links = [{ id:'1', originalUrl:'https://example.com', normalizedUrl:'https://example.com', url:'https://example.com', title:'T', description:'', image:'', tags:[], category:'Other', important:false, mustHave:false, favorite:false, folderId:null, domain:'example.com', createdAt:'2026-01-01T00:00:00.000Z', savedFrom:'Android'}]
+    const payload = createBackupPayload({ links, profile:{} })
+    expect(validateBackupPayload(payload).valid).toBe(true)
+    const norm = normalizeBackupData(payload)
+    expect(norm.links[0].createdAt).toBe('2026-01-01T00:00:00.000Z')
+    expect(norm.links[0].savedFrom).toBe('Android')
+  })
+
+  it('old backup without savedFrom imports safely as Unknown', () => {
+    const data = { app:'Save_Link', version:2, exportedAt:new Date().toISOString(), profile:{}, links:[{ id:'1', originalUrl:'https://example.com', normalizedUrl:'https://example.com', title:'T', createdAt:'2025-05-05T00:00:00.000Z'}]}
+    expect(validateBackupPayload(data).valid).toBe(true)
+    const norm = normalizeBackupData(data)
+    expect(norm.links[0].createdAt).toBe('2025-05-05T00:00:00.000Z')
+    expect(norm.links[0].savedFrom).toBe('Unknown')
   })
 })

@@ -60,6 +60,7 @@ export function createBackupPayload({ links, profile, folders, appearance, color
         folderId: typeof l.folderId === 'string' && l.folderId ? l.folderId : null,
         domain: l.domain,
         createdAt: l.createdAt,
+        savedFrom: l.savedFrom,
       }))
     : []
 

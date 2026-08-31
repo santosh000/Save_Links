@@ -4,6 +4,7 @@ import { bootState } from '../storage/migration.js'
 import { categorizeUrl, getDomain, normalizeUrl } from '../utils/categorize.js'
 import { normalizeLink } from '../domain/link.js'
 import { fetchMetadata, guessTitleSync } from '../utils/metadata.js'
+import { detectPlatform } from '../utils/device.js'
 
 export const STATUSES = ['important', 'must-have']
 
@@ -122,7 +123,7 @@ export function useLinks() {
     if (existing && !options.allowDuplicate) throw new DuplicateLinkError(existing)
 
     const spec = buildLinkSpec(payload, normalized)
-    const link = { id: newLinkId(), createdAt: new Date().toISOString(), ...spec }
+    const link = { id: newLinkId(), createdAt: new Date().toISOString(), savedFrom: detectPlatform(), ...spec }
     links.value.unshift(link)
     enrichMetadata(link.id, normalized, payload)
     return link

@@ -130,17 +130,16 @@ function handleDelete(id) {
 .create-row .btn { align-self: stretch; white-space: nowrap; height: auto; }
 .nav-item {
   display:flex; align-items:center; gap:8px; width:100%;
-  background: var(--muted-bg);
-  border:1px solid var(--border);
-  border-radius:10px;
+  background:none; border:none;
+  border-radius:8px;
   padding:8px 10px;
   cursor:pointer;
   font-size:13px; font-weight:700; color:var(--text-h);
   text-align:left;
 }
-.nav-item:hover { border-color: var(--accent-border); }
-.nav-item + .nav-item { margin-top: 8px; }
-.nav-item.active { background: var(--accent-bg); border-color: var(--accent-border); color: var(--accent); }
+.nav-item:hover { background: var(--muted-bg); }
+.nav-item + .nav-item { margin-top: 2px; }
+.nav-item.active { background: var(--accent-bg); color: var(--accent); }
 .nav-icon { font-size:14px; }
 .input {
   flex:1;
@@ -159,13 +158,11 @@ function handleDelete(id) {
 .folder-list { list-style:none; padding:0; margin:12px 0 0; display:flex; flex-direction:column; gap:6px; }
 .folder-item {
   display:flex; align-items:center; gap:6px;
-  background: var(--bg);
-  border:1px solid var(--border);
-  border-radius:10px;
+  border-radius:8px;
   padding:6px 8px;
 }
-.folder-item:hover { border-color: var(--accent-border); }
-.folder-item.active { background: var(--accent-bg); border-color: var(--accent-border); }
+.folder-item:hover { background: var(--muted-bg); }
+.folder-item.active { background: var(--accent-bg); }
 .folder-item.active .folder-name { color: var(--accent); }
 /* editing: the name row is hidden, so the input owns the line; Save/Cancel wrap
    to their own row when the edit controls cannot all share one line */
@@ -177,7 +174,7 @@ function handleDelete(id) {
   background:none; border:none; padding:2px 2px; cursor:pointer; text-align:left;
 }
 .folder-name { flex:1; font-size:13px; color:var(--text-h); font-weight:600; word-break:break-word; }
-.folder-count { font-size:12px; color:var(--muted); background: var(--card); border:1px solid var(--border); padding:2px 8px; border-radius:999px; }
+.folder-count { font-size:12px; color:var(--muted); padding:2px 4px; }
 .icon-btn {
   width:28px; height:28px; border-radius:8px; border:1px solid var(--border); background: var(--card); cursor:pointer; display:grid; place-items:center; font-size:12px;
 }

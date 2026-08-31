@@ -36,7 +36,7 @@ const maxCount = computed(() => {
         <div class="num">{{ mustHaveCount }}</div>
         <div class="label">Must Have</div>
       </div>
-      <div class="stat-card" style="background: var(--card); border-color: var(--border);">
+      <div class="stat-card" style="background: var(--muted-bg);">
         <div class="num">{{ favoriteCount }}</div>
         <div class="label">Favorites</div>
       </div>
@@ -71,13 +71,12 @@ h3 { margin: 0 0 12px; font-size: 14px; color: var(--text-h); }
 .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
 .stat-card {
   background: var(--bg);
-  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 10px 6px;
   text-align: center;
 }
-.stat-card.accent { background: var(--accent-bg); border-color: var(--accent-border); }
-.stat-card.dark { background: var(--text-h); color: var(--bg); border-color: transparent; }
+.stat-card.accent { background: var(--accent-bg); }
+.stat-card.dark { background: var(--text-h); color: var(--bg); }
 .stat-card.dark .label { color: var(--bg); opacity: .7; }
 .stat-card.dark .num { color: var(--bg); }
 .num { font-size: 17px; font-weight: 800; color: var(--text-h); line-height: 1; }

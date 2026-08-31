@@ -28,6 +28,7 @@ describe('normalizeLink', () => {
       folderId: 'f1',
       status: 'important',
       createdAt: '2024-01-01T00:00:00.000Z',
+      savedFrom: 'Unknown',
     }
     const again = normalizeLink(canonical)
     expect(again).toEqual(canonical)
@@ -152,6 +153,17 @@ describe('normalizeLink', () => {
     expect(l.normalizedUrl).toBe('')
     expect(l.important).toBe(false)
     expect(l.tags).toEqual([])
+  })
+
+  it('normalizes savedFrom (preserved string or Unknown), never assigns current device', () => {
+    // present string preserved
+    expect(normalizeLink({ originalUrl: 'https://x.com', savedFrom: 'Windows' }).savedFrom).toBe('Windows')
+    // missing -> Unknown (no device assignment for old links)
+    expect(normalizeLink({ originalUrl: 'https://x.com' }).savedFrom).toBe('Unknown')
+    // malformed -> Unknown, and normalizer never throws
+    expect(normalizeLink({ originalUrl: 'https://x.com', savedFrom: 42 }).savedFrom).toBe('Unknown')
+    expect(normalizeLink({ originalUrl: 'https://x.com', savedFrom: { x: 1 } }).savedFrom).toBe('Unknown')
+    expect(() => normalizeLink({ originalUrl: 'https://x.com', savedFrom: ['w'] })).not.toThrow()
   })
 })
 

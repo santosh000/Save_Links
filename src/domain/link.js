@@ -22,6 +22,7 @@
 //   folderId: string|null,
 //   status: string|null,      // legacy derived flag: 'important'|'must-have'|'both'|null
 //   createdAt: string,        // ISO; preserved when present, else backfilled
+//   savedFrom: string,        // broad platform/OS; 'Unknown' when not set/preserved
 // }
 //
 // Deterministic and idempotent: a canonical record in produces an identical
@@ -82,5 +83,6 @@ export function normalizeLink(raw) {
     folderId: str(raw.folderId).trim() || null,
     status: important && mustHave ? 'both' : important ? 'important' : mustHave ? 'must-have' : null, // legacy compat, derived
     createdAt: str(raw.createdAt) || new Date().toISOString(),
+    savedFrom: str(raw.savedFrom) || 'Unknown',
   }
 }
