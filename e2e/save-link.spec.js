@@ -469,6 +469,50 @@ test.describe('Save Links E2E', () => {
     await expect(page.getByRole('dialog')).toHaveCount(0)
   })
 
+  test('U. Duplicate dialog focus returns to compact bar after form collapses', async ({ page }) => {
+    await page.goto('/')
+    await saveLink(page, { url: 'https://example.com/dup-focus', title: 'Dup Focus' })
+    await expect(page.locator('article.card')).toHaveCount(1)
+
+    // save the same URL again to trigger the duplicate dialog
+    await saveLink(page, { url: 'https://example.com/dup-focus', title: 'Again' })
+    const appDialog = page.getByRole('dialog')
+    await expect(appDialog).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Link already saved' })).toBeVisible()
+
+    // focus should have entered the dialog
+    const focusedInDialog = await page.evaluate(() => {
+      const dialog = document.querySelector('[role="dialog"]')
+      return dialog?.contains(document.activeElement)
+    })
+    expect(focusedInDialog).toBe(true)
+
+    // the save form should have collapsed after the first save
+    await expect(page.locator('#save-url')).not.toBeVisible()
+
+    // Cancel: focus should return to the compact bar toggle, not <body>
+    await appDialog.getByRole('button', { name: 'Cancel' }).click()
+    await expect(appDialog).toHaveCount(0)
+    const isOnToggle = await page.evaluate(() => {
+      const toggle = document.querySelector('.add-toggle')
+      return toggle && document.activeElement === toggle
+    })
+    expect(isOnToggle).toBe(true)
+    const focusedTag = await page.evaluate(() => document.activeElement?.tagName)
+    expect(focusedTag).not.toBe('BODY')
+
+    // repeat: Escape path
+    await saveLink(page, { url: 'https://example.com/dup-focus', title: 'Again 2' })
+    await expect(appDialog).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(appDialog).toHaveCount(0)
+    const isOnToggleAfterEscape = await page.evaluate(() => {
+      const toggle = document.querySelector('.add-toggle')
+      return toggle && document.activeElement === toggle
+    })
+    expect(isOnToggleAfterEscape).toBe(true)
+  })
+
   test('T. Duplicate dialog on mobile (320px and 375px)', async ({ page }) => {
     for (const width of [320, 375]) {
       await clearStorage(page)

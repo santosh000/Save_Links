@@ -177,8 +177,13 @@ function closeDialog() {
   dialog.value = null
   const el = lastTrigger.value
   lastTrigger.value = null
-  // return focus to whatever opened the dialog (no-op if it was torn down, e.g. collapsed form)
-  if (el && document.body.contains(el)) el.focus()
+  // return focus to whatever opened the dialog; fall back to the compact bar toggle
+  if (el && document.body.contains(el)) {
+    el.focus()
+  } else {
+    const fallback = document.querySelector('.add-toggle')
+    if (fallback) fallback.focus()
+  }
 }
 
 function onDialogChoose(value) {
