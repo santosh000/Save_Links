@@ -4,9 +4,11 @@ import { CATEGORIES } from '../utils/categorize.js'
 defineProps({
   category: String,
   folder: String,
-  folders: { type: Array, default: () => [] }
+  sort: String,
+  folders: { type: Array, default: () => [] },
+  sortOptions: { type: Array, default: () => [] }
 })
-const emit = defineEmits(['update:category', 'update:folder'])
+const emit = defineEmits(['update:category', 'update:folder', 'update:sort'])
 </script>
 
 <template>
@@ -24,6 +26,12 @@ const emit = defineEmits(['update:category', 'update:folder'])
         <option v-for="f in folders" :key="f.id" :value="f.id">{{ f.name }}</option>
       </select>
     </div>
+    <div class="sort">
+      <label for="filter-sort" class="sort-label">Sort by</label>
+      <select id="filter-sort" :value="sort" @change="emit('update:sort', $event.target.value)" class="select" aria-label="Sort by">
+        <option v-for="o in sortOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+      </select>
+    </div>
   </div>
 </template>
 
@@ -36,6 +44,14 @@ const emit = defineEmits(['update:category', 'update:folder'])
   margin-bottom: 16px;
 }
 .selects { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; width: 100%; }
+.sort {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.sort-label { font-size: 12px; font-weight: 600; color: var(--text-h); white-space: nowrap; }
+.sort .select { flex: 1; min-width: 0; }
 .select {
   padding: 8px 10px;
   border-radius: 12px;

@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { sortLinks, SORT_OPTIONS, DEFAULT_SORT } from './utils/sort.js'
 import { useLinks, DuplicateLinkError } from './composables/useLinks.js'
 import { useProfile } from './composables/useProfile.js'
 import { useFolders } from './composables/useFolders.js'
@@ -27,6 +28,10 @@ const search = ref('')
 const filterCategory = ref('')
 const filterStatus = ref('')
 const filterFolder = ref('')
+// Display-order sort (session-only preference; defaults to newest first).
+// Kept in memory only — persisting it would require widening the settings
+// blob, which is out of scope for this milestone.
+const sortBy = ref(DEFAULT_SORT)
 // ONE source of truth for the responsive drawers: 'folders' | 'filters' | null.
 // The two drawers are mutually exclusive by construction — toggling one open
 // can never leave the other open (a single assignment per interaction).
@@ -256,7 +261,7 @@ const filteredLinks = computed(() => {
   const q = search.value.trim().toLowerCase()
   // build folder name map for search
   const folderNameById = new Map(folders.value.map(f=>[f.id, f.name]))
-  return links.value.filter(l => {
+  const result = links.value.filter(l => {
     if (filterFolder.value) {
       if (filterFolder.value === '__unfiled') {
         if (l.folderId) return false
@@ -277,6 +282,9 @@ const filteredLinks = computed(() => {
     }
     return true
   })
+  // Display-order only (after filtering/search/folder logic). Returns a new
+  // array and never mutates the stored records.
+  return sortLinks(result, sortBy.value)
 })
 
 const hasLinks = computed(() => links.value.length > 0)
@@ -370,7 +378,9 @@ const hasLinks = computed(() => links.value.length > 0)
         <SearchFilter
           v-model:category="filterCategory"
           v-model:folder="filterFolder"
+          v-model:sort="sortBy"
           :folders="folders"
+          :sort-options="SORT_OPTIONS"
         />
         <StatsPanel
           :total="total"
