@@ -43,6 +43,7 @@ Save_Links is a Progressive Web App, so once you have opened it online it also w
 - **Favorites, Important, Must Have** — mark links for quick access or priority
 - **Search** — full-text search across every saved link
 - **Filters** — combine filters by flag (important, must have, favorite), category, folder, and status
+- **Sorting** — order your saved links by Newest first, Oldest first, Title A–Z, or Title Z–A
 - **Appearance** — light, dark, or system theme with a choice of four accent colors; your preference is remembered
 - **Installable app** — Save_Links can be installed on your device like a native app
 - **Responsive layouts** — clean desktop, tablet, and mobile layouts; on smaller screens the folders and filters/tools panels open one at a time
@@ -71,6 +72,17 @@ The original URL you entered is still shown, while the saved navigation URL is t
 ## Metadata
 
 Save_Links saves your link immediately, so metadata never delays saving. Title, description, and preview image are filled in when a site provides usable information, and retrieval happens in the background when needed. Some websites do not allow their page information to be read, so the title, description, or preview image may not always be available. The link is still saved either way, and you can edit any of these fields yourself.
+
+## Sorting
+
+You can reorder the list of saved links to suit how you like to work:
+
+- **Newest first** — the most recently saved links appear at the top (the default)
+- **Oldest first** — the longest-saved links appear at the top
+- **Title A–Z** — alphabetical by title, ignoring capital letters
+- **Title Z–A** — reverse alphabetical by title
+
+Sorting works together with search, filters, and folders — it reorders only the links currently shown, and it never changes where your links are stored.
 
 ## Backup and Restore
 
@@ -132,6 +144,7 @@ Save_Links is built with **Vue 3** and **Vite**, stores data in the browser's **
 - [x] URL cleaning of common tracking parameters
 - [x] Duplicate detection with Replace / Add another / Cancel
 - [x] Background metadata (title, description, preview image)
+- [x] Sorting saved links (Newest first, Oldest first, Title A–Z, Title Z–A)
 - [x] Backup and restore, including older backup formats
 - [x] Offline use, installation, and safe migration of older data
 - [x] Responsive desktop, tablet, and mobile layouts
@@ -140,7 +153,6 @@ Save_Links is built with **Vue 3** and **Vite**, stores data in the browser's **
 
 Planned (local improvements):
 
-- [ ] Sorting saved links
 - [ ] Smart tag suggestions
 - [ ] Improved metadata coverage and a way to refresh it
 - [ ] Link health checking
