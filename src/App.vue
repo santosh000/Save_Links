@@ -404,7 +404,7 @@ const hasLinks = computed(() => links.value.length > 0)
       @close="closeDialog"
     />
 
-    <footer class="footer">Local storage only • No backend • No auth • Data stays in this browser • v{{ appVersion }}</footer>
+    <footer class="footer">Local data only • No account • No cloud sync • Data stays on this device • v{{ appVersion }}</footer>
   </div>
 </template>
 
