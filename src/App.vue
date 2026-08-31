@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { sortLinks, SORT_OPTIONS, DEFAULT_SORT } from './utils/sort.js'
 import { useLinks, DuplicateLinkError } from './composables/useLinks.js'
 import { useProfile } from './composables/useProfile.js'
@@ -182,38 +182,48 @@ function closeDialog() {
   dialog.value = null
   const el = lastTrigger.value
   lastTrigger.value = null
-  // return focus to whatever opened the dialog; fall back to the compact bar toggle
-  if (el && document.body.contains(el)) {
-    el.focus()
-  } else {
-    const fallback = document.querySelector('.add-toggle')
-    if (fallback) fallback.focus()
-  }
+  // return focus to whatever opened the dialog; fall back to the compact bar toggle.
+  // Runs after the DOM flush so a confirm that removed the trigger (folder/link
+  // delete) has actually detached it — otherwise focus returns to a node that is
+  // removed moments later and drops to <body>.
+  nextTick(() => {
+    if (el && document.body.contains(el)) {
+      el.focus()
+    } else {
+      const fallback = document.querySelector('.add-toggle')
+      if (fallback) fallback.focus()
+    }
+  })
 }
 
 function onDialogChoose(value) {
   const cfg = dialog.value
-  closeDialog()
-  if (!cfg) return
-  if (cfg.kind === 'duplicate') {
-    handleDuplicateChoice(value)
-  } else if (cfg.kind === 'delete-link') {
-    if (value === 'confirm') {
-      removeLink(cfg.id)
-      showToast('Link deleted')
+  // Run the chosen action BEFORE closing, so that a confirm that removes the
+  // trigger control from the DOM (e.g. folder/link delete) has already
+  // detached it when closeDialog() restores focus. Otherwise focus is first
+  // returned to the trigger and then dropped to <body> when it is removed.
+  if (cfg) {
+    if (cfg.kind === 'duplicate') {
+      handleDuplicateChoice(value)
+    } else if (cfg.kind === 'delete-link') {
+      if (value === 'confirm') {
+        removeLink(cfg.id)
+        showToast('Link deleted')
+      }
+    } else if (cfg.kind === 'delete-folder') {
+      if (value === 'confirm') {
+        deleteFolder(cfg.id)
+        moveLinksFromFolder(cfg.id)
+        // if filtered folder was deleted, reset filter
+        if (filterFolder.value === cfg.id) filterFolder.value = ''
+        showToast('Folder deleted')
+      }
+    } else if (cfg.kind === 'import') {
+      if (value === 'confirm' && pendingImport.value) handleImportBackup(pendingImport.value)
+      pendingImport.value = null
     }
-  } else if (cfg.kind === 'delete-folder') {
-    if (value === 'confirm') {
-      deleteFolder(cfg.id)
-      moveLinksFromFolder(cfg.id)
-      // if filtered folder was deleted, reset filter
-      if (filterFolder.value === cfg.id) filterFolder.value = ''
-      showToast('Folder deleted')
-    }
-  } else if (cfg.kind === 'import') {
-    if (value === 'confirm' && pendingImport.value) handleImportBackup(pendingImport.value)
-    pendingImport.value = null
   }
+  closeDialog()
 }
 
 function handleEdit(id, patch) {

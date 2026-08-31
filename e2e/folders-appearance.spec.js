@@ -110,6 +110,12 @@ test.describe('Folders, Appearance, Color Schemes, Backup v2', () => {
     // link still exists and folder badge shows Unfiled
     await expect(page.locator('article.card').first()).toContainText('Work link')
     await expect(page.locator('article.card').first()).toContainText('Unfiled')
+    // after CONFIRM deletion the trigger button is gone, so focus must fall back
+    // to the surviving "Save a link" toggle rather than dropping to <body>
+    await expect.poll(() => page.evaluate(() => {
+      const a = document.activeElement
+      return { isBody: a === document.body, isToggle: !!a?.classList?.contains('add-toggle') }
+    })).toEqual({ isBody: false, isToggle: true })
   })
 
   test('Assign folder via edit and filtering + search', async ({page}) => {
