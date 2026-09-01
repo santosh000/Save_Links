@@ -1,0 +1,191 @@
+// Save_Links Worker — Phase 3D: authenticated API boundary.
+//
+// The /api/* boundary is the point where a browser request, a session cookie,
+// and a D1 account come together. Chunk 1 proved the read boundary:
+//   GET /api/me  -> 200 { authenticated: true, accountId } | 401 | 503 | 500
+//
+// Chunk 2 adds the first real state-changing endpoint:
+//   POST /api/session/refresh -> 200 { ok: true } + fresh session cookie
+//   | 401 | 403 | 503 | 500
+//
+// Design constraints honored here:
+//   - GET /api/me is READ-ONLY: no CSRF token, no Origin/Referer gate (a
+//     cross-site read is harmless and same-origin policy already guards it).
+//     It also deliberately never inspects APPROVED_ORIGINS.
+//   - POST /api/session/refresh IS state-changing, so it enforces the full
+//     boundary FIRST: POST (router) -> Origin/Referer gate -> authenticated
+//     session -> account. Origin validation fails closed and never derives a
+//     trusted origin from Host/X-Forwarded-Host/X-Forwarded-Proto, query
+//     params, or the request body — only from APPROVED_ORIGINS.
+//   - Session resolution + rotation REUSE the existing authentication
+//     machinery (auth.js readSessionCookie/setCookieHeader/sessionCookieConfig,
+//     store.js getSessionByToken/getAccount/revokeSessionByToken/createSession)
+//     — no duplicated hashing/cookie-parse/lookup logic.
+//   - Nothing here touches application data, IndexedDB, or sync. Local-first
+//     behavior stays completely independent.
+
+import {
+  getAccount,
+  getSessionByToken,
+  revokeSessionByToken,
+  createSession,
+} from './db/store.js'
+import {
+  jsonResponse,
+  parseApprovedOrigins,
+  readSessionCookie,
+  setCookieHeader,
+  sessionCookieConfig,
+  SESSION_TTL_SECONDS,
+} from './auth.js'
+
+// ---- GET /api/me --------------------------------------------------------------
+
+/**
+ * Authenticated "who am I" probe for the API boundary.
+ *
+ * Resolution order (server-side, all-or-nothing per the cleanup chain):
+ *   cookie present -> token hashed (getSessionByToken) -> session EXISTS, NOT
+ *   revoked, NOT expired (all enforced INSIDE the SQL) -> account EXISTS.
+ * Every failure along that chain is a generic 401 { error: 'unauthenticated' }
+ * so network observers cannot distinguish absent/malformed/unknown/expired/
+ * revoked conditions or a missing account.
+ *
+ * A missing DB binding is infrastructure, not auth state: 503 (never treat the
+ * user as authenticated). An unexpected error is a generic 500; internal
+ * exception messages are never exposed. The response body contains only the
+ * opaque D1 account id — never the raw token, the GitHub provider subject, any
+ * OAuth token, or any DB detail.
+ */
+export async function handleApiMe(request, env, { now = Date.now() } = {}) {
+  if (!env.DB) return jsonResponse(503, { error: 'unavailable' })
+  const presented = readSessionCookie(request)
+  if (!presented) return jsonResponse(401, { error: 'unauthenticated' })
+  try {
+    const session = await getSessionByToken(env.DB, { token: presented.token, now })
+    if (!session) return jsonResponse(401, { error: 'unauthenticated' })
+    const account = await getAccount(env.DB, { accountId: session.account_id })
+    if (!account) return jsonResponse(401, { error: 'unauthenticated' })
+    return jsonResponse(200, { authenticated: true, accountId: account.account_id })
+  } catch {
+    return jsonResponse(500, { error: 'server_error' })
+  }
+}
+
+// ---- POST /api/session/refresh ------------------------------------------------
+
+/**
+ * Rotate the browser's authenticated session: revoke the presented session,
+ * create a fresh random session, and hand out a new session cookie.
+ *
+ * Security flow (strict order, POST enforced by the router):
+ *   1. POST                                          (router)
+ *   2. Origin/Referer gate against APPROVED_ORIGINS  (requireApiOrigin)
+ *   3. read the presented session cookie
+ *   4. hash the raw token (inside getSessionByToken)
+ *   5. resolve the ACTIVE session (revoked/expired -> null)
+ *   6. resolve the account
+ *   7. revoke the presented session
+ *   8. create a fresh random session (only its hash persisted)
+ *   9. set the fresh session cookie (existing prod/dev cookie rules)
+ *  10. return success
+ *
+ * The trusted origin comes ONLY from APPROVED_ORIGINS — never from
+ * Host/X-Forwarded-Host/X-Forwarded-Proto, query params, or the body (and an
+ * account id / token / redirect URL are never accepted from the body).
+ *
+ * Atomicity: this is not a single DB transaction. Steps 7-8 are ordered
+ * revoke-then-create (the same sequence the OAuth callback already uses). If
+ * revocation succeeds but creation fails, we return a generic 500 and NO
+ * replacement cookie — never a success response and never a misleading
+ * replacement cookie. The degradation is a logged-out session, which is safe
+ * (a client-initiated rotation that fails simply ends the session); the old
+ * token is already revoked so it cannot linger valid.
+ *
+ * Authentication failures (missing/malformed/unknown/expired/revoked session
+ * or missing account) are all a uniform generic 401 - nothing is rotated and
+ * nothing is revealed. An origin failure is 403/503 *before* any session work,
+ * so nothing is revoked or created. A missing DB or an unexpected error is a
+ * generic 500.
+ *
+ * The success body is minimal ({ ok: true }) and contains no token, GitHub
+ * subject, OAuth token, session row, or DB detail. Cache-Control: no-store and
+ * the shared security headers come from jsonResponse.
+ */
+export async function handleApiSessionRefresh(request, env, { now = Date.now() } = {}) {
+  if (!env.DB) return jsonResponse(503, { error: 'unavailable' })
+
+  // Origin/Referer gate FIRST: fail closed before doing any session work.
+  const gate = requireApiOrigin(request, env)
+  if (gate.status) {
+    // 503 = APPROVED_ORIGINS unset/empty (misconfigured); 403 = cross-site.
+    const body = gate.status === 503 ? { error: 'unavailable' } : { error: 'forbidden' }
+    return jsonResponse(gate.status, body)
+  }
+
+  const presented = readSessionCookie(request)
+  if (!presented) return jsonResponse(401, { error: 'unauthenticated' })
+
+  try {
+    const session = await getSessionByToken(env.DB, { token: presented.token, now })
+    if (!session) return jsonResponse(401, { error: 'unauthenticated' })
+    const account = await getAccount(env.DB, { accountId: session.account_id })
+    if (!account) return jsonResponse(401, { error: 'unauthenticated' })
+
+    // Authenticated + origin-approved: rotate. Revoke first, then create.
+    await revokeSessionByToken(env.DB, { token: presented.token, now })
+    const fresh = await createSession(env.DB, { accountId: account.account_id, now })
+
+    const { name, secure } = sessionCookieConfig(new URL(request.url))
+    const cookie = setCookieHeader(name, fresh.token, {
+      maxAgeSeconds: SESSION_TTL_SECONDS,
+      secure,
+    })
+    return jsonResponse(200, { ok: true }, { 'Set-Cookie': [cookie] })
+  } catch {
+    return jsonResponse(500, { error: 'server_error' })
+  }
+}
+
+// ---- Reusable API boundary convention (for state-changing endpoints) ----------
+
+/**
+ * Origin/Referer gate for state-changing /api/* endpoints (used by
+ * POST /api/session/refresh).
+ *
+ * Intended usage by the first mutation endpoint:
+ *   - require POST (method enforcement lives in the router)
+ *   - await-require an authenticated session
+ *   - call requireApiOrigin(request, env) and return the error status when
+ *     `ok` is false.
+ *
+ * It verifies the request's Origin (falling back to Referer, per the
+ * SameSite/OAuth npm guidance) against APPROVED_ORIGINS and fails closed:
+ *   { ok: true }            origin is on the approved list
+ *   { status: 503 }         APPROVED_ORIGINS unset/empty (misconfigured)
+ *   { status: 403 }         cross-site or missing origin/referer — reject
+ *
+ * Store-closing note: SameSite=Lax withholds the session cookie on cross-site
+ * POSTs, so a cross-site mutation arrives sessionless and is 401 before this
+ * even runs; this gate is defense-in-depth + explicit allowlisting, not the
+ * only control. NOT used by GET/read-only endpoints like /api/me.
+ *
+ * @returns {{ok: true}|{status: number}}
+ */
+export function requireApiOrigin(request, env) {
+  const approved = parseApprovedOrigins(env.APPROVED_ORIGINS)
+  if (approved.length === 0) return { status: 503 }
+  let origin = request.headers.get('origin')
+  if (!origin) {
+    const ref = request.headers.get('referer')
+    if (ref) {
+      try {
+        origin = new URL(ref).origin
+      } catch {
+        origin = null
+      }
+    }
+  }
+  if (!origin || !approved.includes(origin)) return { status: 403 }
+  return { ok: true }
+}

@@ -13,12 +13,17 @@
 //                                 create session, hand out browser cookie
 //   GET  /auth/me            -> current authenticated identity (AuthUser shape)
 //   POST /auth/logout        -> revoke session + clear session cookie(s)
+//   GET  /api/me             -> authenticated API boundary probe (200/401/503/500)
+//   POST /api/session/refresh -> rotate session: revoke old, issue fresh cookie
+//                                (200 {ok:true} | 401 | 403 | 503 | 500)
 // Worker-generated responses carry their own security headers (public/_headers
 // applies only to static-asset responses, not to script responses).
 //
-// Still NOT implemented (later phases): /api/*, session validation on app
-// requests beyond /auth/me, the HTTP AuthAdapter bridge, any frontend coupling.
+// Still NOT implemented (later phases): /api/* beyond /api/me and
+// /api/session/refresh, session validation on app requests beyond these
+// handlers, the HTTP AuthAdapter bridge, any frontend coupling, cloud sync.
 import { handleOAuthLogin, handleOAuthCallback, handleAuthMe, handleAuthLogout } from './auth.js'
+import { handleApiMe, handleApiSessionRefresh } from './api.js'
 
 const AUTH_ROUTES = new Map([
   ['/auth/github/login', { allow: ['GET'], handler: handleOAuthLogin }],
@@ -27,22 +32,42 @@ const AUTH_ROUTES = new Map([
   ['/auth/logout', { allow: ['POST'], handler: handleAuthLogout }],
 ])
 
+const API_ROUTES = new Map([
+  ['/api/me', { allow: ['GET'], handler: handleApiMe }],
+  ['/api/session/refresh', { allow: ['POST'], handler: handleApiSessionRefresh }],
+])
+
+function methodNotAllowed(allow) {
+  return new Response('Method Not Allowed', {
+    status: 405,
+    headers: {
+      Allow: allow.join(', '),
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+    },
+  })
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url)
-    const route = AUTH_ROUTES.get(url.pathname)
+    const route = AUTH_ROUTES.get(url.pathname) ?? API_ROUTES.get(url.pathname)
     if (route) {
       if (!route.allow.includes(request.method)) {
-        return new Response('Method Not Allowed', {
-          status: 405,
-          headers: {
-            Allow: route.allow.join(', '),
-            'Cache-Control': 'no-store',
-            'X-Content-Type-Options': 'nosniff',
-          },
-        })
+        return methodNotAllowed(route.allow)
       }
       return route.handler(request, env)
+    }
+    // Unknown /api/* path: the API is not the SPA — 404, never the index.html
+    // fallback (an unknown API path must not be mistaken for a page load).
+    if (url.pathname.startsWith('/api/')) {
+      return new Response('Not Found', {
+        status: 404,
+        headers: {
+          'Cache-Control': 'no-store',
+          'X-Content-Type-Options': 'nosniff',
+        },
+      })
     }
     return env.ASSETS.fetch(request)
   },

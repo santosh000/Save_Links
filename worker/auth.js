@@ -51,7 +51,7 @@ import {
 } from './db/store.js'
 
 const GITHUB_PROVIDER = 'github'
-const SESSION_TTL_SECONDS = Math.floor(DEFAULT_SESSION_TTL_MS / 1000)
+export const SESSION_TTL_SECONDS = Math.floor(DEFAULT_SESSION_TTL_MS / 1000)
 
 function responseHeaders(extra = {}) {
   return {
@@ -89,7 +89,7 @@ function errorResponse(status, message, cookies = []) {
   )
 }
 
-function setCookieHeader(name, value, { maxAgeSeconds, secure, path = '/', sameSite = 'Lax' }) {
+export function setCookieHeader(name, value, { maxAgeSeconds, secure, path = '/', sameSite = 'Lax' }) {
   const parts = [
     `${name}=${encodeURIComponent(value)}`,
     `Path=${path}`,
@@ -118,7 +118,7 @@ const DEV_SESSION_COOKIE = 'save_links_session_dev'
  * production traffic (the only path that reaches https) always takes the
  * `__Host-` branch above. Never weaken production for the dev case.
  */
-function sessionCookieConfig(url) {
+export function sessionCookieConfig(url) {
   const secure = url.protocol === 'https:'
   if (!secure) {
     return { name: DEV_SESSION_COOKIE, secure: false }
@@ -131,7 +131,7 @@ function redirectResponse(location, cookies = []) {
 }
 
 /** JSON response with the shared hardening headers (no-store + nosniff + no frame). */
-function jsonResponse(status, body, extraHeaders = {}) {
+export function jsonResponse(status, body, extraHeaders = {}) {
   const headers = new Headers(
     responseHeaders({ 'Content-Type': 'application/json; charset=utf-8' })
   )
@@ -168,7 +168,7 @@ function readCookie(request, name) {
  *
  * @returns {{name: string, token: string}|null}
  */
-function readSessionCookie(request) {
+export function readSessionCookie(request) {
   const host = readCookie(request, HOST_SESSION_COOKIE)
   if (host) return { name: HOST_SESSION_COOKIE, token: host }
   const dev = readCookie(request, DEV_SESSION_COOKIE)
