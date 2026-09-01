@@ -56,6 +56,22 @@ Phase 3A additionally introduced a Workers project (`wrangler.jsonc` + `worker/i
 - `npm run deploy:worker` — deploys the Worker to its own `save-links.<account>.workers.dev` URL. This is a **non-production** preview environment; requests to static assets are free and unlimited on the Free tier, and the Worker script itself is not invoked on the asset-serving path. It deploys to whichever Cloudflare account `wrangler` is logged into (check with `wrangler whoami`); the Workers project name `save-links` is separate from the Pages project `savelinks`.
 - `public/_headers` — security headers applied by both the Workers static-assets layer and Pages (same file format).
 
+### D1 (Phase 3B: accounts + sessions)
+
+The Worker binds the local D1 database `save-links-db` as `DB` (`wrangler.jsonc` → `d1_databases`). The browser never talks to D1; only the Worker-side data layer (`worker/db/store.js`) does, and it has no HTTP routes yet (Phase 3C adds them).
+
+Local development (no Cloudflare credentials required):
+
+```bash
+npx wrangler d1 migrations apply save-links-db --local   # apply migrations/ to the local D1
+npx wrangler d1 execute save-links-db --local --command "SELECT count(*) FROM users"
+npx wrangler dev                                          # local Worker runtime with the local D1 binding
+```
+
+The data layer is unit-tested against real SQLite (`worker/db/store.test.js` runs `migrations/` through `node:sqlite`) — `npm test` covers it.
+
+**Production setup (do NOT do this yet — no production D1 exists and none may be created by this repository until approved):** create the remote database (`npx wrangler d1 create save-links-db`), set its real `database_id` in `wrangler.jsonc` (currently a zero-UUID placeholder that intentionally makes `wrangler deploy` fail — a guard against deploying without a database), then apply migrations with `--remote`.
+
 Do not deploy the new Worker architecture to production (`savelinks.pages.dev`) until explicitly instructed.
 
 ## Production Verification

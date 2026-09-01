@@ -44,7 +44,7 @@ export default defineConfig({
     environmentOptions: {
       jsdom: { url: 'http://localhost' },
     },
-    include: ['src/**/*.{test,spec}.{js,ts}'],
+    include: ['src/**/*.{test,spec}.{js,ts}', 'worker/**/*.{test,spec}.{js,ts}'],
     exclude: ['e2e/**', 'node_modules/**', 'dist/**'],
   },
 })

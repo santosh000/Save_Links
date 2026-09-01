@@ -24,5 +24,18 @@
     // index.html (200), while real files (/sw.js, manifest, /assets/*) are
     // never shadowed. https://developers.cloudflare.com/workers/static-assets/routing/single-page-application/
     "not_found_handling": "single-page-application"
-  }
+  },
+  // Phase 3B: application accounts + server-side sessions (worker/db/store.js).
+  // Local development / local migrations use only database_name (the
+  // database_id below is a zero-UUID PLACEHOLDER that makes any real
+  // `wrangler deploy` fail until the production database exists and its real
+  // id is set here — an intentional guard; see MAINTAINERS.md). No production
+  // D1 database exists or may be created by this repository yet.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "save-links-db",
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ]
 }
