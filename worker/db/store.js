@@ -95,6 +95,44 @@ export async function getAccountIdByProviderIdentity(db, { provider, providerSub
     .first()
 }
 
+/**
+ * Resolve a provider identity to an application account, creating the account
+ * + identity mapping atomically on first sight (used by the OAuth callback).
+ *
+ * Create path runs as ONE D1 `batch` (a SQL transaction): either both the
+ * users row and the auth_identities row commit, or neither does — no
+ * orphaned identity or account. If a concurrent callback creates the same
+ * identity first, the batch fails on the (provider, provider_subject) PRIMARY
+ * KEY and we simply re-resolve the winner. Never merges or duplicates
+ * accounts, never matches on email.
+ *
+ * @returns {Promise<{account_id: string, created: boolean, createdAt: number}>}
+ */
+export async function resolveAccountByProvider(db, { provider, providerSubject, accountId = crypto.randomUUID(), now = Date.now() } = {}) {
+  requireNonEmpty(provider, 'provider')
+  requireNonEmpty(providerSubject, 'providerSubject')
+  requireAccountId(accountId)
+  requireEpochMs(now)
+
+  const existing = await getAccountIdByProviderIdentity(db, { provider, providerSubject })
+  if (existing) return { account_id: existing.account_id, created: false, createdAt: now }
+
+  try {
+    await db.batch([
+      db.prepare('INSERT INTO users (account_id, created_at) VALUES (?, ?)').bind(accountId, now),
+      db.prepare('INSERT INTO auth_identities (provider, provider_subject, account_id, created_at) VALUES (?, ?, ?, ?)')
+        .bind(provider, providerSubject, accountId, now),
+    ])
+    return { account_id: accountId, created: true, createdAt: now }
+  } catch {
+    // Race: another callback created this identity between our lookup and our
+    // batch. Re-resolve; a genuine error is rethrown below.
+    const winner = await getAccountIdByProviderIdentity(db, { provider, providerSubject })
+    if (winner) return { account_id: winner.account_id, created: false, createdAt: now }
+    throw new Error('account creation failed and the identity could not be re-resolved')
+  }
+}
+
 // ---- sessions --------------------------------------------------------------
 
 /**
@@ -158,5 +196,45 @@ export async function revokeAllSessionsForAccount(db, { accountId, now = Date.no
 export async function deleteExpiredSessions(db, { now = Date.now() } = {}) {
   requireEpochMs(now)
   const res = await db.prepare('DELETE FROM sessions WHERE expires_at <= ?').bind(now).run()
+  return res.meta?.changes ?? 0
+}
+
+// ---- OAuth state (Phase 3C-2: single-use claim) -------------------------------
+
+/**
+ * Atomically claim an OAuth state for its first (and only) use.
+ *
+ * INSERT OR IGNORE on the PRIMARY KEY means exactly one request ever wins the
+ * insert (changes = 1 — the fresh first use); every later presentation of the
+ * same state conflicts (changes = 0 — a replay or an already-claimed state) and
+ * returns false. The claimed row is deliberately NOT deleted: it is the
+ * tombstone that makes the state single-use — deleting it on claim would let a
+ * replay win the insert again. Rows are bounded by the expiry sweep
+ * (deleteExpiredOAuthStates), run opportunistically from the login route.
+ *
+ * Only the opaque random state is stored — never the PKCE code_verifier or any
+ * token. Expiry enforcement lives in the signed state payload's `exp` (checked
+ * before this call); the table guarantees single-use, it does not re-check time.
+ *
+ * @returns {Promise<boolean>} true when this call claimed the state (first use)
+ */
+export async function claimOAuthState(db, { state, expiresAt }) {
+  requireNonEmpty(state, 'state')
+  if (!Number.isInteger(expiresAt) || expiresAt <= 0) throw new TypeError('expiresAt must be a positive integer (epoch ms)')
+  const claim = await db.prepare('INSERT OR IGNORE INTO oauth_states (state, expires_at) VALUES (?, ?)')
+    .bind(state, expiresAt)
+    .run()
+  return (claim.meta?.changes ?? 0) === 1
+}
+
+/**
+ * Delete OAuth-state tombstones whose expiry has passed. Returns the number
+ * deleted. The login route calls this opportunistically so the table stays a
+ * rolling ~10-minute window of attempts (state TTL). The expires_at index
+ * keeps this a cheap index-range delete.
+ */
+export async function deleteExpiredOAuthStates(db, { now = Date.now() } = {}) {
+  requireEpochMs(now)
+  const res = await db.prepare('DELETE FROM oauth_states WHERE expires_at <= ?').bind(now).run()
   return res.meta?.changes ?? 0
 }

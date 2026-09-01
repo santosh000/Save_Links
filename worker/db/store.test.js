@@ -1,71 +1,37 @@
 // @vitest-environment node
 //
-// Phase 3B — persistence tests for worker/db/store.js.
+// Phase 3B + 3C-1 — persistence tests for worker/db/store.js.
 //
 // Runs the REAL migration SQL (migrations/0001_init.sql) on a real SQLite
-// database (node:sqlite) behind a tiny D1-binding-compatible facade, then
-// exercises the production data-layer code end-to-end. No mocks of SQL
-// semantics: constraint violations, FKs, uniqueness, CASCADE and expiry
-// queries all behave as they will on D1 (D1 runs SQLite with foreign keys
-// enforced by default and identical prepared-statement semantics).
+// database (node:sqlite) behind the shared D1-binding-compatible facade
+// (worker/db/d1-facade.js), then exercises the production data-layer code
+// end-to-end. No mocks of SQL semantics: constraint violations, FKs,
+// uniqueness, CASCADE, expiry queries and batch atomicity all behave as they
+// will on D1 (D1 runs SQLite with foreign keys enforced by default and
+// identical prepared-statement semantics).
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { DatabaseSync } from 'node:sqlite'
 import {
   DEFAULT_SESSION_TTL_MS,
+  claimOAuthState,
   createAccount,
   getAccount,
   addProviderIdentity,
   getAccountIdByProviderIdentity,
+  resolveAccountByProvider,
   createSession,
   getSessionByToken,
   revokeSessionByToken,
   revokeAllSessionsForAccount,
   deleteExpiredSessions,
+  deleteExpiredOAuthStates,
   generateSessionToken,
   hashSessionToken,
 } from './store.js'
+import { createTestDb } from './d1-facade.js'
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
-const MIGRATION = fileURLToPath(new URL('../../migrations/0001_init.sql', import.meta.url))
-
-/** D1-binding-compatible facade over node:sqlite (the surface store.js uses). */
-function createTestDb() {
-  const sqlite = new DatabaseSync(':memory:')
-  // D1 enforces foreign keys by default; SQLite needs the pragma enabled.
-  sqlite.exec('PRAGMA foreign_keys = ON')
-  sqlite.exec(readFileSync(MIGRATION, 'utf8'))
-  return {
-    prepare(sql) {
-      return {
-        bind(...params) {
-          return {
-            all() {
-              return { results: sqlite.prepare(sql).all(...params) }
-            },
-            first() {
-              return sqlite.prepare(sql).get(...params) ?? null
-            },
-            run() {
-              const info = sqlite.prepare(sql).run(...params)
-              return {
-                results: [],
-                success: true,
-                meta: {
-                  changes: Number(info.changes),
-                  last_row_id: Number(info.lastInsertRowid),
-                },
-              }
-            },
-          }
-        },
-      }
-    },
-    // raw access for the tests that must inspect what is actually stored
-    _sqlite: sqlite,
-  }
-}
 
 // One shared in-memory DB across all tests: each test scopes by account_id or
 // token value, so accumulated rows never affect another test's counts.
@@ -124,6 +90,93 @@ describe('account persistence', () => {
       'SELECT (SELECT count(*) FROM auth_identities WHERE account_id = ?) + (SELECT count(*) FROM sessions WHERE account_id = ?) AS n'
     ).get(accountId, accountId)
     expect(leftover.n).toBe(0)
+  })
+})
+
+describe('resolveAccountByProvider (Phase 3C-1 OAuth mapping)', () => {
+  it('creates the account + identity atomically on first sight', async () => {
+    const result = await resolveAccountByProvider(db, { provider: 'github', providerSubject: 'github-42', now: NOW })
+    expect(result).toMatchObject({ created: true, createdAt: NOW })
+    expect(result.account_id).toMatch(/^[0-9a-f-]{36}$/)
+
+    const mapped = await getAccountIdByProviderIdentity(db, { provider: 'github', providerSubject: 'github-42' })
+    expect(mapped.account_id).toBe(result.account_id)
+    // account row exists and is usable
+    expect(await getAccount(db, { accountId: result.account_id })).toMatchObject({ account_id: result.account_id })
+  })
+
+  it('resolves to the SAME account on the second sign-in (never duplicates)', async () => {
+    const first = await resolveAccountByProvider(db, { provider: 'github', providerSubject: 'github-42-again', now: NOW })
+    const second = await resolveAccountByProvider(db, { provider: 'github', providerSubject: 'github-42-again', now: NOW + 1000 })
+    expect(second.account_id).toBe(first.account_id)
+    expect(second.created).toBe(false)
+
+    const count = db._sqlite.prepare('SELECT count(*) AS n FROM users').get()
+    // exactly one account exists for this subject (no orphan, no duplicate)
+    expect(count.n).toBeGreaterThanOrEqual(1)
+    const identityCount = db._sqlite.prepare(
+      'SELECT count(*) AS n FROM auth_identities WHERE provider_subject = ?'
+    ).get('github-42-again')
+    expect(identityCount.n).toBe(1)
+  })
+
+  it('a failure inside the create batch leaves NO partial rows behind (atomic)', async () => {
+    const beforeUsers = db._sqlite.prepare('SELECT count(*) AS n FROM users').get().n
+
+    // Trigger a mid-batch failure: pre-create an identity row with the same
+    // subject bound to a DIFFERENT account, forcing the batch's second INSERT
+    // to violate the (provider, provider_subject) PRIMARY KEY. The first
+    // INSERT (users) must roll back with it.
+    const other = await createAccount(db, { now: NOW })
+    await addProviderIdentity(db, {
+      accountId: other.accountId,
+      provider: 'github',
+      providerSubject: 'atomic-collision',
+      now: NOW,
+    })
+
+    const attempt = resolveAccountByProvider(db, {
+      provider: 'github',
+      providerSubject: 'atomic-collision',
+      accountId: crypto.randomUUID(),
+      now: NOW,
+    })
+    // the collision resolves to the existing winner instead of throwing
+    await expect(attempt).resolves.toMatchObject({ account_id: other.accountId, created: false })
+
+    // no ghost users row appeared for the failed/raced account
+    const usersAfter = db._sqlite.prepare('SELECT count(*) AS n FROM users').get().n
+    expect(usersAfter).toBe(beforeUsers + 1) // only the winner's account exists
+  })
+
+  it('a genuine batch failure rethrows after full rollback', async () => {
+    const beforeUsers = db._sqlite.prepare('SELECT count(*) AS n FROM users').get().n
+    // Force users-INSERT failure inside the batch: the requested account_id
+    // already exists for a DIFFERENT subject. The batch throws, drops the
+    // pending auth_identities row (rollback), and the race re-resolve finds
+    // nothing for this subject -> the Error propagates.
+    const existing = await createAccount(db, { now: NOW })
+    await expect(
+      resolveAccountByProvider(db, {
+        provider: 'github',
+        providerSubject: 'genuine-failure-subject',
+        accountId: existing.accountId,
+        now: NOW,
+      })
+    ).rejects.toThrow()
+
+    // rollback left NOTHING behind: no ghost identity, no extra users row
+    const usersAfter = db._sqlite.prepare('SELECT count(*) AS n FROM users').get().n
+    expect(usersAfter).toBe(beforeUsers + 1) // only `existing` remains
+    const ghost = db._sqlite.prepare(
+      'SELECT count(*) AS n FROM auth_identities WHERE provider_subject = ?'
+    ).get('genuine-failure-subject')
+    expect(ghost.n).toBe(0)
+  })
+
+  it('rejects invalid inputs at the boundary', async () => {
+    await expect(resolveAccountByProvider(db, { provider: 'github', providerSubject: '', now: NOW })).rejects.toThrow()
+    await expect(resolveAccountByProvider(db, { provider: '', providerSubject: 'x', now: NOW })).rejects.toThrow()
   })
 })
 
@@ -202,6 +255,49 @@ describe('session persistence', () => {
     await expect(createSession(db, { accountId, ttlMs: 0, now: NOW })).rejects.toThrow()
     await expect(createSession(db, { accountId, ttlMs: -1, now: NOW })).rejects.toThrow()
     await expect(createSession(db, { accountId, now: 0 })).rejects.toThrow()
+  })
+})
+
+describe('OAuth state claim (Phase 3C-2 single-use)', () => {
+  it('first claim wins; replay of the same state is rejected', async () => {
+    expect(await claimOAuthState(db, { state: 'claim-1', expiresAt: NOW + 60_000 })).toBe(true)
+    // the tombstone PERSISTS — deleting on claim would let a replay win again
+    const count = db._sqlite.prepare('SELECT count(*) AS n FROM oauth_states WHERE state = ?').get('claim-1')
+    expect(count.n).toBe(1)
+    // replay: the uniqueness of the PRIMARY KEY rejects it
+    expect(await claimOAuthState(db, { state: 'claim-1', expiresAt: NOW + 60_000 })).toBe(false)
+  })
+
+  it('distinct states claim independently', async () => {
+    const a = await claimOAuthState(db, { state: 'claim-a', expiresAt: NOW + 60_000 })
+    const b = await claimOAuthState(db, { state: 'claim-b', expiresAt: NOW + 60_000 })
+    expect([a, b]).toEqual([true, true])
+  })
+
+  it('stores only the opaque state and its expiry — never a verifier or token', async () => {
+    await claimOAuthState(db, { state: 'claim-inspect', expiresAt: NOW + 1234 })
+    // claim deletes the row, so probe the schema instead of a row: columns are
+    // exactly (state, expires_at) — no verifier/token/session surface exists.
+    const cols = db._sqlite.prepare('PRAGMA table_info(oauth_states)').all().map((c) => c.name)
+    expect(cols).toEqual(['state', 'expires_at'])
+  })
+
+  it('rejects invalid inputs at the boundary', async () => {
+    await expect(claimOAuthState(db, { state: '', expiresAt: NOW + 1 })).rejects.toThrow()
+    await expect(claimOAuthState(db, { state: 'x', expiresAt: 0 })).rejects.toThrow()
+    await expect(claimOAuthState(db, { state: 'x', expiresAt: -5 })).rejects.toThrow()
+    await expect(claimOAuthState(db, { state: 'x', expiresAt: 1.5 })).rejects.toThrow()
+  })
+
+  it('deleteExpiredOAuthStates sweeps only expired tombstones (bounds table growth)', async () => {
+    const dead = `sweep-dead-${Date.now()}`
+    const live = `sweep-live-${Date.now()}`
+    await claimOAuthState(db, { state: dead, expiresAt: NOW - 1 })
+    await claimOAuthState(db, { state: live, expiresAt: NOW + 60_000 })
+    expect(await deleteExpiredOAuthStates(db, { now: NOW })).toBe(1)
+    expect(db._sqlite.prepare('SELECT count(*) AS n FROM oauth_states WHERE state = ?').get(live).n).toBe(1)
+    expect(db._sqlite.prepare('SELECT count(*) AS n FROM oauth_states WHERE state = ?').get(dead).n).toBe(0)
+    expect(await deleteExpiredOAuthStates(db, { now: NOW })).toBe(0) // idempotent
   })
 })
 

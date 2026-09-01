@@ -23,7 +23,14 @@
     // Official SPA fallback: any request that matches no asset is served
     // index.html (200), while real files (/sw.js, manifest, /assets/*) are
     // never shadowed. https://developers.cloudflare.com/workers/static-assets/routing/single-page-application/
-    "not_found_handling": "single-page-application"
+    "not_found_handling": "single-page-application",
+    // Phase 3C-1: the compatibility_date above enables
+    // assets_navigation_prefers_asset_serving — navigation requests normally
+    // NEVER invoke the Worker script, so /auth/* would be swallowed by the
+    // SPA fallback. This glob routes ONLY /auth/* to the Worker first;
+    // everything else keeps assets-first Phase 3A behavior.
+    // https://developers.cloudflare.com/workers/static-assets/binding/#run_worker_first
+    "run_worker_first": ["/auth/*"]
   },
   // Phase 3B: application accounts + server-side sessions (worker/db/store.js).
   // Local development / local migrations use only database_name (the
@@ -37,5 +44,26 @@
       "database_name": "save-links-db",
       "database_id": "00000000-0000-0000-0000-000000000000"
     }
-  ]
+  ],
+  // Phase 3C-1: GitHub OAuth + signed OAuth-state cookie. These are deployed
+  // as Wrangler secrets (`wrangler secret put <NAME>`) for production and
+  // read from the gitignored .dev.vars file locally (see MAINTAINERS.md;
+  // {env}.dev.vars matching is supported). `required` is a deploy guard: a
+  // `wrangler deploy` fails loudly instead of shipping half-configured auth.
+  // https://developers.cloudflare.com/workers/wrangler/configuration/#secrets
+  "secrets": {
+    "required": ["GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "STATE_HMAC_SECRET"]
+  },
+  // Phase 3C-2 Chunk 3: redirect-origin allowlist (worker/auth.js
+  // resolveApprovedOrigin). Comma-separated origins; every /auth/* redirect
+  // destination derives only from this list — never from request headers.
+  // Non-secret configuration, so it ships as plaintext `vars`, NOT a secret
+  // (https://developers.cloudflare.com/workers/configuration/environment-variables/).
+  // `vars` is non-inheritable: each `env.<name>.vars` must set its own, and
+  // the empty default here deliberately FAILS CLOSED — unconfigured
+  // deployments return 503 and start no OAuth flow. Local development sets it
+  // in .dev.vars (gitignored); deployed environments use their env block.
+  "vars": {
+    "APPROVED_ORIGINS": ""
+  }
 }
