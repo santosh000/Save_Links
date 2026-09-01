@@ -29,7 +29,9 @@ Save_Links is hosted on Cloudflare Pages. The stable version is available at sav
 
 ## What Save Links Does
 
-Save_Links is a bookmark manager that lives in your browser. There is no server, no account, and no cloud database — your links stay on your device. Paste a link and Save_Links cleans common tracking parameters, catches duplicates, fetches a title, description, and preview image when the site allows it, and lets you organize your links into folders and categories.
+Save_Links is a bookmark manager that lives in your browser. Your links stay on your device in IndexedDB. The app works offline and local use never requires an account or cloud connectivity.
+
+Optional cloud authentication infrastructure exists (GitHub OAuth via Cloudflare Worker + D1) but **cloud bookmark synchronization is not implemented**. The local application remains fully functional without it.
 
 Save_Links is a Progressive Web App, so once you have opened it online it also works offline: links can still be added, edited, and deleted without a connection. Data saved by very old versions of the app is migrated automatically on first launch, so nothing is lost.
 
@@ -48,6 +50,17 @@ Save_Links is a Progressive Web App, so once you have opened it online it also w
 - **Installable app** — Save_Links can be installed on your device like a native app
 - **Responsive layouts** — clean desktop, tablet, and mobile layouts; on smaller screens the folders and filters/tools panels open one at a time
 - **Saves instantly** — every change is written immediately to your browser's storage, so a page reload always shows the latest state
+
+## Authentication (Worker-side, optional)
+
+The repository includes a Cloudflare Worker authentication boundary:
+
+- **GitHub OAuth** — `/auth/github/login`, `/auth/github/callback`
+- **Session management** — `/auth/me`, `/auth/logout`
+- **API boundary** — `/api/me` (read), `POST /api/session/refresh` (rotate session)
+- **Security** — PKCE, signed single-use OAuth state, approved-origin allowlist, session token hashing, HttpOnly cookies
+
+This infrastructure is deployed to a separate Workers preview environment (`save-links.<account>.workers.dev`). The stable Pages deployment at `savelinks.pages.dev` does not include it. The local application works completely without authentication.
 
 ## URL Cleaning
 
@@ -91,7 +104,7 @@ All your data can be exported to a JSON file and imported again later — which 
 ## Offline and Privacy
 
 - **Offline.** After a first visit online, the app shell is cached by your browser, and Save_Links keeps working without a connection, including adding, editing, and deleting links.
-- **Your data stays in your browser.** Saved links, folders, and settings are stored on your device. There is no account, no cloud database, and no synchronization.
+- **Your data stays in your browser.** Saved links, folders, and settings are stored on your device in IndexedDB. Cloud synchronization is not implemented.
 - **No analytics or telemetry.** Save_Links does not collect usage data.
 - **The website is just where the app comes from.** The app is served from savelinks.pages.dev; it is not a backend, and no data is uploaded to it.
 - **One optional external request.** When you save a URL, your browser may ask that website for its title, description, and preview image. Some websites block this, in which case the link is saved with just what you entered.
@@ -135,6 +148,16 @@ The dev server is available at `http://localhost:5173` by default.
 
 Save_Links is built with **Vue 3** and **Vite**, stores data in the browser's **IndexedDB**, and uses a **service worker and PWA manifest** for installation and offline support. Unit tests use **Vitest**, and end-to-end tests use **Playwright**.
 
+Optional worker-side authentication uses **Cloudflare Workers**, **D1 (SQLite)**, and **GitHub OAuth**.
+
+## Development with OpenCode
+
+Save_Links is developed with OpenCode as an AI-assisted development tool.
+
+Project-specific development instructions, architecture notes, and workflow guidance are maintained in `.opencode/`.
+
+Changes are validated with automated unit, end-to-end, and build checks.
+
 ## Roadmap
 
 ### Completed
@@ -148,6 +171,9 @@ Save_Links is built with **Vue 3** and **Vite**, stores data in the browser's **
 - [x] Backup and restore, including older backup formats
 - [x] Offline use, installation, and safe migration of older data
 - [x] Responsive desktop, tablet, and mobile layouts
+- [x] GitHub OAuth authentication (Worker-side)
+- [x] Session management with rotation
+- [x] Authenticated API boundary (`/api/me`, `POST /api/session/refresh`)
 
 ### Future
 
@@ -158,11 +184,12 @@ Planned (local improvements):
 - [ ] Link health checking
 - [ ] Bulk actions
 
-Later (accounts and sync):
+Later (cloud sync):
 
-- [ ] Authentication
-- [ ] Cloud backup
-- [ ] Syncing across devices
+- [ ] Cloud bookmark/data synchronization
+- [ ] Conflict resolution
+- [ ] Automatic cloud sync
+- [ ] Cross-device bookmark synchronization
 - [ ] Desktop and mobile packaging
 
 ## License
