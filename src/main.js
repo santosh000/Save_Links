@@ -3,6 +3,7 @@ import './style.css'
 import App from './App.vue'
 import { repository } from './storage/repository.js'
 import { boot } from './storage/migration.js'
+import { initSession } from './auth/session.js'
 
 // Boot BEFORE mounting: migrate localStorage -> IndexedDB if necessary, then
 // hydrate the in-memory snapshot so the first render never shows an empty or
@@ -11,6 +12,11 @@ import { boot } from './storage/migration.js'
 async function start() {
   try {
     await boot(repository)
+    // Non-blocking authentication initialization: local boot never waits for
+    // it, and its result can never prevent the app from starting (initSession
+    // resolves even when the auth adapter fails). Phase 2A uses the in-memory
+    // adapter — no real backend — so this settles as anonymous.
+    initSession()
     createApp(App).mount('#app')
   } catch (err) {
     console.error('Save Links failed to start:', err)
