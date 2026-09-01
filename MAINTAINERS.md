@@ -40,17 +40,23 @@ General sequence:
 7. Deploy the verified build to production.
 8. Verify the live production site.
 
-## Cloudflare Pages
+## Deployment (Cloudflare Pages + Workers)
 
-The app is a static site hosted on Cloudflare Pages (direct upload). The two deploy scripts are defined in `package.json`:
+Production is still served by Cloudflare Pages direct upload at **savelinks.pages.dev** (currently v2.0.2). The two Pages scripts are defined in `package.json`:
 
 - **Production:** `npm run deploy:production`
 - **Preview:** `npm run deploy:preview`
 
 - Production deploys the stable build to the existing Cloudflare Pages project.
 - Preview creates a temporary Cloudflare Pages preview deployment with its own URL.
-- Do not use `wrangler deploy`.
-- The project uses Cloudflare Pages direct upload, not a Worker. Do not create a separate Worker for Save_Links.
+
+Phase 3A additionally introduced a Workers project (`wrangler.jsonc` + `worker/index.js`) that serves the exact same `dist/` build as static assets behind a Worker boundary. It is the target runtime for the future authentication work (Phase 3C) but currently has no server routes:
+
+- `npx wrangler dev` — run the Worker/static-assets boundary locally (build `dist/` first).
+- `npm run deploy:worker` — deploys the Worker to its own `save-links.<account>.workers.dev` URL. This is a **non-production** preview environment; requests to static assets are free and unlimited on the Free tier, and the Worker script itself is not invoked on the asset-serving path. It deploys to whichever Cloudflare account `wrangler` is logged into (check with `wrangler whoami`); the Workers project name `save-links` is separate from the Pages project `savelinks`.
+- `public/_headers` — security headers applied by both the Workers static-assets layer and Pages (same file format).
+
+Do not deploy the new Worker architecture to production (`savelinks.pages.dev`) until explicitly instructed.
 
 ## Production Verification
 
@@ -69,6 +75,6 @@ After a production deployment, verify:
 - Do not force-push release branches or history.
 - Do not move an existing release tag.
 - Do not deploy unverified changes to production.
-- Do not run `wrangler deploy`.
+- Do not run `wrangler deploy` against the production Pages project; the Workers project (`save-links`) is a separate, non-production preview environment until explicitly approved for production.
 - Do not expose credentials in the repository.
 - Keep user data and local-storage behavior backward compatible unless a migration is intentionally designed and tested.

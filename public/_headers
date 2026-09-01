@@ -1,0 +1,12 @@
+# Security headers for static-asset responses.
+# Applied by the Workers static-assets layer (file lives in the assets
+# directory, copied from public/ into dist/ at build time) and understood by
+# the existing Cloudflare Pages deployment, so both delivery paths stay
+# covered. Content-Security-Policy is intentionally NOT set here: the app
+# emits dynamic inline styles and a CSP would require an application-level
+# audit before it can be added safely.
+/*
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: document-domain=()
