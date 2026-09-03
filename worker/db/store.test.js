@@ -28,6 +28,9 @@ import {
   deleteExpiredOAuthStates,
   generateSessionToken,
   hashSessionToken,
+  applyObjectMutation,
+  getObject,
+  purgeExpiredTombstones,
 } from './store.js'
 import { createTestDb } from './d1-facade.js'
 
@@ -335,5 +338,163 @@ describe('isolation (Phase 3B data layer)', () => {
     for (const forbidden of ['indexedDB', 'localStorage', 'repository', 'migration', 'backup']) {
       expect(source.toLowerCase()).not.toContain(forbidden)
     }
+  })
+})
+
+describe('cloud sync objects (Chunk 2)', () => {
+  const NOW = 1_700_000_000_000
+
+  /** Fresh account per test -> full isolation on the shared DB. */
+  async function freshAccount() {
+    const { accountId } = await createAccount(db, { now: NOW })
+    return accountId
+  }
+
+  describe('create', () => {
+    it('creates an absent object at revision 1', async () => {
+      const accountId = await freshAccount()
+      const objectId = crypto.randomUUID()
+      const res = await applyObjectMutation(db, {
+        accountId, mutationId: crypto.randomUUID(), objectType: 'link',
+        objectId, operation: 'create', baseRevision: 0,
+        payload: '{"name":"x"}', now: NOW,
+      })
+      expect(res).toEqual({ kind: 'applied', resultRevision: 1 })
+      const row = await getObject(db, { accountId, objectType: 'link', objectId })
+      expect(row.revision).toBe(1)
+      expect(row.deleted).toBe(0)
+    })
+
+    it('existing object -> 409 conflict, returns current', async () => {
+      const accountId = await freshAccount()
+      const objectId = crypto.randomUUID()
+      await applyObjectMutation(db, { accountId, mutationId: crypto.randomUUID(), objectType: 'folder', objectId, operation: 'create', baseRevision: 0, payload: '{}', now: NOW })
+      const res = await applyObjectMutation(db, { accountId, mutationId: crypto.randomUUID(), objectType: 'folder', objectId, operation: 'create', baseRevision: 0, payload: '{}', now: NOW })
+      expect(res.kind).toBe('conflict')
+      expect(res.current.object_id).toBe(objectId)
+      expect(res.current.revision).toBe(1)
+    })
+
+    it('create with base_revision !== 0 -> conflict', async () => {
+      const accountId = await freshAccount()
+      const res = await applyObjectMutation(db, { accountId, mutationId: crypto.randomUUID(), objectType: 'link', objectId: crypto.randomUUID(), operation: 'create', baseRevision: 3, payload: '{}', now: NOW })
+      expect(res.kind).toBe('conflict')
+    })
+  })
+
+  describe('update', () => {
+    it('accepts when base_revision === current and increments exactly once', async () => {
+      const accountId = await freshAccount()
+      const objectId = crypto.randomUUID()
+      await applyObjectMutation(db, { accountId, mutationId: crypto.randomUUID(), objectType: 'link', objectId, operation: 'create', baseRevision: 0, payload: '{}', now: NOW })
+      const res = await applyObjectMutation(db, { accountId, mutationId: crypto.randomUUID(), objectType: 'link', objectId, operation: 'update', baseRevision: 1, payload: '{"v":2}', now: NOW })
+      expect(res).toEqual({ kind: 'applied', resultRevision: 2 })
+      expect((await getObject(db, { accountId, objectType: 'link', objectId })).revision).toBe(2)
+    })
+
+    it('stale base_revision -> 409 conflict with current', async () => {
+      const accountId = await freshAccount()
+      const objectId = crypto.randomUUID()
+      await applyObjectMutation(db, { accountId, mutationId: crypto.randomUUID(), objectType: 'link', objectId, operation: 'create', baseRevision: 0, payload: '{}', now: NOW })
+      await applyObjectMutation(db, { accountId, mutationId: crypto.randomUUID(), objectType: 'link', objectId, operation: 'update', baseRevision: 1, payload: '{}', now: NOW })
+      const res = await applyObjectMutation(db, { accountId, mutationId: crypto.randomUUID(), objectType: 'link', objectId, operation: 'update', baseRevision: 1, payload: '{}', now: NOW })
+      expect(res.kind).toBe('conflict')
+      expect(res.current.revision).toBe(2)
+    })
+  })
+
+  describe('delete (tombstone)', () => {
+    it('tombstones a live object, bumps revision, records deleted_at', async () => {
+      const accountId = await freshAccount()
+      const objectId = crypto.randomUUID()
+      await applyObjectMutation(db, { accountId, mutationId: crypto.randomUUID(), objectType: 'folder', objectId, operation: 'create', baseRevision: 0, payload: '{}', now: NOW })
+      const res = await applyObjectMutation(db, { accountId, mutationId: crypto.randomUUID(), objectType: 'folder', objectId, operation: 'delete', baseRevision: 1, payload: '{}', now: NOW })
+      expect(res).toEqual({ kind: 'applied', resultRevision: 2 })
+      const row = await getObject(db, { accountId, objectType: 'folder', objectId })
+      expect(row.deleted).toBe(1)
+      expect(row.deleted_at).toBe(NOW)
+      expect(row.revision).toBe(2)
+    })
+
+    it('delete on an already-deleted object -> conflict', async () => {
+      const accountId = await freshAccount()
+      const objectId = crypto.randomUUID()
+      await applyObjectMutation(db, { accountId, mutationId: crypto.randomUUID(), objectType: 'folder', objectId, operation: 'create', baseRevision: 0, payload: '{}', now: NOW })
+      await applyObjectMutation(db, { accountId, mutationId: crypto.randomUUID(), objectType: 'folder', objectId, operation: 'delete', baseRevision: 1, payload: '{}', now: NOW })
+      const res = await applyObjectMutation(db, { accountId, mutationId: crypto.randomUUID(), objectType: 'folder', objectId, operation: 'delete', baseRevision: 2, payload: '{}', now: NOW })
+      expect(res.kind).toBe('conflict')
+    })
+
+    it('update is rejected on a tombstoned object (tombstone preserved)', async () => {
+      const accountId = await freshAccount()
+      const objectId = crypto.randomUUID()
+      await applyObjectMutation(db, { accountId, mutationId: crypto.randomUUID(), objectType: 'folder', objectId, operation: 'create', baseRevision: 0, payload: '{}', now: NOW })
+      await applyObjectMutation(db, { accountId, mutationId: crypto.randomUUID(), objectType: 'folder', objectId, operation: 'delete', baseRevision: 1, payload: '{}', now: NOW })
+      const res = await applyObjectMutation(db, { accountId, mutationId: crypto.randomUUID(), objectType: 'folder', objectId, operation: 'update', baseRevision: 2, payload: '{}', now: NOW })
+      expect(res.kind).toBe('conflict')
+      expect((await getObject(db, { accountId, objectType: 'folder', objectId })).deleted).toBe(1)
+    })
+  })
+
+  describe('replay (idempotency)', () => {
+    it('same account + mutation_id returns the original result_revision without re-apply', async () => {
+      const accountId = await freshAccount()
+      const objectId = crypto.randomUUID()
+      const mutationId = crypto.randomUUID()
+      await applyObjectMutation(db, { accountId, mutationId, objectType: 'link', objectId, operation: 'create', baseRevision: 0, payload: '{}', now: NOW })
+      const res = await applyObjectMutation(db, { accountId, mutationId, objectType: 'link', objectId, operation: 'create', baseRevision: 0, payload: '{}', now: NOW })
+      expect(res).toEqual({ kind: 'replay', resultRevision: 1 })
+      expect((await getObject(db, { accountId, objectType: 'link', objectId })).revision).toBe(1) // not bumped again
+    })
+
+    it('replay of an update returns its original result without double-apply', async () => {
+      const accountId = await freshAccount()
+      const objectId = crypto.randomUUID()
+      await applyObjectMutation(db, { accountId, mutationId: crypto.randomUUID(), objectType: 'link', objectId, operation: 'create', baseRevision: 0, payload: '{}', now: NOW })
+      const mutationId = crypto.randomUUID()
+      await applyObjectMutation(db, { accountId, mutationId, objectType: 'link', objectId, operation: 'update', baseRevision: 1, payload: '{"v":2}', now: NOW })
+      const res = await applyObjectMutation(db, { accountId, mutationId, objectType: 'link', objectId, operation: 'update', baseRevision: 1, payload: '{"v":3}', now: NOW })
+      expect(res).toEqual({ kind: 'replay', resultRevision: 2 })
+      expect((await getObject(db, { accountId, objectType: 'link', objectId })).revision).toBe(2)
+    })
+  })
+
+  describe('account scoping', () => {
+    it('conflict read is scoped to the account (no cross-account leakage)', async () => {
+      const a1 = await freshAccount()
+      const a2 = await freshAccount()
+      const objectId = crypto.randomUUID()
+      await applyObjectMutation(db, { accountId: a1, mutationId: crypto.randomUUID(), objectType: 'link', objectId, operation: 'create', baseRevision: 0, payload: '{}', now: NOW })
+      // a2 has no such object -> absent
+      expect(await getObject(db, { accountId: a2, objectType: 'link', objectId })).toBeNull()
+      // a2 create succeeds independently (its own namespace)
+      const res = await applyObjectMutation(db, { accountId: a2, mutationId: crypto.randomUUID(), objectType: 'link', objectId, operation: 'create', baseRevision: 0, payload: '{}', now: NOW })
+      expect(res.kind).toBe('applied')
+    })
+  })
+
+  describe('tombstone purge', () => {
+    it('reclaims only tombstones past retention, keeps live rows and fresh tombstones', async () => {
+      const accountId = await freshAccount()
+      const aged = crypto.randomUUID()
+      const fresh = crypto.randomUUID()
+      const live = crypto.randomUUID()
+      const old = NOW - 31 * 24 * 60 * 60 * 1000
+
+      // aged tombstone: delete at `old`
+      await applyObjectMutation(db, { accountId, mutationId: crypto.randomUUID(), objectType: 'link', objectId: aged, operation: 'create', baseRevision: 0, payload: '{}', now: old })
+      await applyObjectMutation(db, { accountId, mutationId: crypto.randomUUID(), objectType: 'link', objectId: aged, operation: 'delete', baseRevision: 1, payload: '{}', now: old })
+      // fresh tombstone (deleted now)
+      await applyObjectMutation(db, { accountId, mutationId: crypto.randomUUID(), objectType: 'link', objectId: fresh, operation: 'create', baseRevision: 0, payload: '{}', now: NOW })
+      await applyObjectMutation(db, { accountId, mutationId: crypto.randomUUID(), objectType: 'link', objectId: fresh, operation: 'delete', baseRevision: 1, payload: '{}', now: NOW })
+      // live object
+      await applyObjectMutation(db, { accountId, mutationId: crypto.randomUUID(), objectType: 'link', objectId: live, operation: 'create', baseRevision: 0, payload: '{}', now: NOW })
+
+      const purged = await purgeExpiredTombstones(db, { now: NOW })
+      expect(purged).toBe(1)
+      expect(await getObject(db, { accountId, objectType: 'link', objectId: aged })).toBeNull()
+      expect((await getObject(db, { accountId, objectType: 'link', objectId: fresh })).deleted).toBe(1)
+      expect((await getObject(db, { accountId, objectType: 'link', objectId: live })).deleted).toBe(0)
+    })
   })
 })

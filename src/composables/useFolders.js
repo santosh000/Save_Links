@@ -1,6 +1,8 @@
 import { ref, watch, computed } from 'vue'
 import { repository } from '../storage/repository.js'
 import { bootState } from '../storage/migration.js'
+import { session } from '../auth/session.js'
+import { generateId } from '../domain/link.js'
 
 function sanitizeFolder(raw) {
   if (typeof raw !== 'object' || raw === null) return null
@@ -45,9 +47,22 @@ export function useFolders() {
     // prevent duplicate name case-insensitive
     const exists = folders.value.some(f => f.name.toLowerCase() === trimmed.toLowerCase())
     if (exists) throw new Error('Folder already exists')
-    const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
-    const folder = { id, name: trimmed, createdAt: new Date().toISOString() }
+    const folder = { id: generateId(), name: trimmed, createdAt: new Date().toISOString(), revision: 0 }
     folders.value.push(folder)
+
+    // Create pending mutation for sync (if authenticated)
+    const accountId = session.getState().user?.id
+    if (accountId) {
+      repository.addPendingMutation(
+        'create',
+        folder.id,
+        'folder',
+        folder,
+        accountId,
+        folder.revision // base_revision = 0 for new objects
+      ).catch(err => console.warn('Failed to queue mutation:', err))
+    }
+
     return folder
   }
 
@@ -59,7 +74,21 @@ export function useFolders() {
     // duplicate check excluding self
     const dup = folders.value.some(f => f.id !== id && f.name.toLowerCase() === trimmed.toLowerCase())
     if (dup) throw new Error('Folder already exists')
-    folders.value.splice(idx, 1, { ...folders.value[idx], name: trimmed })
+    const updated = { ...folders.value[idx], name: trimmed }
+    folders.value.splice(idx, 1, updated)
+
+    // Create pending mutation for sync (if authenticated)
+    const accountId = session.getState().user?.id
+    if (accountId) {
+      repository.addPendingMutation(
+        'update',
+        updated.id,
+        'folder',
+        updated,
+        accountId,
+        updated.revision
+      ).catch(err => console.warn('Failed to queue mutation:', err))
+    }
   }
 
   function deleteFolder(id) {
@@ -67,12 +96,61 @@ export function useFolders() {
     if (idx === -1) return null
     const removed = folders.value[idx]
     folders.value.splice(idx, 1)
+
+    // Create pending mutation for sync (if authenticated)
+    const accountId = session.getState().user?.id
+    if (accountId) {
+      repository.addPendingMutation(
+        'delete',
+        id,
+        'folder',
+        { id },
+        accountId,
+        removed.revision
+      ).catch(err => console.warn('Failed to queue mutation:', err))
+    }
     return removed
+  }
+
+  function mergeFolders(importedFolders, strategy = 'skip') {
+    const existing = folders.value
+    const existingById = new Map()
+    const existingByName = new Map()
+    for (const f of existing) {
+      if (f.id) existingById.set(f.id, f)
+      if (f.name) existingByName.set(f.name.toLowerCase(), f)
+    }
+
+    const newFolders = []
+    const merged = [...existing]
+
+    for (const imported of importedFolders) {
+      if (!imported.id && !imported.name) continue
+      const existingByIdVal = imported.id ? existingById.get(imported.id) : null
+      const existingByNameVal = imported.name ? existingByName.get(imported.name.toLowerCase()) : null
+      const existing = existingByIdVal || existingByNameVal
+
+      if (existing) {
+        if (strategy === 'replace') {
+          const idx = merged.findIndex(f => f.id === existing.id)
+          if (idx !== -1) {
+            merged[idx] = { ...existing, name: imported.name }
+          }
+        }
+      } else {
+        const newFolder = { ...imported, id: imported.id || generateId() }
+        merged.push(newFolder)
+        newFolders.push(newFolder)
+      }
+    }
+
+    folders.value = merged
+    return { newCount: newFolders.length, replacedCount: strategy === 'replace' ? (importedFolders.length - newFolders.length) : 0 }
   }
 
   function setFolders(newFolders) {
     folders.value = sanitizeFolders(Array.isArray(newFolders) ? newFolders : [])
   }
 
-  return { folders, folderMap, createFolder, renameFolder, deleteFolder, setFolders, sanitizeFolders }
+  return { folders, folderMap, createFolder, renameFolder, deleteFolder, setFolders, mergeFolders, sanitizeFolders }
 }

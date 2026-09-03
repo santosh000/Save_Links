@@ -33,7 +33,13 @@
 import { categorizeUrl, getDomain } from '../utils/categorize.js'
 
 export function generateId() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+  // UUID v4 for new objects (RFC 4122 compliant)
+  const bytes = crypto.getRandomValues(new Uint8Array(16))
+  bytes[6] = (bytes[6] & 0x0f) | 0x40 // version 4
+  bytes[8] = (bytes[8] & 0x3f) | 0x80 // variant 10
+  let hex = ''
+  for (const b of bytes) hex += b.toString(16).padStart(2, '0')
+  return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20,32)}`
 }
 
 // The href-bound URL must be http(s) — the app only ever creates those; this
@@ -84,5 +90,8 @@ export function normalizeLink(raw) {
     status: important && mustHave ? 'both' : important ? 'important' : mustHave ? 'must-have' : null, // legacy compat, derived
     createdAt: str(raw.createdAt) || new Date().toISOString(),
     savedFrom: str(raw.savedFrom) || 'Unknown',
+    // v2 sync fields — preserve if present, backfill with defaults if missing
+    revision: typeof raw.revision === 'number' ? raw.revision : 0,
+    account_id: typeof raw.account_id === 'string' ? raw.account_id.trim() : null,
   }
 }

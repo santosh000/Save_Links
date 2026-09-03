@@ -290,24 +290,22 @@ test.describe('Folders, Appearance, Color Schemes, Backup v2', () => {
     expect(json.settings.appearance).toBe('dark')
     expect(json.settings.colorScheme).toBe('forest')
     expect(json.links[0].folderId).toBeDefined()
-    // clear and import v2
+    // clear and import v2 (empty store -> no duplicates -> immediate import)
     await clearStorage(page)
     await page.goto('/')
     await page.locator('.backup-card input[type="file"]').setInputFiles({ name:'backup.json', mimeType:'application/json', buffer:Buffer.from(JSON.stringify(json))})
-    await expect(page.getByRole('dialog')).toBeVisible()
-    await page.getByRole('dialog').getByRole('button', { name: 'Import', exact: true }).click()
-    await expect(page.getByText('Backup imported')).toBeVisible()
+    await expect(page.getByText(/Import complete/)).toBeVisible()
     await expect(page.locator('article.card').first()).toContainText('Backup Folder Link')
     await expect(page.locator('.folder-item', {hasText:'BackupFolder'})).toBeVisible()
-    await expect(page.getByLabel('Dark theme')).toBeChecked()
-    await expect(page.getByLabel('Forest color scheme')).toBeChecked()
+    // local-first invariant: imported appearance/color-scheme are NOT applied;
+    // the on-device defaults stay.
+    await expect(page.getByLabel('System theme')).toBeChecked()
+    await expect(page.getByLabel('Ocean color scheme')).toBeChecked()
     // v1 still imports with defaults
     const v1 = { app:'Save_Link', version:1, exportedAt:new Date().toISOString(), profile:{name:'V1 User'}, links:[{ id:'v1id', originalUrl:'https://example.com/v1', normalizedUrl:'https://example.com/v1', url:'https://example.com/v1', title:'V1 Link'}]}
     await page.locator('.backup-card input[type="file"]').setInputFiles({ name:'v1.json', mimeType:'application/json', buffer:Buffer.from(JSON.stringify(v1))})
-    await expect(page.getByRole('dialog')).toBeVisible()
-    await page.getByRole('dialog').getByRole('button', { name: 'Import', exact: true }).click()
-    await expect(page.getByText('Backup imported')).toBeVisible()
-    await expect(page.locator('article.card').first()).toContainText('V1 Link')
+    await expect(page.getByText(/Import complete/)).toBeVisible()
+    await expect(page.locator('article.card', { hasText: 'V1 Link' })).toBeVisible()
     await expect(page.getByLabel('System theme')).toBeChecked()
     await expect(page.getByLabel('Ocean color scheme')).toBeChecked()
     await expect(page.locator('.folder-item', {hasText:'Unfiled'})).toBeVisible()
@@ -319,10 +317,8 @@ test.describe('Folders, Appearance, Color Schemes, Backup v2', () => {
     // security: v-html not executed
     const malicious = { app:'Save_Link', version:2, exportedAt:new Date().toISOString(), profile:{}, settings:{appearance:'system', colorScheme:'ocean'}, folders:[], links:[{ id:'sec', originalUrl:'https://example.com/sec', normalizedUrl:'https://example.com/sec', title:'<script>alert(1)</script>', description:'<img onerror=alert(1)>'}]}
     await page.locator('.backup-card input[type="file"]').setInputFiles({ name:'mal.json', mimeType:'application/json', buffer:Buffer.from(JSON.stringify(malicious))})
-    await expect(page.getByRole('dialog')).toBeVisible()
-    await page.getByRole('dialog').getByRole('button', { name: 'Import', exact: true }).click()
-    await expect(page.getByText('Backup imported')).toBeVisible()
-    await expect(page.locator('article.card').first()).toContainText('<script>alert(1)</script>')
-    await expect(page.locator('article.card').first().locator('script')).toHaveCount(0)
+    await expect(page.getByText(/Import complete/)).toBeVisible()
+    await expect(page.locator('article.card', { hasText: '<script>alert(1)</script>' })).toBeVisible()
+    await expect(page.locator('article.card', { hasText: '<script>alert(1)</script>' }).locator('script')).toHaveCount(0)
   })
 })

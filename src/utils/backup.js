@@ -142,6 +142,17 @@ export function normalizeBackupData(data) {
   return { profile, links, folders, settings, appearance, colorScheme }
 }
 
+// Which slices of a validated+normalized backup should be applied to local
+// state. Only bookmarks and folders are imported. The Local Profile and the
+// device-local appearance/color-scheme preferences are NEVER taken from an
+// import — they belong to this device and must be preserved.
+export function pickImportSlices(data) {
+  return {
+    links: Array.isArray(data?.links) ? data.links : [],
+    folders: Array.isArray(data?.folders) ? data.folders : [],
+  }
+}
+
 export function getLastBackupAt() {
   try {
     return localStorage.getItem(getStorageKey('lastBackupAt'))
@@ -156,5 +167,129 @@ export function setLastBackupAt(isoString) {
     return true
   } catch {
     return false
+  }
+}
+
+// Duplicate detection and merge preview
+// Uses the app's existing identity rules:
+// - Links: by normalizedUrl (canonical duplicate key per useLinks.js)
+// - Folders: by id (primary) and by name case-insensitive (per useFolders.js)
+export function mergeImportData(existingLinks, existingFolders, importedLinks, importedFolders, strategy = 'skip') {
+  // Handle null/undefined gracefully
+  existingLinks = existingLinks || []
+  existingFolders = existingFolders || []
+
+  // Normalize imported links/folders to ensure consistent shape
+  const normalizedImportedLinks = (importedLinks || []).map(l => normalizeLink(l)).filter(Boolean)
+  const normalizedImportedFolders = sanitizeFolders(importedFolders || [])
+
+  // Build lookup maps for existing items
+  const existingLinksByUrl = new Map()
+  for (const l of existingLinks) {
+    if (l.normalizedUrl) existingLinksByUrl.set(l.normalizedUrl, l)
+  }
+  const existingFoldersById = new Map()
+  const existingFoldersByName = new Map()
+  for (const f of existingFolders) {
+    if (f.id) existingFoldersById.set(f.id, f)
+    if (f.name) existingFoldersByName.set(f.name.toLowerCase(), f)
+  }
+
+  // Categorize imported links
+  const newLinks = []
+  const duplicateLinks = []
+  const mergedLinks = [...existingLinks] // start with existing
+
+  for (const imported of normalizedImportedLinks) {
+    const existing = imported.normalizedUrl ? existingLinksByUrl.get(imported.normalizedUrl) : null
+    if (existing) {
+      duplicateLinks.push({ imported, existing })
+      if (strategy === 'replace') {
+        // Replace: keep existing id/createdAt, update other fields from imported
+        const idx = mergedLinks.findIndex(l => l.id === existing.id)
+        if (idx !== -1) {
+          // Preserve id, createdAt, folderId, user-managed fields
+          const preserved = {
+            id: existing.id,
+            createdAt: existing.createdAt,
+            folderId: existing.folderId,
+            tags: existing.tags,
+            important: existing.important,
+            mustHave: existing.mustHave,
+            favorite: existing.favorite,
+            revision: existing.revision,
+            account_id: existing.account_id,
+          }
+          mergedLinks[idx] = { ...imported, ...preserved }
+        }
+      }
+      // strategy === 'skip': do nothing, keep existing
+    } else {
+      // New link - ensure it has an id
+      const newLink = { ...imported, id: imported.id || generateId() }
+      newLinks.push(newLink)
+      mergedLinks.push(newLink)
+    }
+  }
+
+  // Categorize imported folders
+  const newFolders = []
+  const duplicateFolders = []
+  const mergedFolders = [...existingFolders] // start with existing
+
+  for (const imported of normalizedImportedFolders) {
+    // Check by id first, then by name (case-insensitive)
+    const existingById = imported.id ? existingFoldersById.get(imported.id) : null
+    const existingByName = imported.name ? existingFoldersByName.get(imported.name.toLowerCase()) : null
+    const existing = existingById || existingByName
+
+    if (existing) {
+      duplicateFolders.push({ imported, existing })
+      if (strategy === 'replace') {
+        // Replace: keep existing id/createdAt, update name from imported
+        const idx = mergedFolders.findIndex(f => f.id === existing.id)
+        if (idx !== -1) {
+          mergedFolders[idx] = { ...existing, name: imported.name }
+        }
+      }
+      // strategy === 'skip': do nothing, keep existing
+    } else {
+      // New folder
+      const newFolder = { ...imported, id: imported.id || generateId() }
+      newFolders.push(newFolder)
+      mergedFolders.push(newFolder)
+    }
+  }
+
+  return {
+    // Summary counts
+    counts: {
+      links: {
+        total: normalizedImportedLinks.length,
+        new: newLinks.length,
+        duplicate: duplicateLinks.length,
+        replaced: strategy === 'replace' ? duplicateLinks.length : 0,
+        skipped: strategy === 'skip' ? duplicateLinks.length : 0,
+      },
+      folders: {
+        total: normalizedImportedFolders.length,
+        new: newFolders.length,
+        duplicate: duplicateFolders.length,
+        replaced: strategy === 'replace' ? duplicateFolders.length : 0,
+        skipped: strategy === 'skip' ? duplicateFolders.length : 0,
+      },
+    },
+    // Detailed items for potential UI display
+    details: {
+      newLinks,
+      duplicateLinks,
+      newFolders,
+      duplicateFolders,
+    },
+    // Merged results ready to apply
+    merged: {
+      links: mergedLinks,
+      folders: mergedFolders,
+    },
   }
 }

@@ -82,12 +82,21 @@ test.describe('Backup E2E', () => {
   test('1. Export Backup', async ({ page }) => {
     test.setTimeout(60000)
     await page.goto('/')
-    // profile
-    await page.getByRole('button', { name: 'Edit' }).first().click()
-    await page.locator('.profile input').first().fill('Backup Tester')
-    await page.locator('.profile input').nth(1).fill('Backup Bio')
-    await page.locator('.profile').getByRole('button', { name: 'Save' }).click()
+    // local profile: Account menu -> Edit local profile -> Local Profile panel
+    await page.locator('.identity-btn').click()
+    await page.getByRole('button', { name: 'Edit local profile' }).click()
+    await page.locator('#lp-name').fill('Backup Tester')
+    await page.locator('#lp-bio').fill('Local-first profile bio')
+    await page.getByRole('button', { name: 'Save changes' }).click()
+    // reload: dismisses the (still-open) Account panel and verifies the local
+    // profile name AND bio persisted to storage
+    await page.reload()
     await expect(page.getByText('Backup Tester')).toBeVisible()
+    // Bio is inside the AccountPanel dialog — open it to verify persistence
+    await page.locator('.identity-btn').click()
+    await expect(page.getByText('Local-first profile bio')).toBeVisible()
+    // Close AccountPanel before continuing with link operations
+    await page.keyboard.press('Escape')
 
     // link with all flags
     await saveLink(page, {
@@ -112,7 +121,7 @@ test.describe('Backup E2E', () => {
     expect(json.exportedAt).toBeDefined()
     expect(() => new Date(json.exportedAt).toISOString()).not.toThrow()
     expect(json.profile.name).toBe('Backup Tester')
-    expect(json.profile.bio).toBe('Backup Bio')
+    expect(json.profile.bio).toBe('Local-first profile bio')
     expect(Array.isArray(json.links)).toBe(true)
     expect(Array.isArray(json.folders)).toBe(true)
     expect(json.settings).toBeDefined()
@@ -151,7 +160,7 @@ test.describe('Backup E2E', () => {
     expect(json.links.some((l) => l.title === 'Old')).toBe(false)
   })
 
-  test('3. Import valid backup replaces data', async ({ page }) => {
+  test('3. Import valid backup merges data', async ({ page }) => {
     await page.goto('/')
     await saveLink(page, { url: 'https://example.com/existing', title: 'Existing' })
     await expect(page.locator('article.card')).toHaveCount(1)
@@ -202,18 +211,21 @@ test.describe('Backup E2E', () => {
       mimeType: 'application/json',
       buffer: Buffer.from(JSON.stringify(backup)),
     })
-    const importDialog = page.getByRole('dialog')
-    await expect(importDialog).toBeVisible()
-    await expect(importDialog).toContainText('This will replace your current Save Links data')
-    await importDialog.getByRole('button', { name: 'Import', exact: true }).click()
-
-    await expect(page.getByText('Backup imported')).toBeVisible()
-    await expect(page.locator('article.card')).toHaveCount(2)
-    await expect(page.locator('article.card').first()).toContainText('Imported Title')
-    await expect(page.getByText('Imported User')).toBeVisible()
-    await expect(page.locator('.stat-card', { hasText: 'Total saved' }).locator('.num')).toHaveText('2')
+    // No URL overlap with the local link -> no duplicate => no preview modal;
+    // the import is additive and runs immediately.
+    await expect(page.getByText(/Import complete/)).toBeVisible()
+    await expect(page.locator('article.card')).toHaveCount(3)
+    await expect(page.getByText('Existing', { exact: true })).toBeVisible()
+    await expect(page.getByText('Imported Title 1', { exact: true })).toBeVisible()
+    await expect(page.getByText('Imported Title 2', { exact: true })).toBeVisible()
+    await expect(page.locator('.stat-card', { hasText: 'Total saved' }).locator('.num')).toHaveText('3')
     await expect(page.locator('.stat-card', { hasText: 'Favorites' }).locator('.num')).toHaveText('1')
-    await expect(page.getByText('Existing')).toHaveCount(0)
+    await expect(page.locator('.stat-card', { hasText: 'Must Have' }).locator('.num')).toHaveText('1')
+    await expect(page.locator('.stat-card', { hasText: 'Important' }).locator('.num')).toHaveText('1')
+    // flags survive the import
+    const imp1 = page.locator('article.card', { hasText: 'Imported Title 1' })
+    await expect(imp1.getByRole('button', { name: 'Toggle Favorite' })).toHaveAttribute('aria-pressed', 'true')
+    await expect(imp1.getByRole('button', { name: 'Toggle Important' })).toHaveAttribute('aria-pressed', 'true')
   })
 
   test('4. Import cancel keeps existing data', async ({ page }) => {
@@ -221,12 +233,17 @@ test.describe('Backup E2E', () => {
     await saveLink(page, { url: 'https://example.com/keep', title: 'Keep Me' })
     await expect(page.locator('article.card')).toHaveCount(1)
 
+    // A duplicate URL triggers the merge-preview modal; Cancel must keep
+    // everything unchanged.
     const backup = {
       app: 'Save_Link',
-      version: 1,
+      version: 2,
       exportedAt: new Date().toISOString(),
       profile: { name: 'New' },
-      links: [{ id: 'new', originalUrl: 'https://example.com/new', normalizedUrl: 'https://example.com/new', url: 'https://example.com/new', title: 'New Title' }],
+      links: [{
+        id: 'dup', originalUrl: 'https://example.com/keep', normalizedUrl: 'https://example.com/keep', url: 'https://example.com/keep', title: 'Keep Me (backup)', description: '', image: '', tags: [], category: 'Other', important: false, mustHave: false, favorite: false, domain: 'example.com', createdAt: new Date().toISOString(),
+      }],
+      folders: [],
     }
 
     await page.locator('.backup-card input[type="file"]').setInputFiles({
@@ -240,9 +257,9 @@ test.describe('Backup E2E', () => {
 
     await expect(page.locator('article.card').first()).toContainText('Keep Me')
     await expect(page.locator('article.card')).toHaveCount(1)
-    await expect(page.getByText('New Title')).toHaveCount(0)
+    await expect(page.getByText('Keep Me (backup)')).toHaveCount(0)
     // no success toast for import
-    await expect(page.getByText('Backup imported')).toHaveCount(0)
+    await expect(page.getByText(/Import complete/)).toHaveCount(0)
   })
 
   test('5. Invalid JSON', async ({ page }) => {
@@ -336,10 +353,9 @@ test.describe('Backup E2E', () => {
       mimeType: 'application/json',
       buffer: Buffer.from(JSON.stringify(backup)),
     })
-    await expect(page.getByRole('dialog')).toBeVisible()
-    await page.getByRole('dialog').getByRole('button', { name: 'Import', exact: true }).click()
-
-    await expect(page.getByText('Backup imported')).toBeVisible()
+    // The malformed records are dropped during normalization. No duplicates in
+    // an empty store -> no preview modal, import runs immediately.
+    await expect(page.getByText(/Import complete/)).toBeVisible()
     await expect(page.locator('article.card')).toHaveCount(1)
     await expect(page.locator('article.card').first()).toContainText('Good Link')
     // ensure app didn't crash
@@ -378,14 +394,16 @@ test.describe('Backup E2E', () => {
       mimeType: 'application/json',
       buffer: Buffer.from(JSON.stringify(backup)),
     })
-    await expect(page.getByRole('dialog')).toBeVisible()
-    await page.getByRole('dialog').getByRole('button', { name: 'Import', exact: true }).click()
-    await expect(page.getByText('Backup imported')).toBeVisible()
+    // empty store -> no duplicates -> immediate import, no preview modal
+    await expect(page.getByText(/Import complete/)).toBeVisible()
     await expect(page.locator('article.card').first()).toContainText('Persist Link')
 
     await page.reload()
     await expect(page.locator('article.card').first()).toContainText('Persist Link')
-    await expect(page.getByText('Persist User')).toBeVisible()
+    // local-first invariant: the backup's profile is deliberately NOT imported;
+    // the on-device identity is untouched.
+    await expect(page.locator('.identity-name')).toContainText('Local User')
+    await expect(page.getByText('Persist User')).toHaveCount(0)
     await expect(page.locator('article.card').first().getByRole('button', { name: 'Toggle Favorite' })).toHaveAttribute('aria-pressed', 'true')
     await expect(page.locator('article.card').first().getByRole('button', { name: 'Toggle Important' })).toHaveAttribute('aria-pressed', 'true')
     await expect(page.locator('.stat-card', { hasText: 'Favorites' }).locator('.num')).toHaveText('1')
@@ -447,9 +465,8 @@ test.describe('Backup E2E', () => {
       mimeType: 'application/json',
       buffer: Buffer.from(JSON.stringify(backup)),
     })
-    await expect(page.getByRole('dialog')).toBeVisible()
-    await page.getByRole('dialog').getByRole('button', { name: 'Import', exact: true }).click()
-    await expect(page.getByText('Backup imported')).toBeVisible()
+    // empty store -> no duplicates -> immediate import (XSS payload NOT run)
+    await expect(page.getByText(/Import complete/)).toBeVisible()
     const card = page.locator('article.card').first()
     // title should be rendered as text, not HTML
     await expect(card.getByText('<img src=x onerror=alert(1)>')).toBeVisible()
@@ -461,5 +478,72 @@ test.describe('Backup E2E', () => {
     // ensure __proto__ pollution didn't happen - check window polluted not exists
     const polluted = await page.evaluate(() => ({}).polluted)
     expect(polluted).toBeUndefined()
+  })
+
+  // Regression: the real Import button in the new merge-preview modal must
+  // actually run the import, close the dialog, and show a summary. This
+  // exercises the full DataBackup -> App.vue event boundary, NOT just
+  // mergeImportData(). Guards against the "mergeLinks is not defined" failure
+  // where the click threw and left the modal stuck open.
+  test('13. Import button (Keep existing) performs merge, closes dialog, shows summary', async ({ page }) => {
+    test.setTimeout(60000)
+    await page.goto('/')
+    await saveLink(page, { url: 'https://example.com/existing', title: 'Existing' })
+    await expect(page.locator('article.card')).toHaveCount(1)
+
+    const backup = {
+      app: 'Save_Link', version: 2, exportedAt: new Date().toISOString(), profile: { name: 'Imported' },
+      links: [
+        { id: 'dup1', originalUrl: 'https://example.com/existing', normalizedUrl: 'https://example.com/existing', url: 'https://example.com/existing', title: 'Existing (backup)', description: '', image: '', tags: [], category: 'Other', important: false, mustHave: false, favorite: false, domain: 'example.com', createdAt: new Date().toISOString() },
+        { id: 'new1', originalUrl: 'https://example.com/new1', normalizedUrl: 'https://example.com/new1', url: 'https://example.com/new1', title: 'New One', description: '', image: '', tags: [], category: 'Other', important: false, mustHave: false, favorite: false, domain: 'example.com', createdAt: new Date().toISOString() },
+      ],
+      folders: [],
+    }
+    await page.locator('.backup-card input[type="file"]').setInputFiles({
+      name: 'backup.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(backup)),
+    })
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible()
+    // Keep existing = skip (default radio)
+    await dialog.getByRole('button', { name: 'Import', exact: true }).click()
+    // dialog closes
+    await expect(dialog).toHaveCount(0)
+    // summary appears
+    await expect(page.getByText(/Import complete/)).toBeVisible()
+    // new item added, existing preserved (no duplicate card)
+    await expect(page.locator('article.card')).toHaveCount(2)
+    await expect(page.getByText('New One')).toBeVisible()
+    await expect(page.getByText('Existing', { exact: true })).toBeVisible()
+    await expect(page.getByText('Existing (backup)')).toHaveCount(0)
+  })
+
+  test('14. Import button (Replace existing) performs merge, closes dialog, shows summary', async ({ page }) => {
+    test.setTimeout(60000)
+    await page.goto('/')
+    await saveLink(page, { url: 'https://example.com/existing', title: 'Existing Local' })
+    await expect(page.locator('article.card')).toHaveCount(1)
+
+    const backup = {
+      app: 'Save_Link', version: 2, exportedAt: new Date().toISOString(), profile: { name: 'Imported' },
+      links: [
+        { id: 'dup1', originalUrl: 'https://example.com/existing', normalizedUrl: 'https://example.com/existing', url: 'https://example.com/existing', title: 'Existing REPLACED', description: '', image: '', tags: [], category: 'Other', important: false, mustHave: false, favorite: false, domain: 'example.com', createdAt: new Date().toISOString() },
+        { id: 'new1', originalUrl: 'https://example.com/new1', normalizedUrl: 'https://example.com/new1', url: 'https://example.com/new1', title: 'New One', description: '', image: '', tags: [], category: 'Other', important: false, mustHave: false, favorite: false, domain: 'example.com', createdAt: new Date().toISOString() },
+      ],
+      folders: [],
+    }
+    await page.locator('.backup-card input[type="file"]').setInputFiles({
+      name: 'backup.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(backup)),
+    })
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible()
+    // choose Replace
+    await dialog.locator('input[name="import-strategy"][value="replace"]').check()
+    await dialog.getByRole('button', { name: 'Import', exact: true }).click()
+    await expect(dialog).toHaveCount(0)
+    await expect(page.getByText(/replaced/)).toBeVisible()
+    await expect(page.locator('article.card')).toHaveCount(2)
+    await expect(page.getByText('Existing REPLACED')).toBeVisible()
+    await expect(page.getByText('Existing Local')).toHaveCount(0)
+    await expect(page.getByText('New One')).toBeVisible()
   })
 })

@@ -238,3 +238,178 @@ export async function deleteExpiredOAuthStates(db, { now = Date.now() } = {}) {
   const res = await db.prepare('DELETE FROM oauth_states WHERE expires_at <= ?').bind(now).run()
   return res.meta?.changes ?? 0
 }
+
+// ---- cloud sync objects (Phase 4 Chunk 2) -----------------------------------
+
+export const TOMBSTONE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000 // 30 days
+
+const OBJECT_TYPES = new Set(['link', 'folder'])
+const OPERATIONS = new Set(['create', 'update', 'delete'])
+
+function requireObjectType(t) {
+  if (!OBJECT_TYPES.has(t)) throw new TypeError('object_type must be "link" or "folder"')
+}
+
+function requireObjectId(id) {
+  requireNonEmpty(id, 'objectId')
+}
+
+function requireOperation(op) {
+  if (!OPERATIONS.has(op)) throw new TypeError('operation must be create, update, or delete')
+}
+
+function requireBaseRevision(rev) {
+  if (!Number.isInteger(rev) || rev < 0) throw new TypeError('base_revision must be a non-negative integer')
+}
+
+/**
+ * Read the current authoritative object for an account (live or tombstoned).
+ *
+ * @returns {Promise<{object_id, object_type, revision, deleted, deleted_at, payload}|null>}
+ */
+export async function getObject(db, { accountId, objectType, objectId }) {
+  requireAccountId(accountId)
+  requireObjectType(objectType)
+  requireObjectId(objectId)
+  return db.prepare(
+    'SELECT object_id, object_type, revision, deleted, deleted_at, payload FROM sync_objects WHERE account_id = ? AND object_id = ?'
+  ).bind(accountId, objectId).first()
+}
+
+/**
+ * Atomically apply one client mutation for an account and record its outcome
+ * in the idempotency ledger — or return the original result if this exact
+ * mutation_id was already applied.
+ *
+ * D1 transaction strategy (see api.js / spec): {account_id, mutation_id} rows
+ * are claimed with INSERT OR IGNORE, and the object write is revision-gated,
+ * ALL inside a single db.batch() (one atomic transaction). The conditionality
+ * that a naive "read-then-branch INSIDE db.batch()" cannot express is instead
+ * encoded in the SQL (WHERE revision = ?, NOT EXISTS, INSERT...SELECT), and we
+ * branch only on the returned `changes` AFTER the batch resolves. This is D1-
+ * valid, atomic, and idempotent WITHOUT the (unavailable) withSession API.
+ *
+ * @param {Object} input
+ * @param {string} input.accountId  FROM THE AUTHENTICATED SESSION ONLY
+ * @param {string} input.mutationId idempotency key, reused verbatim on retry
+ * @param {'link'|'folder'} input.objectType
+ * @param {string} input.objectId
+ * @param {'create'|'update'|'delete'} input.operation
+ * @param {number} input.baseRevision
+ * @param {string} input.payload JSON body (opaque to the store)
+ * @returns {Promise<{kind:'applied', resultRevision:number}|{kind:'replay', resultRevision:number}|{kind:'conflict', current:object|null}|{kind:'error'}>}
+ */
+export async function applyObjectMutation(db, {
+  accountId,
+  mutationId,
+  objectType,
+  objectId,
+  operation,
+  baseRevision,
+  payload,
+  now = Date.now(),
+}) {
+  requireAccountId(accountId)
+  requireNonEmpty(mutationId, 'mutationId')
+  requireObjectType(objectType)
+  requireObjectId(objectId)
+  requireOperation(operation)
+  requireBaseRevision(baseRevision)
+  requireEpochMs(now)
+
+  if (operation === 'create' && baseRevision !== 0) {
+    return { kind: 'conflict', current: await getObject(db, { accountId, objectType, objectId }) }
+  }
+
+  // Fast-path replay: an already-committed mutation_id returns its original
+  // result without touching the object. (The authoritative guard is the
+  // INSERT OR IGNORE claim inside the batch below; this read is the cheap
+  // happy path for the dominant retry-after-lost-response case.)
+  const prior = await db.prepare(
+    'SELECT result_revision FROM sync_mutations WHERE account_id = ? AND mutation_id = ?'
+  ).bind(accountId, mutationId).first()
+  if (prior) return { kind: 'replay', resultRevision: prior.result_revision }
+
+  // Build the claim + object-write SQL for ONE atomic batch. The claim's
+  // INSERT...SELECT only inserts (changes = 1) when the object is in the
+  // exact pre-mutation state the operation needs; the object write is gated
+  // by the SAME condition, so both commit together or neither does.
+  let claimSql, objSql, claimParams, objParams
+
+  if (operation === 'create') {
+    // CREATE: base_revision must be 0 (checked above) and the object must be
+    // ABSENT. result_revision = 1.
+    claimSql = `INSERT OR IGNORE INTO sync_mutations
+      (account_id, mutation_id, object_id, object_type, operation, base_revision, status, result_revision, applied_at)
+      SELECT ?, ?, ?, ?, ?, ?, 'applied', 1, ?
+      WHERE NOT EXISTS (SELECT 1 FROM sync_objects WHERE account_id = ? AND object_id = ?)`
+    claimParams = [accountId, mutationId, objectId, objectType, operation, baseRevision, now, accountId, objectId]
+    objSql = `INSERT INTO sync_objects
+      (account_id, object_id, object_type, revision, deleted, deleted_at, payload, created_at, updated_at)
+      SELECT ?, ?, ?, 1, 0, NULL, ?, ?, ?
+      WHERE NOT EXISTS (SELECT 1 FROM sync_objects WHERE account_id = ? AND object_id = ?)`
+    objParams = [accountId, objectId, objectType, payload, now, now, accountId, objectId]
+  } else if (operation === 'update') {
+    // UPDATE: base_revision must equal the current live revision; result = rev+1.
+    claimSql = `INSERT OR IGNORE INTO sync_mutations
+      (account_id, mutation_id, object_id, object_type, operation, base_revision, status, result_revision, applied_at)
+      SELECT account_id, ?, object_id, object_type, ?, ?, 'applied', revision + 1, ?
+      FROM sync_objects
+      WHERE account_id = ? AND object_id = ? AND deleted = 0 AND revision = ?`
+    claimParams = [mutationId, operation, baseRevision, now, accountId, objectId, baseRevision]
+    objSql = `UPDATE sync_objects
+      SET revision = revision + 1, payload = ?, deleted = 0, deleted_at = NULL, updated_at = ?
+      WHERE account_id = ? AND object_id = ? AND deleted = 0 AND revision = ?`
+    objParams = [payload, now, accountId, objectId, baseRevision]
+  } else {
+    // DELETE: base_revision must equal the current live revision; result = rev+1.
+    claimSql = `INSERT OR IGNORE INTO sync_mutations
+      (account_id, mutation_id, object_id, object_type, operation, base_revision, status, result_revision, applied_at)
+      SELECT account_id, ?, object_id, object_type, ?, ?, 'applied', revision + 1, ?
+      FROM sync_objects
+      WHERE account_id = ? AND object_id = ? AND deleted = 0 AND revision = ?`
+    claimParams = [mutationId, operation, baseRevision, now, accountId, objectId, baseRevision]
+    objSql = `UPDATE sync_objects
+      SET revision = revision + 1, deleted = 1, deleted_at = ?, updated_at = ?
+      WHERE account_id = ? AND object_id = ? AND deleted = 0 AND revision = ?`
+    objParams = [now, now, accountId, objectId, baseRevision]
+  }
+
+  const [claimRes, objRes] = await db.batch([
+    db.prepare(claimSql).bind(...claimParams),
+    db.prepare(objSql).bind(...objParams),
+  ])
+  const claimChanges = claimRes?.meta?.changes ?? 0
+
+  if (claimChanges === 1) {
+    // This request won the atomic claim AND the object write — committed
+    // together. result_revision for create is 1; for update/delete it was
+    // recorded in the claim as rev+1. Re-read the ledger for the exact value.
+    const recorded = await db.prepare(
+      'SELECT result_revision FROM sync_mutations WHERE account_id = ? AND mutation_id = ?'
+    ).bind(accountId, mutationId).first()
+    return { kind: 'applied', resultRevision: recorded ? recorded.result_revision : 1 }
+  }
+
+  // claimChanges === 0: the claim collided — either the mutation_id was
+  // already applied (replay) or the object was not in the expected state
+  // (conflict). Distinguish by checking the ledger.
+  const ledger = await db.prepare(
+    'SELECT result_revision FROM sync_mutations WHERE account_id = ? AND mutation_id = ?'
+  ).bind(accountId, mutationId).first()
+  if (ledger) return { kind: 'replay', resultRevision: ledger.result_revision }
+  const current = await getObject(db, { accountId, objectType, objectId })
+  return { kind: 'conflict', current }
+}
+
+/**
+ * Reclaim tombstoned objects older than the retention window. Returns the
+ * number of rows hard-deleted.
+ */
+export async function purgeExpiredTombstones(db, { now = Date.now() } = {}) {
+  requireEpochMs(now)
+  const res = await db.prepare('DELETE FROM sync_objects WHERE deleted = 1 AND deleted_at <= ?')
+    .bind(now - TOMBSTONE_RETENTION_MS)
+    .run()
+  return res.meta?.changes ?? 0
+}

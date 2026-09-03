@@ -1,14 +1,15 @@
 <template>
   <section class="about-card">
     <h4>About Save Links</h4>
-    <p>
-      Save Links is a <strong>local-first</strong> bookmark manager. No backend,
-      no authentication — all data stays in your browser.
-    </p>
+    <p>Save Links is a simple bookmark manager that keeps your links on your device.</p>
+    <p class="about-sub">Save and organize your links even when you're offline.</p>
+    <p class="about-sub">Want to use your links on another device? Create an account and sign in to sync them.</p>
     <ul>
-      <li>Links, folders, stats, and profile are stored locally on this device.</li>
-      <li>Cards, filters, and categories update instantly and locally.</li>
-      <li>Nothing leaves this device.</li>
+      <li>Your links are saved on your device first.</li>
+      <li>You don't need an account to use Save Links.</li>
+      <li>Sync is optional — use it only when you need it.</li>
+      <li>Your local profile and account are separate.</li>
+      <li>Your data stays on your device unless you choose to sync it.</li>
     </ul>
   </section>
 </template>
@@ -30,6 +31,9 @@
   font-size: 13px;
   line-height: 1.5;
   color: var(--text);
+}
+.about-card p.about-sub {
+  margin-top: 8px;
 }
 .about-card ul {
   margin: 10px 0 0;

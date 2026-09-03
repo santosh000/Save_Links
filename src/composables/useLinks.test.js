@@ -788,4 +788,122 @@ describe('useLinks', () => {
       expect(storageError.value).toBe('')
     })
   })
+
+  describe('authenticated sync queueing', () => {
+    it('queues a create mutation with base_revision 0 for a new authenticated link', async () => {
+      const { session } = await import('../auth/session.js')
+      await session.login()
+      const { useLinks } = await import('./useLinks.js')
+      const { links, addLink } = useLinks()
+      const link = await addLink({ originalUrl: 'https://example.com/synced', _prefetchedMeta: { title: 'S', description: '', image: '', domain: 'example.com' }, _prefetchedUrl: 'https://example.com/synced' })
+      expect(link.revision).toBe(0)
+      await flush()
+      const pending = await repository.getPendingMutations()
+      expect(pending.length).toBe(1)
+      expect(pending[0].operation).toBe('create')
+      expect(pending[0].object_type).toBe('link')
+      expect(pending[0].object_id).toBe(link.id)
+      expect(pending[0].base_revision).toBe(0)
+      expect(pending[0].account_id).toBe('memory-user')
+      expect(links.value.length).toBe(1) // local-first data still present
+      await session.logout()
+    })
+  })
+
+  describe('mergeLinks — device/source (savedFrom) preservation across import', () => {
+    function importedLink(normalizedUrl, title, savedFrom) {
+      return {
+        id: 'imp-' + normalizedUrl.replace(/[^a-z0-9]/gi, ''),
+        originalUrl: normalizedUrl,
+        normalizedUrl,
+        url: normalizedUrl,
+        domain: 'example.com',
+        title,
+        description: '',
+        image: '',
+        tags: [],
+        category: 'Other',
+        important: false,
+        mustHave: false,
+        favorite: false,
+        folderId: null,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        savedFrom,
+      }
+    }
+
+    it('keep-existing (skip) does not overwrite the local link device metadata', async () => {
+      const { useLinks } = await import('./useLinks.js')
+      const { links, addLink, mergeLinks } = useLinks()
+      // existing local link, saved on Windows
+      await addLink({ originalUrl: 'https://example.com/a', _prefetchedMeta: { title: 'A', description: '', image: '', domain: 'example.com' }, _prefetchedUrl: 'https://example.com/a' })
+      links.value[0].savedFrom = 'Windows'
+      await flush()
+      const createdAt = links.value[0].createdAt
+      const id = links.value[0].id
+
+      // incoming backup link is a duplicate (same url) saved on Android
+      const res = mergeLinks([importedLink('https://example.com/a', 'A (backup)', 'Android')], 'skip')
+
+      expect(res.newCount).toBe(0)
+      expect(res.replacedCount).toBe(0)
+      expect(links.value.length).toBe(1)
+      const kept = links.value[0]
+      // local link untouched: same id, same date, same device metadata
+      expect(kept.id).toBe(id)
+      expect(kept.createdAt).toBe(createdAt)
+      expect(kept.savedFrom).toBe('Windows')
+      // persisted with the local Windows metadata
+      await flush()
+      const stored = await repository.getAllLinks()
+      expect(stored[0].savedFrom).toBe('Windows')
+    })
+
+    it('replace-existing preserves the BACKUP link device metadata (Windows stays Windows)', async () => {
+      const { useLinks } = await import('./useLinks.js')
+      const { links, addLink, mergeLinks } = useLinks()
+      await addLink({ originalUrl: 'https://example.com/b', _prefetchedMeta: { title: 'B', description: '', image: '', domain: 'example.com' }, _prefetchedUrl: 'https://example.com/b' })
+      links.value[0].savedFrom = 'Android'
+      await flush()
+      const id = links.value[0].id
+      const createdAt = links.value[0].createdAt
+
+      // backup says Windows — replace must retain Windows (backup metadata), not the local Android
+      mergeLinks([importedLink('https://example.com/b', 'B (backup)', 'Windows')], 'replace')
+
+      const replaced = links.value.find(l => l.id === id)
+      expect(replaced.title).toBe('B (backup)') // backup version applied
+      expect(replaced.savedFrom).toBe('Windows') // backup device metadata retained
+      expect(replaced.createdAt).toBe(createdAt) // local date preserved
+      await flush()
+      const stored = await repository.getAllLinks()
+      expect(stored[0].savedFrom).toBe('Windows')
+    })
+
+    it('added new links retain the backup device metadata', async () => {
+      const { useLinks } = await import('./useLinks.js')
+      const { links, mergeLinks } = useLinks()
+      const res = mergeLinks([importedLink('https://example.com/new', 'New', 'Windows')], 'skip')
+      expect(res.newCount).toBe(1)
+      expect(links.value[0].savedFrom).toBe('Windows')
+      await flush()
+      const stored = await repository.getAllLinks()
+      expect(stored[0].savedFrom).toBe('Windows')
+    })
+
+    it('added new links with no device metadata stay Unknown (never re-detected from the importing device)', async () => {
+      const { useLinks } = await import('./useLinks.js')
+      const { links, mergeLinks } = useLinks()
+      // DataBackup always passes normalizer output, so a backup link with no
+      // savedFrom arrives here as 'Unknown' (normalizeLink default) — never as
+      // the importing device's platform. Assert mergeLinks keeps that intact.
+      const res = mergeLinks([importedLink('https://example.com/nometa', 'No Meta', 'Unknown')], 'skip')
+      expect(res.newCount).toBe(1)
+      // not stamped with the importing device's platform
+      expect(links.value[0].savedFrom).toBe('Unknown')
+      await flush()
+      const stored = await repository.getAllLinks()
+      expect(stored[0].savedFrom).toBe('Unknown')
+    })
+  })
 })

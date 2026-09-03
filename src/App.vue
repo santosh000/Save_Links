@@ -1,28 +1,32 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { sortLinks, SORT_OPTIONS, DEFAULT_SORT } from './utils/sort.js'
+import { pickImportSlices } from './utils/backup.js'
 import { useLinks, DuplicateLinkError } from './composables/useLinks.js'
 import { useProfile } from './composables/useProfile.js'
 import { useFolders } from './composables/useFolders.js'
 import { useSettings } from './composables/useSettings.js'
+import { session } from './auth/session.js'
 import AppDialog from './components/AppDialog.vue'
-import Profile from './components/Profile.vue'
 import AddLink from './components/AddLink.vue'
 import LinkCard from './components/LinkCard.vue'
 import StatsPanel from './components/StatsPanel.vue'
 import SearchFilter from './components/SearchFilter.vue'
 import About from './components/About.vue'
 import DataBackup from './components/DataBackup.vue'
+import SyncPanel from './components/SyncPanel.vue'
+import AccountPanel from './components/AccountPanel.vue'
+import LocalProfilePanel from './components/LocalProfilePanel.vue'
 import FolderManager from './components/FolderManager.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import pkg from '../package.json'
 
 const appVersion = pkg.version
 
-const { links, total, importantCount, mustHaveCount, favoriteCount, byCategory, storageError, addLink, replaceLink, toggleImportant, toggleMustHave, toggleFavorite, setStatus, removeLink, updateLink, setLinks, moveLinksFromFolder } = useLinks()
-const { profile, updateProfile, setProfile } = useProfile()
-const { folders, createFolder, renameFolder, deleteFolder, setFolders } = useFolders()
-const { appearance, colorScheme, setAppearance, setColorScheme, setSettings } = useSettings()
+const { links, total, importantCount, mustHaveCount, favoriteCount, byCategory, storageError, addLink, replaceLink, toggleImportant, toggleMustHave, toggleFavorite, setStatus, removeLink, updateLink, setLinks, moveLinksFromFolder, mergeLinks } = useLinks()
+const { profile, updateProfile } = useProfile()
+const { folders, createFolder, renameFolder, deleteFolder, setFolders, mergeFolders } = useFolders()
+const { appearance, colorScheme, setAppearance, setColorScheme } = useSettings()
 
 const search = ref('')
 const filterCategory = ref('')
@@ -36,6 +40,32 @@ const sortBy = ref(DEFAULT_SORT)
 // The two drawers are mutually exclusive by construction — toggling one open
 // can never leave the other open (a single assignment per interaction).
 const activeDrawer = ref(null)
+
+// Online account/auth panel (distinct from the local Profile identity).
+const accountOpen = ref(false)
+function toggleAccount() {
+  accountOpen.value = !accountOpen.value
+}
+
+// Local Profile panel (local-only identity, separate from the online account).
+const localProfileOpen = ref(false)
+function openLocalProfile() {
+  localProfileOpen.value = true
+}
+function closeLocalProfile() {
+  localProfileOpen.value = false
+}
+function saveLocalProfile(name, bio) {
+  updateProfile({ name, bio })
+}
+
+// Session/authentication state (for unified identity display)
+const authState = ref(session.getState())
+let authUnsubscribe = null
+onMounted(() => {
+  authUnsubscribe = session.subscribe((state) => { authState.value = state })
+})
+onBeforeUnmount(() => { authUnsubscribe?.() })
 
 function toggleDrawer(name) {
   activeDrawer.value = activeDrawer.value === name ? null : name
@@ -155,22 +185,14 @@ function requestDeleteFolder(id) {
   })
 }
 
-function requestImport(data) {
-  pendingImport.value = data
-  openDialog({
-    kind: 'import',
-    title: 'Import backup?',
-    message: 'This will replace your current Save Links data. Your existing data may be lost. Continue?',
-    buttons: [
-      { label: 'Import', variant: 'danger', value: 'confirm' },
-      { label: 'Cancel', variant: 'ghost', value: 'cancel', default: true }
-    ]
-  })
+function requestImport(payload) {
+  // The new preview modal in DataBackup.vue already handles the confirmation.
+  // Directly proceed with the import using the selected strategy.
+  handleImportBackup(payload)
 }
 
 const dialog = ref(null)
 const pendingDuplicate = ref(null)
-const pendingImport = ref(null)
 const lastTrigger = ref(null)
 
 function openDialog(cfg) {
@@ -218,10 +240,8 @@ function onDialogChoose(value) {
         if (filterFolder.value === cfg.id) filterFolder.value = ''
         showToast('Folder deleted')
       }
-    } else if (cfg.kind === 'import') {
-      if (value === 'confirm' && pendingImport.value) handleImportBackup(pendingImport.value)
-      pendingImport.value = null
     }
+    // 'import' kind is handled directly in requestImport() without dialog
   }
   closeDialog()
 }
@@ -231,21 +251,23 @@ function handleEdit(id, patch) {
   showToast('Link updated')
 }
 
-function handleImportBackup(data) {
-  // data from normalizeBackupData may contain profile, links, folders, settings
-  const importedProfile = data.profile
-  const importedLinks = data.links
-  const importedFolders = data.folders || []
-  const importedSettings = data.settings || data
-  setLinks(importedLinks)
-  setProfile(importedProfile)
-  setFolders(importedFolders)
-  if (importedSettings) {
-    const a = importedSettings.appearance || data.appearance
-    const c = importedSettings.colorScheme || data.colorScheme
-    if (a || c) setSettings({ appearance: a, colorScheme: c })
-  }
-  showToast('Backup imported')
+function handleImportBackup(payload) {
+  // payload: { data: { links, folders }, strategy: 'skip'|'replace' }
+  // Import ONLY the bookmark and folder data. The Local Profile and the
+  // device-local appearance/color-scheme preferences are NOT overwritten.
+  const { data, strategy = 'skip' } = payload
+  const { links, folders } = pickImportSlices(data)
+
+  const linkResult = mergeLinks(links, strategy)
+  const folderResult = mergeFolders(folders, strategy)
+
+  const parts = []
+  if (linkResult.newCount) parts.push(`${linkResult.newCount} link${linkResult.newCount > 1 ? 's' : ''} added`)
+  if (folderResult.newCount) parts.push(`${folderResult.newCount} folder${folderResult.newCount > 1 ? 's' : ''} added`)
+  if (linkResult.replacedCount) parts.push(`${linkResult.replacedCount} link${linkResult.replacedCount > 1 ? 's' : ''} replaced`)
+  if (folderResult.replacedCount) parts.push(`${folderResult.replacedCount} folder${folderResult.replacedCount > 1 ? 's' : ''} replaced`)
+
+  showToast(parts.length ? `Import complete: ${parts.join(', ')}` : 'Import complete: no changes')
 }
 
 // Expected business errors (e.g. duplicate folder name) are reported to
@@ -326,11 +348,26 @@ const hasLinks = computed(() => links.value.length > 0)
             <div class="brand-sub">Local-first bookmark manager</div>
           </div>
         </div>
-        <div class="top-actions">
+<div class="top-actions">
           <span class="pill-count">{{ total }} links</span>
           <button type="button" class="nav-toggle" :aria-expanded="activeDrawer === 'folders'" aria-controls="nav-col" aria-label="Toggle folders navigation" @click="toggleDrawer('folders')">☰ Folders</button>
-          <button type="button" class="util-toggle" :aria-expanded="activeDrawer === 'filters'" aria-controls="side-col" aria-label="Toggle filters and tools" @click="toggleDrawer('filters')">⚙<span class="util-toggle-name">Filters &amp; tools</span></button>
-          <Profile :profile="profile" compact @update="updateProfile" />
+          <button type="button" class="util-toggle" :aria-expanded="activeDrawer === 'filters'" aria-controls="side-col" aria-label="Toggle filters and tools" @click="toggleDrawer('filters')">⚙<span class="util-toggle-name">Filters & tools</span></button>
+          <button
+            type="button"
+            class="identity-btn"
+            :aria-expanded="accountOpen"
+            :aria-label="authState.status === 'authenticated' ? 'Account menu, signed in as ' + profile.name : 'Account menu, sign in' "
+            @click="toggleAccount"
+          >
+            <div class="identity-avatar">{{ profile.name.trim().split(/\s+/).filter(Boolean).map(s => s[0]).join('').slice(0, 2).toUpperCase() || 'L' }}</div>
+            <div class="identity-info">
+              <div class="identity-name">{{ profile.name }}</div>
+              <div class="identity-status">
+                <span v-if="authState.status === 'authenticated'" class="status-dot" aria-hidden="true"></span>
+                <span>{{ authState.status === 'authenticated' ? 'Signed in' : 'Sign in' }}</span>
+              </div>
+            </div>
+          </button>
         </div>
       </div>
     </header>
@@ -400,6 +437,7 @@ const hasLinks = computed(() => links.value.length > 0)
 
       <div id="side-col" class="side-col">
         <DataBackup :links="links" :profile="profile" :folders="folders" :appearance="appearance" :color-scheme="colorScheme" @import-request="requestImport" @show-toast="showToast" />
+        <SyncPanel />
         <SearchFilter
           v-model:category="filterCategory"
           v-model:folder="filterFolder"
@@ -429,7 +467,22 @@ const hasLinks = computed(() => links.value.length > 0)
       @close="closeDialog"
     />
 
-    <footer class="footer">Local data only • No account • No cloud sync • Data stays on this device • v{{ appVersion }}</footer>
+    <AccountPanel
+      :open="accountOpen"
+      :local-profile="profile"
+      @close="accountOpen = false"
+      @edit-local-profile="openLocalProfile"
+    />
+
+    <LocalProfilePanel
+      :open="localProfileOpen"
+      :name="profile.name"
+      :bio="profile.bio"
+      @save="saveLocalProfile"
+      @close="closeLocalProfile"
+    />
+
+    <footer class="footer">Local-first bookmark manager • Sign in to sync across devices • v{{ appVersion }}</footer>
   </div>
 </template>
 
@@ -513,6 +566,65 @@ const hasLinks = computed(() => links.value.length > 0)
 }
 .nav-toggle:hover, .util-toggle:hover { border-color: var(--accent-border); }
 .nav-toggle[aria-expanded="true"], .util-toggle[aria-expanded="true"] { background: var(--accent-bg); border-color: var(--accent-border); color: var(--accent); }
+.account-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  color: var(--text-h);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+.account-toggle:hover { border-color: var(--accent-border); }
+.account-toggle[aria-expanded="true"] { background: var(--accent-bg); border-color: var(--accent-border); color: var(--accent); }
+.account-icon { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+
+/* Unified identity button */
+.identity-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px 6px 8px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+  color: var(--text-h);
+}
+.identity-btn:hover { background: var(--muted-bg); border-color: var(--accent-border); }
+.identity-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.identity-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.identity-info { display: flex; flex-direction: column; min-width: 0; }
+.identity-name { font-weight: 700; font-size: 13px; color: var(--text-h); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.identity-status { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; color: var(--muted); }
+.identity-status .status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--success, #22c55e);
+  flex-shrink: 0;
+}
+.identity-status.signed-out .status-dot {
+  background: var(--muted);
+}
 .nav-backdrop, .util-backdrop {
   position: fixed; inset: 0; z-index: 9;
   background: rgba(15, 23, 42, 0.4);

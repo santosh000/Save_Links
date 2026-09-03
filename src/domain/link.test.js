@@ -29,6 +29,9 @@ describe('normalizeLink', () => {
       status: 'important',
       createdAt: '2024-01-01T00:00:00.000Z',
       savedFrom: 'Unknown',
+      // v2 sync fields
+      revision: 0,
+      account_id: null,
     }
     const again = normalizeLink(canonical)
     expect(again).toEqual(canonical)

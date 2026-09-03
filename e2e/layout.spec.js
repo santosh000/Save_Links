@@ -139,9 +139,11 @@ test.describe('Layout redesign', () => {
       await clearStorage(page)
       await page.setViewportSize({ width, height: 667 })
       await page.goto('/')
-      // profile lives in the header and stays editable
-      await expect(page.locator('.profile')).toBeInViewport()
-      await expect(page.getByRole('button', { name: 'Edit', exact: true })).toBeVisible()
+      // profile lives in the header (identity) and opens the account panel
+      await expect(page.locator('.identity-btn')).toBeInViewport()
+      await page.locator('.identity-btn').click()
+      await expect(page.getByRole('dialog', { name: 'Account' })).toBeVisible()
+      await page.keyboard.press('Escape')
       // topbar toggles present
       await expect(page.getByRole('button', { name: 'Toggle folders navigation' })).toBeVisible()
       await expect(page.getByRole('button', { name: 'Toggle filters and tools' })).toBeVisible()

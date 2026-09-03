@@ -29,6 +29,7 @@ import {
   getSessionByToken,
   revokeSessionByToken,
   createSession,
+  applyObjectMutation,
 } from './db/store.js'
 import {
   jsonResponse,
@@ -147,8 +148,124 @@ export async function handleApiSessionRefresh(request, env, { now = Date.now() }
   }
 }
 
-// ---- Reusable API boundary convention (for state-changing endpoints) ----------
+// ---- POST /api/sync/mutation -------------------------------------------------
 
+const SYNC_BODY_MAX = 512 * 1024
+
+/**
+ * Apply one queued client mutation against the server-authoritative object
+ * storage (Phase 4 Chunk 2). This is the cloud-sync protocol foundation:
+ * objective A (push mutation), B (server behavior), C (idempotency), E (error
+ * semantics), F (atomicity).
+ *
+ * Security flow (strict order, POST enforced by the router):
+ *   1. POST                                            (router)
+ *   2. missing DB binding                              -> 503
+ *   3. Origin/Referer gate (state-changing)            -> 403 / 503
+ *   4. read presented session cookie, resolve account  -> 401 on any failure
+ *   5. parse + structurally validate the JSON body     -> 400 on malformed
+ *   6. delegate the whole mutation to store.applyObjectMutation, which does the
+ *      atomic object write + idempotency-record in ONE db.batch() transaction
+ *   7. map the structured result to HTTP
+ *
+ * account_id is NEVER read from the body — it comes exclusively from the
+ * authenticated session (invariant 4). The local record's account_id is
+ * informational only; the server derives the true owner from the cookie.
+ *
+ * Response mapping:
+ *   applied / replay -> 200 { accepted: true, result_revision }
+ *   conflict         -> 409 { accepted: false, reason: 'revision_conflict', current }
+ *   internal error   -> 500 { error: 'server_error' } (no internals leaked)
+ *
+ * The "duplicate mutation_id" replay is a successful 200 with the ORIGINAL
+ * result_revision (idempotent retry), indistinguishable from a first apply.
+ */
+export async function handleApiSyncMutation(request, env, { now = Date.now() } = {}) {
+  if (!env.DB) return jsonResponse(503, { error: 'unavailable' })
+
+  const gate = requireApiOrigin(request, env)
+  if (gate.status) {
+    return jsonResponse(gate.status, gate.status === 503 ? { error: 'unavailable' } : { error: 'forbidden' })
+  }
+
+  const presented = readSessionCookie(request)
+  if (!presented) return jsonResponse(401, { error: 'unauthenticated' })
+
+  try {
+    const session = await getSessionByToken(env.DB, { token: presented.token, now })
+    if (!session) return jsonResponse(401, { error: 'unauthenticated' })
+    const account = await getAccount(env.DB, { accountId: session.account_id })
+    if (!account) return jsonResponse(401, { error: 'unauthenticated' })
+    const accountId = account.account_id
+
+    let body
+    try {
+      const raw = await request.text()
+      if (raw.length > SYNC_BODY_MAX) return jsonResponse(400, { error: 'malformed_mutation' })
+      body = JSON.parse(raw)
+    } catch {
+      return jsonResponse(400, { error: 'malformed_mutation' })
+    }
+
+    const mutation = parseMutation(body)
+    if (!mutation) return jsonResponse(400, { error: 'malformed_mutation' })
+
+    const result = await applyObjectMutation(env.DB, { accountId, now, ...mutation })
+
+    if (result.kind === 'applied' || result.kind === 'replay') {
+      return jsonResponse(200, { accepted: true, result_revision: result.resultRevision })
+    }
+    if (result.kind === 'conflict') {
+      const c = result.current
+      const current = c
+        ? {
+            object_id: c.object_id,
+            object_type: c.object_type,
+            revision: c.revision,
+            deleted: c.deleted === 1,
+            deleted_at: c.deleted_at,
+            payload: safePayload(c.payload),
+          }
+        : null
+      return jsonResponse(409, { accepted: false, reason: 'revision_conflict', current })
+    }
+    return jsonResponse(500, { error: 'server_error' })
+  } catch {
+    return jsonResponse(500, { error: 'server_error' })
+  }
+}
+
+/** Opaque JSON payload — never rendered server-side, so pass it through as-is. */
+function safePayload(payload) {
+  try { return typeof payload === 'string' ? JSON.parse(payload) : payload } catch { return null }
+}
+
+/**
+ * Parse + validate the push-mutation body. Returns the mutation fields the
+ * store needs, or null when malformed. account_id is deliberately absent here
+ * (session-derived). Sizes of every string field are bounded defensively.
+ */
+function parseMutation(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null
+  const getStr = (v, max) => (typeof v === 'string' && v.length > 0 && v.length <= max ? v : null)
+
+  const mutationId = getStr(body.mutation_id, 128)
+  const objectId = getStr(body.object_id, 128)
+  const objectType = getStr(body.object_type, 32)
+  const operation = getStr(body.operation, 16)
+  const baseRevision = body.base_revision
+  const payload = body.payload
+
+  if (!mutationId || !objectId || !objectType || !operation) return null
+  if (objectType !== 'link' && objectType !== 'folder') return null
+  if (operation !== 'create' && operation !== 'update' && operation !== 'delete') return null
+  if (typeof baseRevision !== 'number' || !Number.isInteger(baseRevision) || baseRevision < 0) return null
+  if (typeof payload !== 'string' || payload.length === 0 || payload.length > SYNC_BODY_MAX) return null
+
+  return { mutationId, objectType, objectId, operation, baseRevision, payload }
+}
+
+// ---- Reusable API boundary convention (for state-changing endpoints) ----------
 /**
  * Origin/Referer gate for state-changing /api/* endpoints (used by
  * POST /api/session/refresh).

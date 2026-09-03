@@ -11,9 +11,14 @@ import worker from './index.js'
 import {
   handleApiMe,
   handleApiSessionRefresh,
+  handleApiSyncMutation,
   requireApiOrigin,
 } from './api.js'
 import { createTestDb } from './db/d1-facade.js'
+import {
+  applyObjectMutation,
+  getObject,
+} from './db/store.js'
 import {
   createSession,
   generateSessionToken,
@@ -158,9 +163,15 @@ describe('GET /api/me — authenticated boundary', () => {
     const { token } = await seedSession(env)
     const res = await handleApiMe(meRequest(`${DEV_COOKIE}=${encodeURIComponent(token)}`), env, { now: NOW })
     const body = await res.text()
-    expect(body).not.toContain(token)
-    expect(body).not.toContain('42') // GitHub provider subject, even as plaintext
-    expect(body).not.toContain('github')
+    expect(body).not.toContain(token) // raw session token never echoed
+    expect(body).not.toContain('github') // provider never named
+    // accountId is opaque: never the GitHub numeric provider subject ('42').
+    // Compare exactly, not by substring scan — a random UUID can legitimately
+    // contain the two characters '42' (e.g. "...-42d2-...") and would
+    // false-flag a raw-body scan.
+    const json = JSON.parse(body)
+    expect(json.authenticated).toBe(true)
+    expect(json.accountId).not.toBe('42')
   })
 })
 
@@ -588,5 +599,199 @@ describe('/api/session/refresh routing + method enforcement', () => {
     const res = await worker.fetch(new Request('http://localhost:8787/auth/github/login', { method: 'POST' }), env)
     expect(res.status).toBe(405)
     expect(res.headers.get('allow')).toBe('GET')
+  })
+})
+
+describe('POST /api/sync/mutation — cloud sync protocol', () => {
+  const SYNC_URL = 'http://localhost:8787/api/sync/mutation'
+
+  function syncRequest({ origin, cookie, body }) {
+    const headers = new Headers()
+    if (origin) headers.set('Origin', origin)
+    if (cookie) headers.set('Cookie', cookie)
+    headers.set('Content-Type', 'application/json')
+    return new Request(SYNC_URL, { method: 'POST', headers, body: JSON.stringify(body) })
+  }
+
+  it('no DB binding -> 503', async () => {
+    const env = makeEnv({ DB: undefined })
+    const res = await handleApiSyncMutation(
+      syncRequest({ origin: 'http://localhost:8787', cookie: `${DEV_COOKIE}=fake`, body: { mutation_id: 'm1', object_type: 'link', object_id: 'o1', operation: 'create', base_revision: 0, payload: '{}' } }),
+      env, { now: NOW }
+    )
+    expect(res.status).toBe(503)
+  })
+
+  it('missing session cookie -> 401', async () => {
+    const env = makeEnv()
+    const res = await handleApiSyncMutation(
+      syncRequest({ origin: 'http://localhost:8787', body: { mutation_id: 'm1', object_type: 'link', object_id: 'o1', operation: 'create', base_revision: 0, payload: '{}' } }),
+      env, { now: NOW }
+    )
+    expect(res.status).toBe(401)
+    expect(await res.json()).toEqual({ error: 'unauthenticated' })
+  })
+
+  it('cross-site request -> 403', async () => {
+    const env = makeEnv()
+    const { token } = await seedSession(env)
+    const res = await handleApiSyncMutation(
+      syncRequest({ origin: 'https://evil.com', cookie: `${DEV_COOKIE}=${token}`, body: { mutation_id: 'm1', object_type: 'link', object_id: 'o1', operation: 'create', base_revision: 0, payload: '{}' } }),
+      env, { now: NOW }
+    )
+    expect(res.status).toBe(403)
+    expect(await res.json()).toEqual({ error: 'forbidden' })
+  })
+
+  it('malformed JSON body -> 400', async () => {
+    const env = makeEnv()
+    const { token } = await seedSession(env)
+    const headers = new Headers()
+    headers.set('Origin', 'http://localhost:8787')
+    headers.set('Cookie', `${DEV_COOKIE}=${token}`)
+    headers.set('Content-Type', 'application/json')
+    const bad = new Request(SYNC_URL, { method: 'POST', headers, body: 'not-json' })
+    const res = await handleApiSyncMutation(bad, env, { now: NOW })
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'malformed_mutation' })
+  })
+
+  it('missing required fields -> 400', async () => {
+    const env = makeEnv()
+    const { token } = await seedSession(env)
+    const res = await handleApiSyncMutation(
+      syncRequest({ origin: 'http://localhost:8787', cookie: `${DEV_COOKIE}=${token}`, body: { mutation_id: 'm1' } }),
+      env, { now: NOW }
+    )
+    expect(res.status).toBe(400)
+  })
+
+  it('bad object_type -> 400', async () => {
+    const env = makeEnv()
+    const { token } = await seedSession(env)
+    const res = await handleApiSyncMutation(
+      syncRequest({ origin: 'http://localhost:8787', cookie: `${DEV_COOKIE}=${token}`, body: { mutation_id: 'm1', object_type: 'note', object_id: 'o1', operation: 'create', base_revision: 0, payload: '{}' } }),
+      env, { now: NOW }
+    )
+    expect(res.status).toBe(400)
+  })
+
+  it('bad base_revision -> 400', async () => {
+    const env = makeEnv()
+    const { token } = await seedSession(env)
+    const res = await handleApiSyncMutation(
+      syncRequest({ origin: 'http://localhost:8787', cookie: `${DEV_COOKIE}=${token}`, body: { mutation_id: 'm1', object_type: 'link', object_id: 'o1', operation: 'create', base_revision: -1, payload: '{}' } }),
+      env, { now: NOW }
+    )
+    expect(res.status).toBe(400)
+  })
+
+  it('create accepted -> 200 { accepted: true, result_revision: 1 }', async () => {
+    const env = makeEnv()
+    const { accountId, token } = await seedSession(env)
+    const objectId = crypto.randomUUID()
+    const res = await handleApiSyncMutation(
+      syncRequest({ origin: 'http://localhost:8787', cookie: `${DEV_COOKIE}=${token}`, body: { mutation_id: crypto.randomUUID(), object_type: 'link', object_id: objectId, operation: 'create', base_revision: 0, payload: '{"url":"x"}' } }),
+      env, { now: NOW }
+    )
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body).toEqual({ accepted: true, result_revision: 1 })
+    // verify stored on server
+    const row = await getObject(env.DB, { accountId, objectType: 'link', objectId })
+    expect(row.revision).toBe(1)
+    expect(row.deleted).toBe(0)
+  })
+
+  it('idempotent replay of same mutation_id -> 200 with original result', async () => {
+    const env = makeEnv()
+    const { accountId, token } = await seedSession(env)
+    const objectId = crypto.randomUUID()
+    const mutationId = crypto.randomUUID()
+    const body = { mutation_id: mutationId, object_type: 'link', object_id: objectId, operation: 'create', base_revision: 0, payload: '{}' }
+    const res1 = await handleApiSyncMutation(syncRequest({ origin: 'http://localhost:8787', cookie: `${DEV_COOKIE}=${token}`, body }), env, { now: NOW })
+    expect(res1.status).toBe(200)
+    const res2 = await handleApiSyncMutation(syncRequest({ origin: 'http://localhost:8787', cookie: `${DEV_COOKIE}=${token}`, body }), env, { now: NOW })
+    expect(res2.status).toBe(200)
+    expect(await res2.json()).toEqual({ accepted: true, result_revision: 1 })
+    // object revision unchanged (not bumped twice)
+    expect((await getObject(env.DB, { accountId, objectType: 'link', objectId })).revision).toBe(1)
+  })
+
+  it('create conflict (existing object) -> 409', async () => {
+    const env = makeEnv()
+    const { accountId, token } = await seedSession(env)
+    const objectId = crypto.randomUUID()
+    await applyObjectMutation(env.DB, { accountId, mutationId: crypto.randomUUID(), objectType: 'link', objectId, operation: 'create', baseRevision: 0, payload: '{}', now: NOW })
+    const res = await handleApiSyncMutation(
+      syncRequest({ origin: 'http://localhost:8787', cookie: `${DEV_COOKIE}=${token}`, body: { mutation_id: crypto.randomUUID(), object_type: 'link', object_id: objectId, operation: 'create', base_revision: 0, payload: '{}' } }),
+      env, { now: NOW }
+    )
+    expect(res.status).toBe(409)
+    const body = await res.json()
+    expect(body.accepted).toBe(false)
+    expect(body.reason).toBe('revision_conflict')
+    expect(body.current.revision).toBe(1)
+  })
+
+  it('update accepted -> 200 with incremented revision', async () => {
+    const env = makeEnv()
+    const { accountId, token } = await seedSession(env)
+    const objectId = crypto.randomUUID()
+    const mutationId = crypto.randomUUID()
+    await applyObjectMutation(env.DB, { accountId, mutationId: crypto.randomUUID(), objectType: 'link', objectId, operation: 'create', baseRevision: 0, payload: '{}', now: NOW })
+    const res = await handleApiSyncMutation(
+      syncRequest({ origin: 'http://localhost:8787', cookie: `${DEV_COOKIE}=${token}`, body: { mutation_id: mutationId, object_type: 'link', object_id: objectId, operation: 'update', base_revision: 1, payload: '{"v":2}' } }),
+      env, { now: NOW }
+    )
+    expect(res.status).toBe(200)
+    expect((await res.json()).result_revision).toBe(2)
+  })
+
+  it('stale base_revision -> 409 with current object', async () => {
+    const env = makeEnv()
+    const { accountId, token } = await seedSession(env)
+    const objectId = crypto.randomUUID()
+    await applyObjectMutation(env.DB, { accountId, mutationId: crypto.randomUUID(), objectType: 'link', objectId, operation: 'create', baseRevision: 0, payload: '{}', now: NOW })
+    await applyObjectMutation(env.DB, { accountId, mutationId: crypto.randomUUID(), objectType: 'link', objectId, operation: 'update', baseRevision: 1, payload: '{}', now: NOW })
+    const res = await handleApiSyncMutation(
+      syncRequest({ origin: 'http://localhost:8787', cookie: `${DEV_COOKIE}=${token}`, body: { mutation_id: crypto.randomUUID(), object_type: 'link', object_id: objectId, operation: 'update', base_revision: 1, payload: '{}' } }),
+      env, { now: NOW }
+    )
+    const body = await res.json()
+    expect(res.status, JSON.stringify(body)).toBe(409)
+    expect(body.reason).toBe('revision_conflict')
+    expect(body.current.revision).toBe(2)
+  })
+
+  it('delete accepted -> 200; tombstone preserved on server', async () => {
+    const env = makeEnv()
+    const { accountId, token } = await seedSession(env)
+    const objectId = crypto.randomUUID()
+    await applyObjectMutation(env.DB, { accountId, mutationId: crypto.randomUUID(), objectType: 'folder', objectId, operation: 'create', baseRevision: 0, payload: '{}', now: NOW })
+    const res = await handleApiSyncMutation(
+      syncRequest({ origin: 'http://localhost:8787', cookie: `${DEV_COOKIE}=${token}`, body: { mutation_id: crypto.randomUUID(), object_type: 'folder', object_id: objectId, operation: 'delete', base_revision: 1, payload: '{}' } }),
+      env, { now: NOW }
+    )
+    expect(res.status).toBe(200)
+    expect((await res.json()).result_revision).toBe(2)
+    const row = await getObject(env.DB, { accountId, objectType: 'folder', objectId })
+    expect(row.deleted).toBe(1)
+    expect(row.revision).toBe(2)
+  })
+
+  it('account scoping: own mutation only targets own account', async () => {
+    const env = makeEnv()
+    const { token } = await seedSession(env)
+    const otherAccountId = (await resolveAccountByProvider(env.DB, { provider: 'github', providerSubject: '99', now: NOW })).account_id
+    const objectId = crypto.randomUUID()
+    // create in another account
+    await applyObjectMutation(env.DB, { accountId: otherAccountId, mutationId: crypto.randomUUID(), objectType: 'link', objectId, operation: 'create', baseRevision: 0, payload: '{}', now: NOW })
+    // authed user tries to create same objectId (different namespace) -> accepted
+    const res = await handleApiSyncMutation(
+      syncRequest({ origin: 'http://localhost:8787', cookie: `${DEV_COOKIE}=${token}`, body: { mutation_id: crypto.randomUUID(), object_type: 'link', object_id: objectId, operation: 'create', base_revision: 0, payload: '{}' } }),
+      env, { now: NOW }
+    )
+    expect(res.status).toBe(200)
   })
 })

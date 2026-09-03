@@ -2,9 +2,10 @@ import { ref, computed, watch } from 'vue'
 import { repository } from '../storage/repository.js'
 import { bootState } from '../storage/migration.js'
 import { categorizeUrl, getDomain, normalizeUrl } from '../utils/categorize.js'
-import { normalizeLink } from '../domain/link.js'
+import { normalizeLink, generateId } from '../domain/link.js'
 import { fetchMetadata, guessTitleSync } from '../utils/metadata.js'
 import { detectPlatform } from '../utils/device.js'
+import { session } from '../auth/session.js'
 
 export const STATUSES = ['important', 'must-have']
 
@@ -17,10 +18,6 @@ export class DuplicateLinkError extends Error {
     this.name = 'DuplicateLinkError'
     this.existing = existing
   }
-}
-
-function newLinkId() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
 }
 
 // True when the submission carries prefetched metadata for the SAME
@@ -72,7 +69,10 @@ function buildLinkSpec(payload, normalized) {
     mustHave,
     favorite,
     folderId,
-    status: important && mustHave ? 'both' : important ? 'important' : mustHave ? 'must-have' : null
+    status: important && mustHave ? 'both' : important ? 'important' : mustHave ? 'must-have' : null,
+    // v2 sync field — new objects start at revision 0 (server-authoritative
+    // once server ACK lands; never incremented locally)
+    revision: 0
   }
 }
 
@@ -123,8 +123,22 @@ export function useLinks() {
     if (existing && !options.allowDuplicate) throw new DuplicateLinkError(existing)
 
     const spec = buildLinkSpec(payload, normalized)
-    const link = { id: newLinkId(), createdAt: new Date().toISOString(), savedFrom: detectPlatform(), ...spec }
+    const link = { id: generateId(), createdAt: new Date().toISOString(), savedFrom: detectPlatform(), ...spec }
     links.value.unshift(link)
+
+    // Create pending mutation for sync (if authenticated)
+    const accountId = session.getState().user?.id
+    if (accountId) {
+      await repository.addPendingMutation(
+        'create',
+        link.id,
+        'link',
+        link,
+        accountId,
+        link.revision // base_revision = 0 for new objects
+      )
+    }
+
     enrichMetadata(link.id, normalized, payload)
     return link
   }
@@ -152,7 +166,21 @@ export function useLinks() {
       image: spec.image
     })
     const updated = links.value.find(l => l.id === id) || null
-    if (updated) enrichMetadata(updated.id, normalized, payload)
+    if (updated) {
+      enrichMetadata(updated.id, normalized, payload)
+      // Create pending mutation for sync (if authenticated)
+      const accountId = session.getState().user?.id
+      if (accountId) {
+        await repository.addPendingMutation(
+          'update',
+          updated.id,
+          'link',
+          updated,
+          accountId,
+          updated.revision
+        )
+      }
+    }
     return updated
   }
 
@@ -210,6 +238,19 @@ export function useLinks() {
     if (patch.normalizedUrl) merged.url = patch.normalizedUrl
     if (patch.url && !patch.normalizedUrl) merged.normalizedUrl = patch.url
     links.value.splice(idx, 1, merged)
+
+    // Create pending mutation for sync (if authenticated)
+    const accountId = session.getState().user?.id
+    if (accountId) {
+      repository.addPendingMutation(
+        'update',
+        merged.id,
+        'link',
+        merged,
+        accountId,
+        merged.revision
+      ).catch(err => console.warn('Failed to queue mutation:', err))
+    }
   }
 
   function toggleImportant(id) {
@@ -239,12 +280,73 @@ export function useLinks() {
   }
 
   function removeLink(id) {
+    const link = links.value.find(l => l.id === id)
     links.value = links.value.filter(l => l.id !== id)
+
+    // Create pending mutation for sync (if authenticated)
+    if (link) {
+      const accountId = session.getState().user?.id
+      if (accountId) {
+        repository.addPendingMutation(
+          'delete',
+          id,
+          'link',
+          { id },
+          accountId,
+          link.revision
+        ).catch(err => console.warn('Failed to queue mutation:', err))
+      }
+    }
   }
 
   function setLinks(newLinks) {
-    // Replace all links (used by backup import) — keep in-memory state, persist via watch
+    // Replace all links (used by backup import with replace strategy) — keep in-memory state, persist via watch
     links.value = Array.isArray(newLinks) ? newLinks.map(normalizeLink).filter(Boolean) : []
+  }
+
+  // Merge imported links with existing links using the given strategy
+  // strategy: 'skip' (default) - keep existing, ignore imported duplicates
+  // strategy: 'replace' - replace existing duplicates with imported versions (preserving id/createdAt/user fields)
+  function mergeLinks(importedLinks, strategy = 'skip') {
+    const existing = links.value
+    const existingByUrl = new Map()
+    for (const l of existing) {
+      if (l.normalizedUrl) existingByUrl.set(l.normalizedUrl, l)
+    }
+
+    const newLinks = []
+    const merged = [...existing]
+
+    for (const imported of importedLinks) {
+      if (!imported.normalizedUrl) continue
+      const existingLink = existingByUrl.get(imported.normalizedUrl)
+      if (existingLink) {
+        if (strategy === 'replace') {
+          const idx = merged.findIndex(l => l.id === existingLink.id)
+          if (idx !== -1) {
+            const preserved = {
+              id: existingLink.id,
+              createdAt: existingLink.createdAt,
+              folderId: existingLink.folderId,
+              tags: existingLink.tags,
+              important: existingLink.important,
+              mustHave: existingLink.mustHave,
+              favorite: existingLink.favorite,
+              revision: existingLink.revision,
+              account_id: existingLink.account_id,
+            }
+            merged[idx] = { ...imported, ...preserved }
+          }
+        }
+      } else {
+        const newLink = { ...imported, id: imported.id || generateId() }
+        merged.push(newLink)
+        newLinks.push(newLink)
+      }
+    }
+
+    links.value = merged
+    return { newCount: newLinks.length, replacedCount: strategy === 'replace' ? (importedLinks.length - newLinks.length) : 0 }
   }
 
   function moveLinksFromFolder(folderId) {
@@ -276,6 +378,7 @@ export function useLinks() {
     toggleFavorite,
     removeLink,
     setLinks,
+    mergeLinks,
     moveLinksFromFolder
   }
 }
