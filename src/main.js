@@ -14,8 +14,9 @@ async function start() {
     await boot(repository)
     // Non-blocking authentication initialization: local boot never waits for
     // it, and its result can never prevent the app from starting (initSession
-    // resolves even when the auth adapter fails). Phase 2A uses the in-memory
-    // adapter — no real backend — so this settles as anonymous.
+    // resolves even when the auth adapter fails). Phase A uses the real HTTP
+    // adapter (GET /api/me): restores the authenticated account on reload, or
+    // settles as signed-out when there is no session / the backend is absent.
     initSession()
     createApp(App).mount('#app')
   } catch (err) {

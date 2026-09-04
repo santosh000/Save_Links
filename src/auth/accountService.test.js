@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { accountService, AccountUnavailableError } from './accountService.js'
+import { accountService } from './accountService.js'
+import { AUTH_LOGIN_PATH } from './http-adapter.js'
 
 // vi.hoisted shares the mock's state between the hoisted vi.mock factory and
 // the test body. (Plain module-scope `const x = vi.fn()` captured by a hoisted
@@ -13,26 +14,36 @@ vi.mock('./session.js', () => ({
   },
 }))
 
-describe('accountService — honest backend integration seam', () => {
-  beforeEach(() => h.logout.mockReset())
+let assignedUrl = null
 
-  it('credential-backed operations reject as unavailable (never fake success)', async () => {
-    await expect(accountService.signIn({ usernameOrEmail: 'a', password: 'p' })).rejects.toBeInstanceOf(AccountUnavailableError)
-    await expect(accountService.register({ username: 'a', email: 'a@b.co', password: 'p' })).rejects.toBeInstanceOf(AccountUnavailableError)
-    await expect(accountService.forgotPassword({ usernameOrEmail: 'a' })).rejects.toBeInstanceOf(AccountUnavailableError)
-    await expect(accountService.forgotUsername({ email: 'a@b.co' })).rejects.toBeInstanceOf(AccountUnavailableError)
+beforeEach(() => {
+  h.logout.mockReset()
+  assignedUrl = null
+  // accountService navigates via window.location.assign; stub it in jsdom.
+  Object.defineProperty(window, 'location', {
+    configurable: true,
+    value: { assign: (url) => { assignedUrl = url } },
+  })
+})
+
+describe('accountService — GitHub OAuth online-account boundary', () => {
+  it('signIn starts the GitHub OAuth flow with a top-level redirect', () => {
+    // signIn() is synchronous navigation; the authenticated account is restored
+    // on the next boot by initSession() -> /api/me, so no in-page promise result.
+    expect(accountService.signIn()).toBeUndefined()
+    expect(assignedUrl).toBe(AUTH_LOGIN_PATH)
   })
 
-  it('unavailable rejection carries a code so the UI can show an honest message', async () => {
-    try {
-      await accountService.signIn({ usernameOrEmail: 'a', password: 'p' })
-    } catch (e) {
-      expect(e).toBeInstanceOf(AccountUnavailableError)
-      expect(e.code).toBe('ACCOUNT_UNAVAILABLE')
-    }
+  it('does not claim an in-page authenticated state or touch local data on sign-in', () => {
+    accountService.signIn({ username: 'ignored', password: 'ignored' })
+    // Only a redirect occurred — accountService never mutates session state or
+    // storage, and no credential is submitted. The redirect target is OAuth,
+    // not a username/password endpoint.
+    expect(assignedUrl).toBe(AUTH_LOGIN_PATH)
+    expect(h.logout).not.toHaveBeenCalled()
   })
 
-  it('signOut delegates to the real session.logout (no cloud backend needed)', async () => {
+  it('signOut delegates to the real session.logout (revokes the session server-side)', async () => {
     h.logout.mockResolvedValue()
     await accountService.signOut()
     expect(h.logout).toHaveBeenCalledTimes(1)

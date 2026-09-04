@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, toRaw } from 'vue'
 import { sortLinks, SORT_OPTIONS, DEFAULT_SORT } from './utils/sort.js'
 import { pickImportSlices } from './utils/backup.js'
 import { useLinks, DuplicateLinkError } from './composables/useLinks.js'
@@ -7,6 +7,7 @@ import { useProfile } from './composables/useProfile.js'
 import { useFolders } from './composables/useFolders.js'
 import { useSettings } from './composables/useSettings.js'
 import { session } from './auth/session.js'
+import { repository } from './storage/repository.js'
 import AppDialog from './components/AppDialog.vue'
 import AddLink from './components/AddLink.vue'
 import LinkCard from './components/LinkCard.vue'
@@ -14,7 +15,6 @@ import StatsPanel from './components/StatsPanel.vue'
 import SearchFilter from './components/SearchFilter.vue'
 import About from './components/About.vue'
 import DataBackup from './components/DataBackup.vue'
-import SyncPanel from './components/SyncPanel.vue'
 import AccountPanel from './components/AccountPanel.vue'
 import LocalProfilePanel from './components/LocalProfilePanel.vue'
 import FolderManager from './components/FolderManager.vue'
@@ -23,9 +23,9 @@ import pkg from '../package.json'
 
 const appVersion = pkg.version
 
-const { links, total, importantCount, mustHaveCount, favoriteCount, byCategory, storageError, addLink, replaceLink, toggleImportant, toggleMustHave, toggleFavorite, setStatus, removeLink, updateLink, setLinks, moveLinksFromFolder, mergeLinks } = useLinks()
+const { links, total, importantCount, mustHaveCount, favoriteCount, byCategory, storageError, addLink, replaceLink, toggleImportant, toggleMustHave, toggleFavorite, setStatus, removeLink, updateLink, setLinks, moveLinksFromFolder, mergeLinks, getAnonymousLinksCount, getAnonymousLinks } = useLinks()
 const { profile, updateProfile } = useProfile()
-const { folders, createFolder, renameFolder, deleteFolder, setFolders, mergeFolders } = useFolders()
+const { folders, createFolder, renameFolder, deleteFolder, setFolders, mergeFolders, getAnonymousFoldersCount, getAnonymousFolders } = useFolders()
 const { appearance, colorScheme, setAppearance, setColorScheme } = useSettings()
 
 const search = ref('')
@@ -65,7 +65,210 @@ let authUnsubscribe = null
 onMounted(() => {
   authUnsubscribe = session.subscribe((state) => { authState.value = state })
 })
-onBeforeUnmount(() => { authUnsubscribe?.() })
+onBeforeUnmount(() => {
+  authUnsubscribe?.()
+  stopSyncPolling()
+})
+
+// Anonymous → Authenticated sync confirmation
+const pendingAnonymousSync = ref(false)
+let hasPromptedForAnonymousSync = false
+
+async function handleAnonymousSyncChoice(choice) {
+  // choice: 'merge' | 'keep-local'
+  pendingAnonymousSync.value = false
+  hasPromptedForAnonymousSync = true
+
+  if (choice === 'merge') {
+    // Convert anonymous links/folders to authenticated mutations
+    const anonLinks = getAnonymousLinks()
+    const anonFolders = getAnonymousFolders()
+
+    const accountId = session.getState().user?.id
+    if (!accountId) return
+
+    // Queue create mutations for anonymous links
+    for (const link of anonLinks) {
+      // Deep unwrap: toRaw is shallow in Vue 3, so nested reactive arrays (like tags)
+      // would remain Proxies. Use JSON serialization to deeply unwrap all nested proxies.
+      const plainLink = JSON.parse(JSON.stringify(toRaw(link)))
+      await repository.addPendingMutation(
+        'create',
+        plainLink.id,
+        'link',
+        { ...plainLink, account_id: accountId },
+        accountId,
+        0 // base_revision = 0 for new objects
+      )
+    }
+
+    // Queue create mutations for anonymous folders
+    for (const folder of anonFolders) {
+      const plainFolder = JSON.parse(JSON.stringify(toRaw(folder)))
+      await repository.addPendingMutation(
+        'create',
+        plainFolder.id,
+        'folder',
+        { ...plainFolder, account_id: accountId },
+        accountId,
+        0
+      )
+    }
+
+    // Perform sync to push the new mutations and WAIT for them to complete
+    const { syncNowWithMutations } = await import('./composables/useSync.js')
+    await syncNowWithMutations()
+    showToast('Local data synced to your account')
+  } else {
+    // Keep Local: do nothing - anonymous data stays local
+    // Mark anonymous data as "kept local" so it doesn't trigger prompt again
+    const anonLinks = getAnonymousLinks()
+    const anonFolders = getAnonymousFolders()
+    const accountId = session.getState().user?.id
+    if (accountId) {
+      for (const link of anonLinks) {
+        const plainLink = JSON.parse(JSON.stringify(toRaw(link)))
+        await repository.addPendingMutation(
+          'update',
+          plainLink.id,
+          'link',
+          { ...plainLink, account_id: accountId, kept_local: true },
+          accountId,
+          plainLink.revision
+        ).catch(err => console.warn('Failed to queue mutation:', err))
+      }
+      for (const folder of anonFolders) {
+        const plainFolder = JSON.parse(JSON.stringify(toRaw(folder)))
+        await repository.addPendingMutation(
+          'update',
+          plainFolder.id,
+          'folder',
+          { ...plainFolder, account_id: accountId, kept_local: true },
+          accountId,
+          plainFolder.revision
+        ).catch(err => console.warn('Failed to queue mutation:', err))
+      }
+    }
+    showToast('Local data kept on this device')
+  }
+}
+
+function checkAndPromptAnonymousSync() {
+  const state = session.getState()
+  const isAuthenticated = state.status === 'authenticated' && !!state.user
+
+  if (!isAuthenticated) return
+
+  // Only prompt once per session
+  if (hasPromptedForAnonymousSync) return
+
+  const anonLinkCount = getAnonymousLinksCount()
+  const anonFolderCount = getAnonymousFoldersCount()
+
+  if (anonLinkCount > 0 || anonFolderCount > 0) {
+    const parts = []
+    if (anonLinkCount > 0) parts.push(`${anonLinkCount} link${anonLinkCount > 1 ? 's' : ''}`)
+    if (anonFolderCount > 0) parts.push(`${anonFolderCount} folder${anonFolderCount > 1 ? 's' : ''}`)
+    const itemList = parts.join(' and ')
+
+    pendingAnonymousSync.value = true
+    openDialog({
+      kind: 'anonymous-sync',
+      title: 'Sync your local data?',
+      message: `You have ${itemList} saved locally. Would you like to sync them to your account?`,
+      buttons: [
+        { label: 'Sync & Merge', variant: 'primary', value: 'merge', default: true },
+        { label: 'Keep Local', variant: 'ghost', value: 'keep-local' }
+      ]
+    })
+  } else {
+    // No anonymous data - just do normal authenticated sync
+    triggerAuthenticatedSync()
+  }
+}
+
+// Automatic authenticated sync trigger (on login/restore)
+let initialSyncTriggered = false
+async function triggerAuthenticatedSync() {
+  if (initialSyncTriggered) return
+  initialSyncTriggered = true
+
+  const { syncNow } = await import('./composables/useSync.js')
+  await syncNow()
+}
+
+// Watch for auth state changes to handle login transition
+watch(() => authState.value.status, (newStatus, oldStatus) => {
+  const wasUnauthenticated = oldStatus === 'anonymous' || oldStatus === 'unknown'
+  const isNowAuthenticated = newStatus === 'authenticated'
+
+  if (wasUnauthenticated && isNowAuthenticated) {
+    // Login transition: check for anonymous data
+    hasPromptedForAnonymousSync = false
+    initialSyncTriggered = false
+    // Defer to next tick so session state is fully settled
+    nextTick(() => checkAndPromptAnonymousSync())
+  } else if (isNowAuthenticated && !initialSyncTriggered) {
+    // Session restored (already authenticated on mount)
+    nextTick(() => triggerAuthenticatedSync())
+  }
+}, { immediate: true })
+
+// Authenticated polling for cross-browser sync
+// This enables already-open browsers to discover remote changes made by other browsers
+let syncPollingInterval = null
+const POLLING_INTERVAL_MS = 30000 // 30 seconds
+
+function startSyncPolling() {
+  if (syncPollingInterval) return // Already polling
+  const state = session.getState()
+  if (state.status !== 'authenticated' || !state.user) return // Only poll when authenticated
+
+  syncPollingInterval = setInterval(async () => {
+    // Only poll when the document is visible (tab is active)
+    if (document.visibilityState !== 'visible') return
+    // Only poll when online
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return
+    const state = session.getState()
+    if (state.status !== 'authenticated' || !state.user) return // Stop if logged out
+
+    try {
+      const { syncNow } = await import('./composables/useSync.js')
+      await syncNow()
+    } catch (err) {
+      // Log but don't spam user with toasts for background polling failures
+      console.warn('Background sync failed:', err)
+    }
+  }, POLLING_INTERVAL_MS)
+}
+
+function stopSyncPolling() {
+  if (syncPollingInterval) {
+    clearInterval(syncPollingInterval)
+    syncPollingInterval = null
+  }
+}
+
+// Handle visibility changes to pause/resume polling
+onMounted(() => {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      startSyncPolling()
+    } else {
+      stopSyncPolling()
+    }
+  })
+  // Start polling if already authenticated on mount
+  const state = session.getState()
+  if (state.status === 'authenticated' && state.user) {
+    startSyncPolling()
+  }
+})
+
+onBeforeUnmount(() => {
+  authUnsubscribe?.()
+  stopSyncPolling()
+})
 
 function toggleDrawer(name) {
   activeDrawer.value = activeDrawer.value === name ? null : name
@@ -164,7 +367,7 @@ function requestDeleteLink(id) {
     kind: 'delete-link',
     id,
     title: 'Delete this link?',
-    message: '',
+    message: 'This will remove it from your device and your synced account.',
     buttons: [
       { label: 'Delete', variant: 'danger', value: 'confirm' },
       { label: 'Cancel', variant: 'ghost', value: 'cancel', default: true }
@@ -177,7 +380,7 @@ function requestDeleteFolder(id) {
     kind: 'delete-folder',
     id,
     title: 'Delete this folder?',
-    message: 'Links will move to Unfiled.',
+    message: 'This will remove it from your device and your synced account. Links will move to Unfiled.',
     buttons: [
       { label: 'Delete', variant: 'danger', value: 'confirm' },
       { label: 'Cancel', variant: 'ghost', value: 'cancel', default: true }
@@ -240,6 +443,8 @@ function onDialogChoose(value) {
         if (filterFolder.value === cfg.id) filterFolder.value = ''
         showToast('Folder deleted')
       }
+    } else if (cfg.kind === 'anonymous-sync') {
+      handleAnonymousSyncChoice(value)
     }
     // 'import' kind is handled directly in requestImport() without dialog
   }
@@ -437,7 +642,6 @@ const hasLinks = computed(() => links.value.length > 0)
 
       <div id="side-col" class="side-col">
         <DataBackup :links="links" :profile="profile" :folders="folders" :appearance="appearance" :color-scheme="colorScheme" @import-request="requestImport" @show-toast="showToast" />
-        <SyncPanel />
         <SearchFilter
           v-model:category="filterCategory"
           v-model:folder="filterFolder"

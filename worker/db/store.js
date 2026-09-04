@@ -277,6 +277,27 @@ export async function getObject(db, { accountId, objectType, objectId }) {
 }
 
 /**
+ * Return every sync object (live AND tombstoned) for one account — the
+ * server-side read side of the pull/reconcile flow.
+ *
+ * Account scoping is enforced here in SQL: callers pass the account id from
+ * the authenticated session only, and the query filters by it, so rows of
+ * another account are never returned.
+ *
+ * @returns {Promise<Array<{object_id, object_type, revision, deleted, deleted_at, payload, created_at, updated_at}>>}
+ */
+export async function getObjectsForAccount(db, { accountId }) {
+  requireAccountId(accountId)
+  const res = await db.prepare(
+    `SELECT object_id, object_type, revision, deleted, deleted_at, payload, created_at, updated_at
+     FROM sync_objects
+     WHERE account_id = ?
+     ORDER BY object_type, object_id`
+  ).bind(accountId).all()
+  return res.results
+}
+
+/**
  * Atomically apply one client mutation for an account and record its outcome
  * in the idempotency ledger — or return the original result if this exact
  * mutation_id was already applied.
@@ -318,7 +339,8 @@ export async function applyObjectMutation(db, {
   requireEpochMs(now)
 
   if (operation === 'create' && baseRevision !== 0) {
-    return { kind: 'conflict', current: await getObject(db, { accountId, objectType, objectId }) }
+    const current = await getObject(db, { accountId, objectType, objectId })
+    return { kind: 'conflict', current }
   }
 
   // Fast-path replay: an already-committed mutation_id returns its original
@@ -328,7 +350,9 @@ export async function applyObjectMutation(db, {
   const prior = await db.prepare(
     'SELECT result_revision FROM sync_mutations WHERE account_id = ? AND mutation_id = ?'
   ).bind(accountId, mutationId).first()
-  if (prior) return { kind: 'replay', resultRevision: prior.result_revision }
+  if (prior) {
+    return { kind: 'replay', resultRevision: prior.result_revision }
+  }
 
   // Build the claim + object-write SQL for ONE atomic batch. The claim's
   // INSERT...SELECT only inserts (changes = 1) when the object is in the
@@ -380,6 +404,7 @@ export async function applyObjectMutation(db, {
     db.prepare(objSql).bind(...objParams),
   ])
   const claimChanges = claimRes?.meta?.changes ?? 0
+  const objChanges = objRes?.meta?.changes ?? 0
 
   if (claimChanges === 1) {
     // This request won the atomic claim AND the object write — committed
@@ -397,7 +422,9 @@ export async function applyObjectMutation(db, {
   const ledger = await db.prepare(
     'SELECT result_revision FROM sync_mutations WHERE account_id = ? AND mutation_id = ?'
   ).bind(accountId, mutationId).first()
-  if (ledger) return { kind: 'replay', resultRevision: ledger.result_revision }
+  if (ledger) {
+    return { kind: 'replay', resultRevision: ledger.result_revision }
+  }
   const current = await getObject(db, { accountId, objectType, objectId })
   return { kind: 'conflict', current }
 }

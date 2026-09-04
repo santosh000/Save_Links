@@ -4,7 +4,7 @@
 // the contract in src/auth/contract.js. The application observes this
 // abstraction; it never observes a provider.
 
-import { createMemoryAdapter } from './memory-adapter.js'
+import { createHttpAdapter } from './http-adapter.js'
 
 function messageOf(err) {
   return err instanceof Error ? err.message : String(err ?? 'unknown error')
@@ -98,10 +98,15 @@ export function createSession(adapter) {
   return { getState, subscribe, initSession, login, logout }
 }
 
-// Application singleton. Phase 2A: the in-memory adapter is the only adapter —
-// there is no authentication backend yet, so every session resolves to
-// anonymous and login/logout are simulated only (never surfaced by the UI).
-export const session = createSession(createMemoryAdapter())
+// Application singleton. Phase A: the real HTTP adapter talks to the existing
+// Cloudflare Worker OAuth + session endpoints. init() restores the
+// authenticated account via GET /api/me on boot (persistent session across
+// reloads); logout() revokes it via POST /auth/logout. Sign-in is a top-level
+// GitHub OAuth redirect initiated by accountService.signIn() — the identity is
+// restored by initSession() after the callback, then state becomes
+// authenticated. session.login() is not the UI sign-in path for OAuth (see
+// http-adapter.login()).
+export const session = createSession(createHttpAdapter())
 
 /** Non-blocking application entry point: initialize the app session async. */
 export function initSession() {

@@ -93,5 +93,7 @@ export function normalizeLink(raw) {
     // v2 sync fields — preserve if present, backfill with defaults if missing
     revision: typeof raw.revision === 'number' ? raw.revision : 0,
     account_id: typeof raw.account_id === 'string' ? raw.account_id.trim() : null,
+    // Track if user explicitly chose to keep this link local after login
+    kept_local: typeof raw.kept_local === 'boolean' ? raw.kept_local : false,
   }
 }

@@ -32,6 +32,7 @@ describe('normalizeLink', () => {
       // v2 sync fields
       revision: 0,
       account_id: null,
+      kept_local: false,
     }
     const again = normalizeLink(canonical)
     expect(again).toEqual(canonical)

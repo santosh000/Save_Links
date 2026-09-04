@@ -30,6 +30,7 @@ import {
   hashSessionToken,
   applyObjectMutation,
   getObject,
+  getObjectsForAccount,
   purgeExpiredTombstones,
 } from './store.js'
 import { createTestDb } from './d1-facade.js'
@@ -470,6 +471,59 @@ describe('cloud sync objects (Chunk 2)', () => {
       // a2 create succeeds independently (its own namespace)
       const res = await applyObjectMutation(db, { accountId: a2, mutationId: crypto.randomUUID(), objectType: 'link', objectId, operation: 'create', baseRevision: 0, payload: '{}', now: NOW })
       expect(res.kind).toBe('applied')
+    })
+  })
+
+  describe('pull (read-back): getObjectsForAccount', () => {
+    it('returns all of an account\'s objects (live AND tombstones) with full fields', async () => {
+      const accountId = await freshAccount()
+      const liveId = crypto.randomUUID()
+      const tombId = crypto.randomUUID()
+      await applyObjectMutation(db, { accountId, mutationId: crypto.randomUUID(), objectType: 'link', objectId: liveId, operation: 'create', baseRevision: 0, payload: '{"a":1}', now: NOW })
+      await applyObjectMutation(db, { accountId, mutationId: crypto.randomUUID(), objectType: 'folder', objectId: tombId, operation: 'create', baseRevision: 0, payload: '{"name":"f"}', now: NOW })
+      await applyObjectMutation(db, { accountId, mutationId: crypto.randomUUID(), objectType: 'folder', objectId: tombId, operation: 'delete', baseRevision: 1, payload: '{}', now: NOW })
+
+      const rows = await getObjectsForAccount(db, { accountId })
+      const live = rows.find((r) => r.object_id === liveId)
+      const tomb = rows.find((r) => r.object_id === tombId)
+      expect(live).toMatchObject({ object_type: 'link', revision: 1, deleted: 0, payload: '{"a":1}' })
+      expect(typeof live.created_at).toBe('number')
+      expect(typeof live.updated_at).toBe('number')
+      expect(tomb).toMatchObject({ object_type: 'folder', revision: 2, deleted: 1, deleted_at: NOW })
+    })
+
+    it('returns revisions correctly', async () => {
+      const accountId = await freshAccount()
+      const objectId = crypto.randomUUID()
+      await applyObjectMutation(db, { accountId, mutationId: crypto.randomUUID(), objectType: 'link', objectId, operation: 'create', baseRevision: 0, payload: '{}', now: NOW })
+      await applyObjectMutation(db, { accountId, mutationId: crypto.randomUUID(), objectType: 'link', objectId, operation: 'update', baseRevision: 1, payload: '{}', now: NOW })
+      const rows = await getObjectsForAccount(db, { accountId })
+      expect(rows.find((r) => r.object_id === objectId).revision).toBe(2)
+    })
+
+    it('returns payload correctly', async () => {
+      const accountId = await freshAccount()
+      const objectId = crypto.randomUUID()
+      await applyObjectMutation(db, { accountId, mutationId: crypto.randomUUID(), objectType: 'folder', objectId, operation: 'create', baseRevision: 0, payload: '{"name":"My Folder"}', now: NOW })
+      const rows = await getObjectsForAccount(db, { accountId })
+      expect(rows.find((r) => r.object_id === objectId).payload).toBe('{"name":"My Folder"}')
+    })
+
+    it('does not leak another account\'s objects', async () => {
+      const a1 = await freshAccount()
+      const a2 = await freshAccount()
+      await applyObjectMutation(db, { accountId: a1, mutationId: crypto.randomUUID(), objectType: 'link', objectId: crypto.randomUUID(), operation: 'create', baseRevision: 0, payload: '{"secret":"a1"}', now: NOW })
+      const rows = await getObjectsForAccount(db, { accountId: a2 })
+      expect(rows).toEqual([])
+    })
+
+    it('returns an empty array for an account with no objects', async () => {
+      const accountId = await freshAccount()
+      expect(await getObjectsForAccount(db, { accountId })).toEqual([])
+    })
+
+    it('rejects an empty account id', async () => {
+      await expect(getObjectsForAccount(db, { accountId: '' })).rejects.toThrow()
     })
   })
 

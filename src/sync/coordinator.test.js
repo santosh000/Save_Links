@@ -1,7 +1,7 @@
 // Tests for the cloud sync coordinator (src/sync/coordinator.js).
 // Pure unit tests with injected mocks — no IndexedDB, no network.
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { syncNow, rebaseConflict } from './coordinator.js'
+import { syncNow, rebaseConflict, pullAndReconcile } from './coordinator.js'
 
 // ---- mock helpers -----------------------------------------------------------
 
@@ -22,15 +22,25 @@ function makeMutation(overrides = {}) {
 
 function makeRepo(mutations = []) {
   const pending = [...mutations]
+  const local = { links: [], folders: [] }
   return {
     pending,
+    local,
     calls: {
       updateRevision: [],
       markSucceeded: [],
       markFailed: [],
       rebased: [],
+      upsert: [],
+      deleted: [],
     },
     async getPendingMutations() { return pending.filter(m => m.status === 'pending') },
+    async getAllLinks() { return local.links },
+    async getAllFolders() { return local.folders },
+    async upsertLink(record) { local.links.push(record); this.calls.upsert.push({ type: 'link', record }) },
+    async upsertFolder(record) { local.folders.push(record); this.calls.upsert.push({ type: 'folder', record }) },
+    async deleteLink(id) { local.links = local.links.filter(l => l.id !== id); this.calls.deleted.push({ type: 'link', id }) },
+    async deleteFolder(id) { local.folders = local.folders.filter(f => f.id !== id); this.calls.deleted.push({ type: 'folder', id }) },
     async updateObjectRevision(storeName, objectId, revision) {
       this.calls.updateRevision.push({ storeName, objectId, revision })
     },
@@ -71,6 +81,16 @@ function mockPush(results) {
 vi.mock('../auth/session.js', () => ({
   session: { getState: () => ({ status: 'authenticated', user: { id: 'acc-1' } }) },
 }))
+
+// Stub the pull transport so syncNow()'s pull phase returns no server objects
+// by default (push-only tests). Individual pull tests override pullFn instead.
+vi.mock('./protocol.js', () => ({
+  pushMutation: vi.fn(),
+  pullObjects: vi.fn(() => Promise.resolve({ kind: 'ok', objects: [] })),
+}))
+
+// The base (push-only) summary shape every syncNow() test starts from.
+const BASE_SUMMARY = { pushed: 0, succeeded: 0, failed: 0, conflict: 0, unavailable: 0, pulled: 0, applied: 0, skippedLocal: 0, skippedStale: 0 }
 
 // ---- rebaseConflict unit tests ----------------------------------------------
 
@@ -211,7 +231,7 @@ describe('syncNow', () => {
     const repo = makeRepo([])
     const pushFn = mockPush([])
     const result = await syncNow({ pushFn, repo })
-    expect(result).toEqual({ pushed: 0, succeeded: 0, failed: 0, conflict: 0, unavailable: 0 })
+    expect(result).toEqual(BASE_SUMMARY)
     expect(pushFn).not.toHaveBeenCalled()
   })
 
@@ -223,7 +243,7 @@ describe('syncNow', () => {
       const repo = makeRepo([makeMutation()])
       const pushFn = mockPush([])
       const result = await syncNow({ pushFn, repo })
-      expect(result).toEqual({ pushed: 0, succeeded: 0, failed: 0, conflict: 0, unavailable: 0 })
+      expect(result).toEqual(BASE_SUMMARY)
       expect(pushFn).not.toHaveBeenCalled()
     } finally {
       realSession.getState = original
@@ -246,7 +266,7 @@ describe('syncNow', () => {
     const repo = makeRepo([m])
     const pushFn = mockPush([{ kind: 'accepted', resultRevision: 1 }])
     const result = await syncNow({ pushFn, repo })
-    expect(result).toEqual({ pushed: 1, succeeded: 1, failed: 0, conflict: 0, unavailable: 0 })
+    expect(result).toEqual({ ...BASE_SUMMARY, pushed: 1, succeeded: 1, failed: 0, conflict: 0, unavailable: 0 })
     expect(repo.calls.updateRevision).toEqual([
       { storeName: 'links', objectId: 'obj-1', revision: 1 },
     ])
@@ -283,7 +303,7 @@ describe('syncNow', () => {
       current: { object_id: 'obj-1', object_type: 'link', revision: 5, deleted: false, deleted_at: null, payload: {} },
     }])
     const result = await syncNow({ pushFn, repo })
-    expect(result).toEqual({ pushed: 1, succeeded: 0, failed: 0, conflict: 1, unavailable: 0 })
+    expect(result).toEqual({ ...BASE_SUMMARY, pushed: 1, succeeded: 0, failed: 0, conflict: 1, unavailable: 0 })
     expect(repo.calls.rebased).toHaveLength(1)
     expect(repo.calls.rebased[0].originalMutationId).toBe('mut-001')
     const rebased = repo.calls.rebased[0].rebased
@@ -310,7 +330,7 @@ describe('syncNow', () => {
     const repo = makeRepo([m])
     const pushFn = mockPush([{ kind: 'rejected', status: 401, reason: 'unauthenticated' }])
     const result = await syncNow({ pushFn, repo })
-    expect(result).toEqual({ pushed: 1, succeeded: 0, failed: 1, conflict: 0, unavailable: 0 })
+    expect(result).toEqual({ ...BASE_SUMMARY, pushed: 1, succeeded: 0, failed: 1, conflict: 0, unavailable: 0 })
     expect(repo.calls.markFailed).toEqual(['mut-001'])
     expect(repo.calls.rebased).toEqual([])
   })
@@ -320,7 +340,7 @@ describe('syncNow', () => {
     const repo = makeRepo([m])
     const pushFn = mockPush([{ kind: 'unavailable', status: 503, reason: 'unavailable' }])
     const result = await syncNow({ pushFn, repo })
-    expect(result).toEqual({ pushed: 1, succeeded: 0, failed: 0, conflict: 0, unavailable: 1 })
+    expect(result).toEqual({ ...BASE_SUMMARY, pushed: 1, succeeded: 0, failed: 0, conflict: 0, unavailable: 1 })
     expect(repo.calls.markFailed).toEqual([])
     expect(repo.calls.markSucceeded).toEqual([])
     expect(repo.calls.rebased).toEqual([])
@@ -331,7 +351,7 @@ describe('syncNow', () => {
     const repo = makeRepo([m])
     const pushFn = mockPush([new Error('Failed to fetch')])
     const result = await syncNow({ pushFn, repo })
-    expect(result).toEqual({ pushed: 1, succeeded: 0, failed: 0, conflict: 0, unavailable: 1 })
+    expect(result).toEqual({ ...BASE_SUMMARY, pushed: 1, succeeded: 0, failed: 0, conflict: 0, unavailable: 1 })
     expect(repo.calls.markFailed).toEqual([])
     expect(repo.calls.markSucceeded).toEqual([])
   })
@@ -356,7 +376,7 @@ describe('syncNow', () => {
       { kind: 'accepted', resultRevision: 3 },
     ])
     const result = await syncNow({ pushFn, repo })
-    expect(result).toEqual({ pushed: 3, succeeded: 3, failed: 0, conflict: 0, unavailable: 0 })
+    expect(result).toEqual({ ...BASE_SUMMARY, pushed: 3, succeeded: 3, failed: 0, conflict: 0, unavailable: 0 })
     expect(pushFn.mock.calls.map(c => c[0].mutation_id)).toEqual(['m-1', 'm-2', 'm-3'])
   })
 
@@ -373,7 +393,7 @@ describe('syncNow', () => {
       { kind: 'unavailable', status: 500, reason: 'server_error' },
     ])
     const result = await syncNow({ pushFn, repo })
-    expect(result).toEqual({ pushed: 4, succeeded: 1, failed: 1, conflict: 1, unavailable: 1 })
+    expect(result).toEqual({ ...BASE_SUMMARY, pushed: 4, succeeded: 1, failed: 1, conflict: 1, unavailable: 1 })
     expect(repo.calls.markSucceeded).toEqual(['m-1'])
     expect(repo.calls.markFailed).toEqual(['m-3'])
     expect(repo.calls.rebased).toHaveLength(1)
@@ -605,5 +625,148 @@ describe('syncNow', () => {
     const result2 = await syncNow({ pushFn: pushFn2, repo })
     expect(result2.succeeded).toBe(1)
     expect(pushFn2).toHaveBeenCalledOnce()
+  })
+
+  // --- pull integration: pull → reconcile → push ---
+
+  it('pull then push: acceptable server objects applied locally, then queue drains', async () => {
+    const repo = makeRepo([makeMutation({ operation: 'update', base_revision: 1 })])
+    // Server reports a NEWER authoritative object for a *different* id than the
+    // mutation — reconciled, then the pending update is pushed.
+    const pullFn = vi.fn().mockResolvedValue({
+      kind: 'ok',
+      objects: [
+        { object_id: 'remote-1', object_type: 'link', revision: 3, deleted: false, deleted_at: null, payload: { id: 'remote-1', title: 'from server' }, created_at: 1, updated_at: 2 },
+      ],
+    })
+    const pushFn = mockPush([{ kind: 'accepted', resultRevision: 2 }])
+    const result = await syncNow({ pullFn, pushFn, repo })
+
+    // pull applied the server object
+    expect(repo.calls.upsert).toHaveLength(1)
+    expect(repo.calls.upsert[0]).toEqual({ type: 'link', record: { id: 'remote-1', title: 'from server', revision: 3 } })
+    expect(result.pulled).toBe(1)
+    expect(result.applied).toBe(1)
+    // push drained the pending mutation
+    expect(result.pushed).toBe(1)
+    expect(result.succeeded).toBe(1)
+  })
+
+  it('pull is unavailable: no push occurs and unavailable is reported (no false success)', async () => {
+    const repo = makeRepo([makeMutation()])
+    const pullFn = vi.fn().mockResolvedValue({ kind: 'unavailable', status: 503, reason: 'unavailable' })
+    const pushFn = mockPush([{ kind: 'accepted', resultRevision: 1 }])
+    const result = await syncNow({ pullFn, pushFn, repo })
+    expect(result.unavailable).toBe(1)
+    expect(result.succeeded).toBe(0)
+    expect(pushFn).not.toHaveBeenCalled()
+  })
+
+  it('pull is rejected (401): reported as failed, no push', async () => {
+    const repo = makeRepo([makeMutation()])
+    const pullFn = vi.fn().mockResolvedValue({ kind: 'rejected', status: 401, reason: 'unauthenticated' })
+    const pushFn = mockPush([{ kind: 'accepted', resultRevision: 1 }])
+    const result = await syncNow({ pullFn, pushFn, repo })
+    expect(result.failed).toBe(1)
+    expect(pushFn).not.toHaveBeenCalled()
+  })
+
+  it('pull network failure (fetch throws): unavailable, no push', async () => {
+    const repo = makeRepo([makeMutation()])
+    const pullFn = vi.fn().mockRejectedValue(new Error('offline'))
+    const pushFn = mockPush([{ kind: 'accepted', resultRevision: 1 }])
+    const result = await syncNow({ pullFn, pushFn, repo })
+    expect(result.unavailable).toBe(1)
+    expect(pushFn).not.toHaveBeenCalled()
+  })
+})
+
+// ---- pullAndReconcile unit tests ----------------------------------------------
+
+describe('pullAndReconcile', () => {
+  it('returns the base shape when not authenticated (no network)', async () => {
+    const original = (await import('../auth/session.js')).session.getState
+    try {
+      (await import('../auth/session.js')).session.getState = () => ({ status: 'anonymous', user: null })
+      const pullFn = vi.fn()
+      const repo = makeRepo([])
+      const summary = await pullAndReconcile({ pullFn, repo })
+      expect(summary).toEqual({ pulled: 0, applied: 0, skippedLocal: 0, skippedStale: 0, unavailable: false, rejected: false })
+      expect(pullFn).not.toHaveBeenCalled()
+    } finally {
+      (await import('../auth/session.js')).session.getState = original
+    }
+  })
+
+  it('server object newer than local -> applied to local store with server revision', async () => {
+    const repo = makeRepo([])
+    repo.local.links.push({ id: 'a', title: 'local v1', revision: 1 })
+    const pullFn = vi.fn().mockResolvedValue({
+      kind: 'ok',
+      objects: [{ object_id: 'a', object_type: 'link', revision: 2, deleted: false, deleted_at: null, payload: { id: 'a', title: 'server v2' } }],
+    })
+    const summary = await pullAndReconcile({ pullFn, repo })
+    expect(summary.applied).toBe(1)
+    expect(repo.calls.upsert).toHaveLength(1)
+    expect(repo.calls.upsert[0].record).toMatchObject({ id: 'a', title: 'server v2', revision: 2 })
+  })
+
+  it('server tombstone -> local object deleted (preserved as local-deleted)', async () => {
+    const repo = makeRepo([])
+    repo.local.links.push({ id: 'gone', title: 'x', revision: 1 })
+    const pullFn = vi.fn().mockResolvedValue({
+      kind: 'ok',
+      objects: [{ object_id: 'gone', object_type: 'link', revision: 2, deleted: true, deleted_at: 5, payload: null }],
+    })
+    const summary = await pullAndReconcile({ pullFn, repo })
+    expect(summary.applied).toBe(1)
+    expect(repo.calls.deleted).toEqual([{ type: 'link', id: 'gone' }])
+    expect(repo.local.links).toEqual([])
+  })
+
+  it('server tombstone for a folder -> local folder deleted', async () => {
+    const repo = makeRepo([])
+    repo.local.folders.push({ id: 'f1', name: 'F', revision: 1 })
+    const pullFn = vi.fn().mockResolvedValue({
+      kind: 'ok',
+      objects: [{ object_id: 'f1', object_type: 'folder', revision: 2, deleted: true, deleted_at: 5, payload: null }],
+    })
+    const summary = await pullAndReconcile({ pullFn, repo })
+    expect(summary.applied).toBe(1)
+    expect(repo.calls.deleted).toEqual([{ type: 'folder', id: 'f1' }])
+  })
+
+  it('local newer than server -> server does not overwrite local', async () => {
+    const repo = makeRepo([])
+    repo.local.links.push({ id: 'a', title: 'newer local', revision: 5 })
+    const pullFn = vi.fn().mockResolvedValue({
+      kind: 'ok',
+      objects: [{ object_id: 'a', object_type: 'link', revision: 2, deleted: false, deleted_at: null, payload: { id: 'a', title: 'older server' } }],
+    })
+    const summary = await pullAndReconcile({ pullFn, repo })
+    expect(summary.skippedStale).toBe(1)
+    expect(summary.applied).toBe(0)
+    expect(repo.calls.upsert).toEqual([])
+  })
+
+  it('pending local mutation is preserved (server object not applied to that id)', async () => {
+    const repo = makeRepo([makeMutation({ object_id: 'p', account_id: 'acc-1' })])
+    const pullFn = vi.fn().mockResolvedValue({
+      kind: 'ok',
+      objects: [{ object_id: 'p', object_type: 'link', revision: 9, deleted: false, deleted_at: null, payload: { id: 'p', title: 'server' } }],
+    })
+    const summary = await pullAndReconcile({ pullFn, repo })
+    expect(summary.skippedLocal).toBe(1)
+    expect(summary.applied).toBe(0)
+    expect(repo.calls.upsert).toEqual([])
+    // The pending mutation is untouched.
+    expect(repo.pending[0].status).toBe('pending')
+  })
+
+  it('unavailable pull -> unreconciled, no network-object application', async () => {
+    const pullFn = vi.fn().mockResolvedValue({ kind: 'unavailable', status: 503, reason: 'unavailable' })
+    const summary = await pullAndReconcile({ pullFn, repo: makeRepo([]) })
+    expect(summary.unavailable).toBe(true)
+    expect(summary.applied).toBe(0)
   })
 })

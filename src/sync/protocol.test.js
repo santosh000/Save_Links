@@ -1,7 +1,7 @@
 // Tests for the cloud sync client transport (src/sync/protocol.js).
 // Mocks fetch; never hits a real network or IndexedDB.
 import { describe, it, expect, vi } from 'vitest'
-import { pushMutation } from './protocol.js'
+import { pushMutation, pullObjects } from './protocol.js'
 
 const BASE_MUTATION = {
   mutation_id: 'test-mutation-001',
@@ -134,5 +134,83 @@ describe('pushMutation — client transport', () => {
     await pushMutation(folderMutation, { fetch: fetchFn })
     const sent = JSON.parse(fetchFn.mock.calls[0][1].body)
     expect(sent.object_type).toBe('folder')
+  })
+})
+
+describe('pullObjects — client read transport', () => {
+  const OBJECTS = [
+    { object_id: 'a', object_type: 'link', revision: 1, deleted: false, deleted_at: null, payload: {}, created_at: 1, updated_at: 1 },
+  ]
+
+  it('issues a GET to /api/sync/objects and returns the object array', async () => {
+    const fetchFn = vi.fn().mockResolvedValue({
+      status: 200,
+      json: () => Promise.resolve({ objects: OBJECTS }),
+    })
+    const result = await pullObjects({ fetch: fetchFn })
+    expect(fetchFn).toHaveBeenCalledOnce()
+    const [url, opts] = fetchFn.mock.calls[0]
+    expect(url).toBe('/api/sync/objects')
+    expect(opts.method).toBe('GET')
+    expect(result).toEqual({ kind: 'ok', objects: OBJECTS })
+  })
+
+  it('uses apiOrigin prefix when provided', async () => {
+    const fetchFn = vi.fn().mockResolvedValue({
+      status: 200,
+      json: () => Promise.resolve({ objects: [] }),
+    })
+    await pullObjects({ fetch: fetchFn, apiOrigin: 'https://api.example.com' })
+    expect(fetchFn.mock.calls[0][0]).toBe('https://api.example.com/api/sync/objects')
+  })
+
+  it('200 with an empty object list -> kind ok, empty array', async () => {
+    const fetchFn = vi.fn().mockResolvedValue({
+      status: 200,
+      json: () => Promise.resolve({ objects: [] }),
+    })
+    expect(await pullObjects({ fetch: fetchFn })).toEqual({ kind: 'ok', objects: [] })
+  })
+
+  it('200 but objects is not an array -> kind unavailable (malformed response)', async () => {
+    const fetchFn = vi.fn().mockResolvedValue({
+      status: 200,
+      json: () => Promise.resolve({ objects: 'nope' }),
+    })
+    const result = await pullObjects({ fetch: fetchFn })
+    expect(result.kind).toBe('unavailable')
+  })
+
+  it('401 unauthenticated -> kind rejected', async () => {
+    const fetchFn = mockFetch(401, { error: 'unauthenticated' })
+    expect(await pullObjects({ fetch: fetchFn })).toEqual({ kind: 'rejected', status: 401, reason: 'unauthenticated' })
+  })
+
+  it('403 forbidden -> kind rejected', async () => {
+    const fetchFn = mockFetch(403, { error: 'forbidden' })
+    expect(await pullObjects({ fetch: fetchFn })).toEqual({ kind: 'rejected', status: 403, reason: 'forbidden' })
+  })
+
+  it('503 unavailable -> kind unavailable', async () => {
+    const fetchFn = mockFetch(503, { error: 'unavailable' })
+    expect(await pullObjects({ fetch: fetchFn })).toEqual({ kind: 'unavailable', status: 503, reason: 'unavailable' })
+  })
+
+  it('500 server error -> kind unavailable', async () => {
+    const fetchFn = mockFetch(500, { error: 'server_error' })
+    expect(await pullObjects({ fetch: fetchFn })).toEqual({ kind: 'unavailable', status: 500, reason: 'server_error' })
+  })
+
+  it('malformed JSON response -> kind unavailable', async () => {
+    const fetchFn = vi.fn().mockResolvedValue({
+      status: 200,
+      json: () => Promise.reject(new Error('bad json')),
+    })
+    expect((await pullObjects({ fetch: fetchFn })).kind).toBe('unavailable')
+  })
+
+  it('network failure (fetch throws) propagates the error', async () => {
+    const fetchFn = vi.fn().mockRejectedValue(new Error('offline'))
+    await expect(pullObjects({ fetch: fetchFn })).rejects.toThrow('offline')
   })
 })

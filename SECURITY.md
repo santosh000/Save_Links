@@ -18,8 +18,8 @@ Contact the maintainer privately through the GitHub security advisory feature or
 - **Security-sensitive changes require tests** — any change to auth routes, session handling, or origin validation must include test coverage
 
 ### Local-First Data
-- **Local data remains browser-local** unless the user explicitly uses cloud functionality (which is not yet implemented)
-- IndexedDB is the primary data store; cloud synchronization does not exist
+- **Local data remains browser-local** unless the user explicitly uses cloud synchronization
+- IndexedDB is the primary data store; cloud synchronization is optional and user-initiated
 
 ### Origin Validation
 - **Never trust `Host`, `X-Forwarded-Host`, or `X-Forwarded-Proto` for security decisions** — approved origins come only from the configured `APPROVED_ORIGINS` list

@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { nextTick } from 'vue'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { nextTick, effectScope } from 'vue'
 import { getStorageKey } from '../utils/environment.js'
 import 'fake-indexeddb/auto'
 import { repository } from '../storage/repository.js'
@@ -129,8 +129,15 @@ describe('useFolders', () => {
   })
 
   it('queues a create mutation with base_revision 0 when authenticated (account_id present)', async () => {
-    const { session } = await import('../auth/session.js')
-    await session.login()
+    const { session, initSession } = await import('../auth/session.js')
+    // Restore an authenticated session through the real HTTP adapter (Phase A):
+    // a mocked GET /api/me that the Worker would answer for a valid session.
+    vi.stubGlobal('fetch', vi.fn(async (url) => {
+      if (url === '/api/me') return new Response(JSON.stringify({ authenticated: true, accountId: 'memory-user' }), { status: 200 })
+      if (url === '/auth/logout') return new Response(null, { status: 200 })
+      return new Response(null, { status: 404 })
+    }))
+    await initSession()
     const { useFolders } = await import('./useFolders.js')
     const { createFolder } = useFolders()
     const f = createFolder('Synced')
@@ -144,5 +151,83 @@ describe('useFolders', () => {
     expect(pending[0].base_revision).toBe(0)
     expect(pending[0].account_id).toBe('memory-user')
     await session.logout()
+    vi.unstubAllGlobals()
+  })
+
+  describe('remote pull reactivity (inbound sync)', () => {
+    async function pullFolderIntoRepo(record) {
+      await repository.upsertFolder(record)
+      const { notifyDataChanged } = await import('../storage/dataChanges.js')
+      notifyDataChanged()
+    }
+
+    it('pulled folder appears in the reactive ref immediately without a reload', async () => {
+      const { useFolders } = await import('./useFolders.js')
+      const { folders } = useFolders()
+      expect(folders.value.length).toBe(0)
+      await pullFolderIntoRepo({ id: 'server-folder-1', name: 'Server Folder', revision: 4 })
+      await flush()
+      expect(folders.value.length).toBe(1)
+      expect(folders.value[0].name).toBe('Server Folder')
+      expect(folders.value[0].revision).toBe(4) // server revision preserved
+    })
+
+    it('remote folder pull does not enqueue a pending mutation', async () => {
+      const { useFolders } = await import('./useFolders.js')
+      useFolders()
+      await pullFolderIntoRepo({ id: 'server-folder-2', name: 'No Mutation', revision: 1 })
+      await flush()
+      const pending = await repository.getPendingMutations()
+      expect(pending.length).toBe(0)
+    })
+
+    it('pulling the same server folder again does not duplicate it', async () => {
+      const { useFolders } = await import('./useFolders.js')
+      const { folders } = useFolders()
+      const record = { id: 'server-folder-3', name: 'Once', revision: 1 }
+      await pullFolderIntoRepo(record)
+      await flush()
+      await pullFolderIntoRepo(record)
+      await flush()
+      expect(folders.value.length).toBe(1)
+    })
+
+    it('unsubscribes the change listener when the composable scope is disposed (no duplicate/stale listeners)', async () => {
+      // Isolate from the shared module scope: prior unscoped useFolders() mounts
+      // in this file leave persistent module-level listeners whose deep watches
+      // would otherwise write to IndexedDB concurrently with this test's reload.
+      vi.resetModules()
+      const { useFolders } = await import('./useFolders.js')
+      const { notifyDataChanged } = await import('../storage/dataChanges.js')
+      const { repository: freshRepo } = await import('../storage/repository.js')
+
+      // Seed IndexedDB so a notifying listener WOULD reload data into its ref.
+      await freshRepo.upsertFolder({ id: 'server-folder-seed', name: 'Seed', revision: 1 })
+
+      // Mount instance A inside its own scope, then tear the scope down.
+      const scopeA = effectScope()
+      let foldersA
+      scopeA.run(() => {
+        foldersA = useFolders().folders
+      })
+      scopeA.stop() // should remove A's listener
+
+      // A stale listener would reload this ref; a properly unsubscribed one won't.
+      notifyDataChanged()
+      await flush()
+      expect(foldersA.value.length).toBe(0)
+
+      // A live instance still reacts -> subscribe works and only live scopes listen.
+      const scopeB = effectScope()
+      let foldersB
+      scopeB.run(() => {
+        foldersB = useFolders().folders
+      })
+      notifyDataChanged()
+      await flush()
+      expect(foldersB.value.length).toBe(1)
+      expect(foldersB.value[0].name).toBe('Seed')
+      scopeB.stop()
+    })
   })
 })

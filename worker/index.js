@@ -16,6 +16,8 @@
 //   GET  /api/me             -> authenticated API boundary probe (200/401/503/500)
 //   POST /api/session/refresh -> rotate session: revoke old, issue fresh cookie
 //                                (200 {ok:true} | 401 | 403 | 503 | 500)
+//   POST /api/sync/mutation  -> apply one client push mutation (200/400/401/403/409/500/503)
+//   GET  /api/sync/objects   -> pull account's server object state (200/401/503/500)
 // Worker-generated responses carry their own security headers (public/_headers
 // applies only to static-asset responses, not to script responses).
 //
@@ -23,7 +25,7 @@
 // /api/session/refresh, session validation on app requests beyond these
 // handlers, the HTTP AuthAdapter bridge, any frontend coupling, cloud sync.
 import { handleOAuthLogin, handleOAuthCallback, handleAuthMe, handleAuthLogout } from './auth.js'
-import { handleApiMe, handleApiSessionRefresh, handleApiSyncMutation } from './api.js'
+import { handleApiMe, handleApiSessionRefresh, handleApiSyncMutation, handleApiSyncObjects } from './api.js'
 
 const AUTH_ROUTES = new Map([
   ['/auth/github/login', { allow: ['GET'], handler: handleOAuthLogin }],
@@ -36,6 +38,7 @@ const API_ROUTES = new Map([
   ['/api/me', { allow: ['GET'], handler: handleApiMe }],
   ['/api/session/refresh', { allow: ['POST'], handler: handleApiSessionRefresh }],
   ['/api/sync/mutation', { allow: ['POST'], handler: handleApiSyncMutation }],
+  ['/api/sync/objects', { allow: ['GET'], handler: handleApiSyncObjects }],
 ])
 
 function methodNotAllowed(allow) {

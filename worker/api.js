@@ -30,6 +30,7 @@ import {
   revokeSessionByToken,
   createSession,
   applyObjectMutation,
+  getObjectsForAccount,
 } from './db/store.js'
 import {
   jsonResponse,
@@ -230,6 +231,53 @@ export async function handleApiSyncMutation(request, env, { now = Date.now() } =
       return jsonResponse(409, { accepted: false, reason: 'revision_conflict', current })
     }
     return jsonResponse(500, { error: 'server_error' })
+  } catch {
+    return jsonResponse(500, { error: 'server_error' })
+  }
+}
+
+// ---- GET /api/sync/objects ---------------------------------------------------
+
+/**
+ * Return the authenticated account's full server object state (live objects
+ * AND tombstones) so the client can pull + reconcile.
+ *
+ * This is a READ-ONLY endpoint (like /api/me): it enforces authentication but
+ * NOT the Origin/Referer gate — a cross-site read is harmless and same-origin
+ * policy already guards the response. account_id is EXCLUSIVELY derived from
+ * the authenticated session; it is never accepted from query params, headers,
+ * or a body.
+ *
+ * Response: 200 { objects: [{ object_id, object_type, revision, deleted,
+ * deleted_at, payload, created_at, updated_at }, ...] } | 401 | 503 | 500.
+ * All responses are Cache-Control: no-store; D1/internal errors never leak.
+ */
+export async function handleApiSyncObjects(request, env, { now = Date.now() } = {}) {
+  if (!env.DB) return jsonResponse(503, { error: 'unavailable' })
+
+  const presented = readSessionCookie(request)
+  if (!presented) return jsonResponse(401, { error: 'unauthenticated' })
+
+  try {
+    const session = await getSessionByToken(env.DB, { token: presented.token, now })
+    if (!session) return jsonResponse(401, { error: 'unauthenticated' })
+    const account = await getAccount(env.DB, { accountId: session.account_id })
+    if (!account) return jsonResponse(401, { error: 'unauthenticated' })
+    const accountId = account.account_id
+
+    const rows = await getObjectsForAccount(env.DB, { accountId })
+    // Normalize the SQLite integer deleted flag to a boolean for the client.
+    const objects = rows.map((row) => ({
+      object_id: row.object_id,
+      object_type: row.object_type,
+      revision: row.revision,
+      deleted: row.deleted === 1,
+      deleted_at: row.deleted_at,
+      payload: safePayload(row.payload),
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+    }))
+    return jsonResponse(200, { objects })
   } catch {
     return jsonResponse(500, { error: 'server_error' })
   }

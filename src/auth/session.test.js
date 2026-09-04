@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { createSession, session, initSession } from './session.js'
 import { createMemoryAdapter } from './memory-adapter.js'
 
@@ -176,12 +176,21 @@ describe('fake in-memory adapter', () => {
 })
 
 describe('application singleton', () => {
-  it('defaults to anonymous in Phase 2A and never rejects on boot', async () => {
-    // The app-wide singleton uses the in-memory adapter (no real backend).
-    await expect(initSession()).resolves.toBeUndefined()
-    const st = session.getState()
-    expect(st.status).toBe('anonymous')
-    expect(st.user).toBeNull()
-    expect(st.error).toBeNull()
+  it('restores anonymous on boot when the server reports no session (GET /api/me 401)', async () => {
+    // The app-wide singleton now uses the real HTTP adapter (Phase A). A 401
+    // from GET /api/me means no/expired/revoked session -> anonymous, and boot
+    // never rejects.
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ authenticated: false }), { status: 401 }))
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      await expect(initSession()).resolves.toBeUndefined()
+      const st = session.getState()
+      expect(st.status).toBe('anonymous')
+      expect(st.user).toBeNull()
+      expect(st.error).toBeNull()
+      expect(fetchMock).toHaveBeenCalledWith('/api/me', expect.objectContaining({ method: 'GET', credentials: 'same-origin' }))
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })

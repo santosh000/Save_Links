@@ -61,6 +61,7 @@ describe('exchangeCodeForToken', () => {
       clientSecret: 's',
       code: 'one-time-code',
       redirectUri: 'http://localhost:8787/auth/github/callback',
+      codeVerifier: 'known-verifier-value',
       fetchImpl,
     })
     expect(accessToken).toBe('gho_very-secret-token')
@@ -74,6 +75,7 @@ describe('exchangeCodeForToken', () => {
     expect(body.get('client_secret')).toBe('s')
     expect(body.get('code')).toBe('one-time-code')
     expect(body.get('redirect_uri')).toBe('http://localhost:8787/auth/github/callback')
+    expect(body.get('code_verifier')).toBe('known-verifier-value')
   })
 
   it('treats GitHub\'s 200-with-error response as a failure (historical quirk)', async () => {
@@ -115,6 +117,20 @@ describe('exchangeCodeForToken', () => {
 })
 
 describe('getIdentity', () => {
+  it('sends the expected headers to GitHub /user: Bearer auth, Accept, User-Agent, API version', async () => {
+    const fetchImpl = mockGithub({ token: 'gho_x', identity: { id: 42, login: 'octo' } })
+    const identity = await getIdentity({ accessToken: 'gho_header_check', fetchImpl })
+    expect(identity).toEqual({ subject: '42', login: 'octo' })
+
+    // Inspect the ACTUAL outgoing request (options[0] = URL, options[1] = init).
+    const [, init] = fetchImpl.mock.calls.find(([url]) => String(url).includes('api.github.com/user'))
+    expect(init.method ?? 'GET').toBe('GET')
+    expect(init.headers.Authorization).toBe('Bearer gho_header_check')
+    expect(init.headers.Accept).toBe('application/vnd.github+json')
+    expect(init.headers['User-Agent']).toBe('Save_Link')
+    expect(init.headers['X-GitHub-Api-Version']).toBe('2026-03-10')
+  })
+
   it('maps GitHub id to the stable String subject with display login', async () => {
     const identity = await getIdentity({
       accessToken: 'gho_x',
@@ -144,6 +160,36 @@ describe('getIdentity', () => {
       await getIdentity({ accessToken: 'gho_do-not-leak-me', fetchImpl })
     } catch (err) {
       expect(err.message).not.toContain('gho_do-not-leak-me')
+    }
+  })
+
+  it('diagnostic log emits only non-sensitive metadata, never a token or the response body', async () => {
+    const accessToken = 'gho_BEARER_TOKEN_MARKER_XYZ'
+    const bodyTokenMarker = 'BODY_SECRET_ACCESS_TOKEN_ABC'
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ id: 42, login: 'octo', leaked: bodyTokenMarker }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', 'Content-Length': '1' }, // any presence is fine
+        })
+    )
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    try {
+      const identity = await getIdentity({ accessToken, fetchImpl })
+      expect(identity).toEqual({ subject: '42', login: 'octo' })
+      expect(spy).toHaveBeenCalled()
+      const logged = spy.mock.calls.map((c) => c.join(' ')).join('\n')
+      // non-sensitive metadata is present (proves logging actually ran)
+      expect(logged).toContain('[getIdentity][diagnostic]')
+      expect(logged).toContain('status=200')
+      expect(logged).toContain('ok=true')
+      expect(logged).toContain('url=https://api.github.com/user')
+      // NEVER the token, authorization header, or response body
+      expect(logged).not.toContain(accessToken)
+      expect(logged).not.toContain(bodyTokenMarker)
+      expect(logged).not.toContain('Bearer')
+    } finally {
+      spy.mockRestore()
     }
   })
 })

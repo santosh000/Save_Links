@@ -7,7 +7,7 @@
 // on any failure.
 import { describe, it, expect, vi } from 'vitest'
 import { handleOAuthLogin, handleOAuthCallback, handleAuthMe, handleAuthLogout } from './auth.js'
-import { createStateCookieValue, OAUTH_STATE_COOKIE, OAUTH_STATE_TTL_MS } from './oauth/state.js'
+import { createStateCookieValue, OAUTH_STATE_COOKIE, OAUTH_STATE_TTL_MS, pkceCodeChallenge } from './oauth/state.js'
 import { createTestDb } from './db/d1-facade.js'
 import { createSession, generateSessionToken, getSessionByToken, revokeSessionByToken, resolveAccountByProvider } from './db/store.js'
 
@@ -147,6 +147,51 @@ describe('GET /auth/github/callback', () => {
     expect(await res.text()).toBe('')
     expect(res.headers.get('location')).not.toContain(rawSessionCookie)
     expect(res.headers.get('location')).not.toContain('gho_test-token')
+  })
+
+  it('forwards the PKCE code_verifier recovered from the oauth_state cookie to the GitHub exchange, matching the authorization challenge', async () => {
+    const env = makeEnv()
+
+    // 1. Login: capture the authorize URL's code_challenge and the oauth_state cookie.
+    const login = await handleOAuthLogin(new Request(LOGIN_URL), env, { now: NOW })
+    expect(login.status).toBe(302)
+    const authorizeUrl = new URL(login.headers.get('location'))
+    const codeChallenge = authorizeUrl.searchParams.get('code_challenge')
+    expect(authorizeUrl.searchParams.get('code_challenge_method')).toBe('S256')
+    const loginCookies = login.headers.getSetCookie()
+    const stateCookie = loginCookies.find((c) => c.startsWith(`${OAUTH_STATE_COOKIE}=`))
+    expect(stateCookie).toBeTruthy()
+    const stateValue = decodeURIComponent(stateCookie.slice(`${OAUTH_STATE_COOKIE}=`.length, stateCookie.indexOf(';')))
+    const state = authorizeUrl.searchParams.get('state')
+
+    // 2. Callback: capture the token-exchange POST body.
+    const captured = []
+    const fetchImpl = vi.fn(async (url, opts = {}) => {
+      if (String(url).includes('/login/oauth/access_token')) {
+        captured.push(new URLSearchParams(opts.body))
+        return jsonResponse({ access_token: 'gho_test-token' })
+      }
+      if (String(url).includes('api.github.com/user')) {
+        return jsonResponse({ id: 42, login: 'octo' })
+      }
+      throw new Error(`unexpected URL: ${url}`)
+    })
+
+    const base = new URL(CALLBACK_URL)
+    base.searchParams.set('state', state)
+    base.searchParams.set('code', 'one-time-code')
+    const callbackReq = new Request(base, {
+      headers: { cookie: `${OAUTH_STATE_COOKIE}=${encodeURIComponent(stateValue)}` },
+    })
+    const cb = await handleOAuthCallback(callbackReq, env, { now: NOW, fetchImpl })
+    expect(cb.status).toBe(302)
+
+    // 3. The recovered verifier must reach GitHub AND match the authorization challenge.
+    const exchangeBody = captured[0]
+    const codeVerifier = exchangeBody.get('code_verifier')
+    expect(typeof codeVerifier).toBe('string')
+    expect(codeVerifier.length).toBeGreaterThan(0)
+    await expect(pkceCodeChallenge(codeVerifier)).resolves.toBe(codeChallenge)
   })
 
   it('second sign-in with the same GitHub id resolves to the SAME account', async () => {

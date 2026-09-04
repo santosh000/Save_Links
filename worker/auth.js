@@ -337,6 +337,9 @@ export async function handleOAuthCallback(request, env, { now = Date.now(), fetc
       clientSecret: config.clientSecret,
       code,
       redirectUri,
+      // PKCE: the authorize request used S256, so GitHub requires the matching
+      // verifier here (recovered from the signed oauth_state cookie above).
+      codeVerifier: verified.codeVerifier,
       fetchImpl,
     })
 

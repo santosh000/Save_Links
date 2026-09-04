@@ -29,7 +29,8 @@
 import { repository } from '../storage/repository.js'
 import { STORES } from '../storage/indexeddb.js'
 import { session } from '../auth/session.js'
-import { pushMutation } from './protocol.js'
+import { notifyDataChanged } from '../storage/dataChanges.js'
+import { pushMutation, pullObjects } from './protocol.js'
 
 const OBJECT_TYPE_TO_STORE = {
   link: STORES.LINKS,
@@ -92,28 +93,164 @@ export async function rebaseConflict(mutation, serverCurrent, repo) {
 }
 
 /**
- * Drain all pending mutations for the currently authenticated account.
+ * Apply one authoritative server object to local IndexedDB, preserving the
+ * server's revision. Tombstones become local deletions (the object leaves the
+ * live local store) rather than a hard purge with no record.
  *
- * Processes mutations sequentially in queue order. For each mutation:
- *   - accepted  → update local revision from server, mark succeeded
- *   - conflict  → rebase against server state (new pending mutation created)
- *   - rejected  → mark failed (not retryable: 400/401/403)
- *   - unavailable → leave pending (retryable: 500/503/network)
+ * @param {Object} repo — repository with upsertLink/upsertFolder/deleteLink/deleteFolder
+ * @param {Object} server — a pulled server object, { object_id, object_type, revision, deleted, payload }
+ * @returns {Promise<void>}
+ */
+async function applyServerObject(repo, server) {
+  if (server.object_type === 'link') {
+    if (server.deleted) {
+      await repo.deleteLink(server.object_id)
+    } else {
+      await repo.upsertLink({ ...(server.payload ?? {}), id: server.object_id, revision: server.revision })
+    }
+  } else if (server.object_type === 'folder') {
+    if (server.deleted) {
+      await repo.deleteFolder(server.object_id)
+    } else {
+      await repo.upsertFolder({ ...(server.payload ?? {}), id: server.object_id, revision: server.revision })
+    }
+  }
+}
+
+/**
+ * Pull the server's authoritative object set for the authenticated account and
+ * reconcile it against local IndexedDB.
+ *
+ * Reconciliation rules (deterministic, no conflict UI):
+ *   - Objects with a locally pending mutation for the SAME (object_type,
+ *     object_id) are skipped: pending local work wins until the push drain
+ *     resolves it (rebase on 409). A pull never silently destroys it.
+ *   - Where the local acknowledged revision is strictly NEWER than the server's,
+ *     the server object is not applied (never overwrite newer local state).
+ *   - Otherwise the server object wins: live objects are upserted with the
+ *     server revision; tombstones delete the local object (local "deleted").
  *
  * @param {Object} [options]
- * @param {Function} [options.pushFn] — injectable pushMutation (default: module import)
+ * @param {Function} [options.pullFn] — injectable pullObjects (default: module import)
  * @param {Object} [options.repo] — injectable repository (default: singleton)
- * @returns {Promise<{ pushed: number, succeeded: number, failed: number, conflict: number, unavailable: number }>}
+ * @returns {Promise<{ pulled: number, applied: number, skippedLocal: number, skippedStale: number, unavailable: boolean, rejected: boolean }>}
  */
-export async function syncNow({
-  pushFn = pushMutation,
-  repo = repository,
-} = {}) {
-  const summary = { pushed: 0, succeeded: 0, failed: 0, conflict: 0, unavailable: 0 }
+export async function pullAndReconcile({ pullFn = pullObjects, repo = repository } = {}) {
+  const summary = { pulled: 0, applied: 0, skippedLocal: 0, skippedStale: 0, unavailable: false, rejected: false }
 
   const accountId = session.getState().user?.id
   if (!accountId) return summary
 
+  let result
+  try {
+    result = await pullFn()
+  } catch {
+    // Network-level failure (fetch threw). Nothing reconciled.
+    summary.unavailable = true
+    return summary
+  }
+
+  if (result.kind === 'rejected') {
+    summary.rejected = true
+    return summary
+  }
+  if (result.kind === 'unavailable' || !Array.isArray(result.objects)) {
+    summary.unavailable = true
+    return summary
+  }
+
+  // Local state snapshots + pending mutations, read once through the repo.
+  const [localLinks, localFolders, pending] = await Promise.all([
+    repo.getAllLinks(),
+    repo.getAllFolders(),
+    repo.getPendingMutations(),
+  ])
+
+  const localByKey = new Map()
+  for (const l of localLinks) localByKey.set(`link:${l.id}`, l)
+  for (const f of localFolders) localByKey.set(`folder:${f.id}`, f)
+
+  // Pending local mutations must never be clobbered by a pull's server state.
+  const pendingKeys = new Set()
+  for (const m of pending) {
+    if (m.account_id === accountId) pendingKeys.add(`${m.object_type}:${m.object_id}`)
+  }
+
+  summary.pulled = result.objects.length
+
+  for (const server of result.objects) {
+    if (!server || typeof server !== 'object') continue
+    const key = `${server.object_type}:${server.object_id}`
+    if (pendingKeys.has(key)) {
+      summary.skippedLocal++
+      continue
+    }
+    const local = localByKey.get(key)
+    if (local && (local.revision ?? 0) > server.revision) {
+      // Local acknowledged revision is ahead of the server's — do not overwrite.
+      summary.skippedStale++
+      continue
+    }
+    await applyServerObject(repo, server)
+    summary.applied++
+  }
+
+  // The reconcile wrote remote state into IndexedDB from outside the
+  // composables; notify them so the mounted useLinks/useFolders refs reload and
+  // reflect the pulled data immediately (no page refresh), without enqueueing a
+  // new pending mutation.
+  if (summary.applied > 0) notifyDataChanged()
+
+  return summary
+}
+
+/**
+ * Full explicit sync: pull the server state, reconcile it into local
+ * IndexedDB, then drain the pending-mutation push queue. Executed in that
+ * strict order (pull → reconcile → push).
+ *
+ * The pull reads the server's authoritative object set for the authenticated
+ * account and reconciles it locally (never clobbering pending local work or
+ * newer acknowledged local state). The push then drains the queue exactly as
+ * before — unchanged semantics (accepted/conflict rebase/rejected/unavailable).
+ *
+ * If the pull is unavailable or rejected, the push is skipped and the summary
+ * reports it (unavailable/failed) so a failed reconciliation is never reported
+ * as a successful sync.
+ *
+ * @param {Object} [options]
+ * @param {Function} [options.pushFn] — injectable pushMutation (default: module import)
+ * @param {Function} [options.pullFn] — injectable pullObjects (default: module import)
+ * @param {Object} [options.repo] — injectable repository (default: singleton)
+ * @returns {Promise<{ pushed: number, succeeded: number, failed: number, conflict: number, unavailable: number, pulled: number, applied: number, skippedLocal: number, skippedStale: number }>}
+ */
+export async function syncNow({
+  pushFn = pushMutation,
+  pullFn = pullObjects,
+  repo = repository,
+} = {}) {
+  const summary = { pushed: 0, succeeded: 0, failed: 0, conflict: 0, unavailable: 0, pulled: 0, applied: 0, skippedLocal: 0, skippedStale: 0 }
+
+  const accountId = session.getState().user?.id
+  if (!accountId) return summary
+
+  // 1. Pull + reconcile. If the pull cannot be performed, the sync stops here
+  //    (no push, no false success) per the pull→reconcile→push ordering.
+  const pull = await pullAndReconcile({ pullFn, repo })
+  summary.pulled = pull.pulled
+  summary.applied = pull.applied
+  summary.skippedLocal = pull.skippedLocal
+  summary.skippedStale = pull.skippedStale
+  if (pull.unavailable) {
+    summary.unavailable = 1
+    return summary
+  }
+  if (pull.rejected) {
+    summary.failed = 1
+    return summary
+  }
+
+  // 2. Push drain (existing behavior, unchanged).
   const mutations = await repo.getPendingMutations()
   const myMutations = mutations.filter(m => m.account_id === accountId)
 

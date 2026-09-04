@@ -12,6 +12,7 @@ import {
   handleApiMe,
   handleApiSessionRefresh,
   handleApiSyncMutation,
+  handleApiSyncObjects,
   requireApiOrigin,
 } from './api.js'
 import { createTestDb } from './db/d1-facade.js'
@@ -793,5 +794,132 @@ describe('POST /api/sync/mutation — cloud sync protocol', () => {
       env, { now: NOW }
     )
     expect(res.status).toBe(200)
+  })
+})
+
+describe('GET /api/sync/objects — pull/read-back', () => {
+  const OBJECTS_URL = 'http://localhost:8787/api/sync/objects'
+
+  function objectsRequest(cookieHeader) {
+    return new Request(OBJECTS_URL, cookieHeader ? { headers: { cookie: cookieHeader } } : undefined)
+  }
+
+  it('authenticated account can read its own objects (live + tombstone), no-store', async () => {
+    const env = makeEnv()
+    const { accountId, token } = await seedSession(env)
+    const liveId = crypto.randomUUID()
+    const tombId = crypto.randomUUID()
+    await applyObjectMutation(env.DB, { accountId, mutationId: crypto.randomUUID(), objectType: 'link', objectId: liveId, operation: 'create', baseRevision: 0, payload: '{"title":"A"}', now: NOW })
+    await applyObjectMutation(env.DB, { accountId, mutationId: crypto.randomUUID(), objectType: 'folder', objectId: tombId, operation: 'create', baseRevision: 0, payload: '{"name":"F"}', now: NOW })
+    await applyObjectMutation(env.DB, { accountId, mutationId: crypto.randomUUID(), objectType: 'folder', objectId: tombId, operation: 'delete', baseRevision: 1, payload: '{}', now: NOW })
+
+    const res = await handleApiSyncObjects(objectsRequest(`${DEV_COOKIE}=${encodeURIComponent(token)}`), env, { now: NOW })
+    expect(res.status).toBe(200)
+    expect(res.headers.get('cache-control')).toBe('no-store')
+    expect(res.headers.get('content-type')).toContain('application/json')
+    const body = await res.json()
+    const live = body.objects.find((o) => o.object_id === liveId)
+    const tomb = body.objects.find((o) => o.object_id === tombId)
+    expect(live).toEqual({
+      object_id: liveId,
+      object_type: 'link',
+      revision: 1,
+      deleted: false,
+      deleted_at: null,
+      payload: { title: 'A' },
+      created_at: NOW,
+      updated_at: NOW,
+    })
+    expect(tomb.deleted).toBe(true)
+    expect(tomb.deleted_at).toBe(NOW)
+    expect(tomb.revision).toBe(2)
+  })
+
+  it('unauthenticated request is rejected with 401', async () => {
+    const env = makeEnv()
+    const res = await handleApiSyncObjects(objectsRequest(), env, { now: NOW })
+    expect(res.status).toBe(401)
+    expect(await res.json()).toEqual({ error: 'unauthenticated' })
+  })
+
+  it('account A cannot read account B\'s objects', async () => {
+    const env = makeEnv()
+    const { accountId: a, token: tokenA } = await seedSession(env) // subject '42'
+    // A distinct account (different GitHub subject).
+    const { account_id: b } = await resolveAccountByProvider(env.DB, {
+      provider: 'github',
+      providerSubject: '99',
+      now: NOW,
+    })
+    expect(b).not.toBe(a)
+    // B owns an object; A must not see it.
+    await applyObjectMutation(env.DB, { accountId: b, mutationId: crypto.randomUUID(), objectType: 'link', objectId: crypto.randomUUID(), operation: 'create', baseRevision: 0, payload: '{"secret":"B"}', now: NOW })
+    const res = await handleApiSyncObjects(objectsRequest(`${DEV_COOKIE}=${encodeURIComponent(tokenA)}`), env, { now: NOW })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.objects).toEqual([])
+  })
+
+  it('tombstones are returned to the owning account', async () => {
+    const env = makeEnv()
+    const { accountId, token } = await seedSession(env)
+    const id = crypto.randomUUID()
+    await applyObjectMutation(env.DB, { accountId, mutationId: crypto.randomUUID(), objectType: 'link', objectId: id, operation: 'create', baseRevision: 0, payload: '{}', now: NOW })
+    await applyObjectMutation(env.DB, { accountId, mutationId: crypto.randomUUID(), objectType: 'link', objectId: id, operation: 'delete', baseRevision: 1, payload: '{}', now: NOW })
+    const res = await handleApiSyncObjects(objectsRequest(`${DEV_COOKIE}=${encodeURIComponent(token)}`), env, { now: NOW })
+    const body = await res.json()
+    const obj = body.objects.find((o) => o.object_id === id)
+    expect(obj.deleted).toBe(true)
+    expect(obj.deleted_at).toBe(NOW)
+  })
+
+  it('missing DB binding -> 503 (never authenticated, no internals leaked)', async () => {
+    const env = makeEnv({ DB: undefined })
+    const res = await handleApiSyncObjects(objectsRequest(), env, { now: NOW })
+    expect(res.status).toBe(503)
+    expect(await res.json()).toEqual({ error: 'unavailable' })
+  })
+
+  it('unexpected database failure -> generic 500 with no internals leaked', async () => {
+    const env = makeEnv()
+    const { token } = await seedSession(env)
+    const store = await import('./db/store.js')
+    const spy = vi.spyOn(store, 'getObjectsForAccount').mockRejectedValueOnce(new Error('db exploded'))
+    try {
+      const res = await handleApiSyncObjects(objectsRequest(`${DEV_COOKIE}=${encodeURIComponent(token)}`), env, { now: NOW })
+      expect(res.status).toBe(500)
+      expect(await res.json()).toEqual({ error: 'server_error' })
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('response never contains the raw session token', async () => {
+    const env = makeEnv()
+    const { token } = await seedSession(env)
+    const res = await handleApiSyncObjects(objectsRequest(`${DEV_COOKIE}=${encodeURIComponent(token)}`), env, { now: NOW })
+    const text = await res.text()
+    expect(text).not.toContain(token)
+  })
+})
+
+describe('GET /api/sync/objects — routing + method enforcement (worker/index.js)', () => {
+  const OBJECTS_URL = 'http://localhost:8787/api/sync/objects'
+
+  it('POST /api/sync/objects -> 405 with Allow: GET', async () => {
+    const env = { DB: createTestDb(), ASSETS: { fetch: () => { throw new Error('should not be called') } } }
+    for (const method of ['POST', 'PUT', 'DELETE']) {
+      const res = await worker.fetch(new Request(OBJECTS_URL, { method }), env)
+      expect(res.status, method).toBe(405)
+      expect(res.headers.get('allow'), method).toBe('GET')
+    }
+  })
+
+  it('GET /api/sync/objects reaches the Worker (unauthenticated -> 401, not 404/asset)', async () => {
+    let assetsCalled = false
+    const env = { DB: createTestDb(), ASSETS: { fetch: () => { assetsCalled = true; return new Response('x') } } }
+    const res = await worker.fetch(new Request(OBJECTS_URL), env)
+    expect(res.status).toBe(401) // reached the handler
+    expect(assetsCalled).toBe(false)
   })
 })
