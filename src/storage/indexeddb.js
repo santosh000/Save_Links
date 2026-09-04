@@ -26,8 +26,8 @@ import { ENVIRONMENT } from '../utils/environment.js'
 import { normalizeLink } from '../domain/link.js'
 import { APPEARANCE_VALUES, COLOR_SCHEME_VALUES, DEFAULT_APPEARANCE, DEFAULT_COLOR_SCHEME } from '../utils/storage.js'
 
-export const INDEXEDDB_DB_VERSION = 1
-export const STORES = { LINKS: 'links', FOLDERS: 'folders', KV: 'kv' }
+export const INDEXEDDB_DB_VERSION = 2
+export const STORES = { LINKS: 'links', FOLDERS: 'folders', KV: 'kv', PENDING_MUTATIONS: 'pending_mutations' }
 export const KV_KEYS = { PROFILE: 'profile', SETTINGS: 'settings' }
 
 export function defaultDBName() {
@@ -37,17 +37,37 @@ export function defaultDBName() {
 // Single source of truth for the schema. Exported so tests and future
 // migration/upgrade tooling build the database through the same path.
 export function upgrade(db) {
+  // --- kv store (profile/settings) ---
+  if (!db.objectStoreNames.contains(STORES.KV)) {
+    db.createObjectStore(STORES.KV, { keyPath: 'key' })
+  }
+
+  // --- links store ---
   if (!db.objectStoreNames.contains(STORES.LINKS)) {
+    // Fresh database — create with v2 schema fields
     const store = db.createObjectStore(STORES.LINKS, { keyPath: 'id' })
     store.createIndex('by-createdAt', 'createdAt')
     store.createIndex('by-folderId', 'folderId')
     store.createIndex('by-category', 'category')
+    store.createIndex('by-revision', 'revision')
+    store.createIndex('by-account_id', 'account_id')
   }
+  // If links store already exists (v1 database), keep it as-is.
+  // New records written after upgrade will include revision/account_id
+  // via normalizeLink/sanitizeFolder defaults; existing records remain
+  // valid without these fields (backward compatible).
+
+  // --- folders store ---
   if (!db.objectStoreNames.contains(STORES.FOLDERS)) {
     db.createObjectStore(STORES.FOLDERS, { keyPath: 'id' })
   }
-  if (!db.objectStoreNames.contains(STORES.KV)) {
-    db.createObjectStore(STORES.KV, { keyPath: 'key' })
+  // If folders store already exists (v1 database), keep it as-is.
+  // New records written after upgrade will include revision/account_id
+  // via sanitizeFolder defaults; existing records remain valid.
+
+  // --- pending_mutations store (new in v2) ---
+  if (!db.objectStoreNames.contains(STORES.PENDING_MUTATIONS)) {
+    db.createObjectStore(STORES.PENDING_MUTATIONS, { keyPath: 'mutation_id' })
   }
 }
 
@@ -79,6 +99,14 @@ function getAllRecords(db, storeName) {
   })
 }
 
+function getRecord(db, storeName, key) {
+  return new Promise((resolve, reject) => {
+    const req = db.transaction(storeName, 'readonly').objectStore(storeName).get(key)
+    req.onsuccess = () => resolve(req.result)
+    req.onerror = () => reject(req.error)
+  })
+}
+
 function getKV(db, key) {
   return new Promise((resolve, reject) => {
     const req = db.transaction(STORES.KV, 'readonly').objectStore(STORES.KV).get(key)
@@ -105,7 +133,16 @@ export function sanitizeFolder(raw) {
   const name = typeof raw.name === 'string' ? raw.name.trim().slice(0, 50) : ''
   if (!id || !name) return null
   const createdAt = typeof raw.createdAt === 'string' && raw.createdAt ? raw.createdAt : new Date().toISOString()
-  return { id, name, createdAt }
+  return {
+    id,
+    name,
+    createdAt,
+    // v2 sync fields — preserve if present, backfill with defaults if missing
+    revision: typeof raw.revision === 'number' ? raw.revision : 0,
+    account_id: typeof raw.account_id === 'string' ? raw.account_id.trim() : null,
+    // Track if user explicitly chose to keep this folder local after login
+    kept_local: typeof raw.kept_local === 'boolean' ? raw.kept_local : false,
+  }
 }
 
 export function createIndexedDBRepository({ dbName = defaultDBName() } = {}) {
@@ -284,6 +321,115 @@ export function createIndexedDBRepository({ dbName = defaultDBName() } = {}) {
     })
   }
 
+  // --- pending-mutation queue (v2) ---
+
+  /** Generate a unique ID for pending mutations (UUID v4) */
+  function generateMutationId() {
+    const bytes = crypto.getRandomValues(new Uint8Array(16))
+    bytes[6] = (bytes[6] & 0x0f) | 0x40
+    bytes[8] = (bytes[8] & 0x3f) | 0x80
+    let hex = ''
+    for (const b of bytes) hex += b.toString(16).padStart(2, '0')
+    return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20,32)}`
+  }
+
+  /** Add a mutation to the pending_mutations store */
+  async function addPendingMutation(type, objectId, objectType, payload, accountId, baseRevision) {
+    if (!['create', 'update', 'delete'].includes(type)) {
+      throw new Error('Invalid mutation type: must be create, update, or delete')
+    }
+    if (!accountId || !accountId.trim()) {
+      throw new Error('account_id is required for pending mutations')
+    }
+    if (typeof baseRevision !== 'number' || baseRevision < 0) {
+      throw new Error('base_revision must be a non-negative integer')
+    }
+    const mutation = {
+      mutation_id: crypto.randomUUID(),
+      account_id: accountId,
+      object_id: objectId,
+      object_type: objectType,
+      operation: type,
+      base_revision: baseRevision,
+      payload,
+      createdAt: new Date().toISOString(),
+      status: 'pending',
+    }
+    const db = await open()
+    await putRecord(db, STORES.PENDING_MUTATIONS, mutation)
+    return mutation.mutation_id
+  }
+
+  /** Get all pending mutations from the store */
+  async function getPendingMutations() {
+    const db = await open()
+    const records = await getAllRecords(db, STORES.PENDING_MUTATIONS)
+    return records.filter((m) => m.status !== 'succeeded' && m.status !== 'failed')
+  }
+
+  /** Mark a pending mutation as succeeded */
+  async function markMutationSucceeded(mutationId) {
+    const db = await open()
+    const record = await getRecord(db, STORES.PENDING_MUTATIONS, mutationId)
+    if (!record) throw new Error('Pending mutation not found')
+    await putRecord(db, STORES.PENDING_MUTATIONS, { ...record, status: 'succeeded' })
+  }
+
+  /** Mark a pending mutation as failed */
+  async function markMutationFailed(mutationId) {
+    const db = await open()
+    const record = await getRecord(db, STORES.PENDING_MUTATIONS, mutationId)
+    if (!record) throw new Error('Pending mutation not found')
+    await putRecord(db, STORES.PENDING_MUTATIONS, { ...record, status: 'failed' })
+  }
+
+  /**
+   * Atomically rebase a conflicted mutation: mark the original failed and
+   * insert a new pending mutation — all in ONE IndexedDB readwrite transaction.
+   *
+   * If the original mutation does not exist, the transaction aborts (neither
+   * the new mutation nor the status change persists).
+   *
+   * @param {string} originalMutationId — the conflicted mutation to retire
+   * @param {Object} rebased — the new pending mutation record (mutation_id must be unique)
+   * @returns {Promise<string>} the rebased mutation_id
+   */
+  async function rebasePendingMutation(originalMutationId, rebased) {
+    const db = await open()
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORES.PENDING_MUTATIONS, 'readwrite')
+      const store = tx.objectStore(STORES.PENDING_MUTATIONS)
+
+      // 1. Verify original exists (get is read-only, but inside rw tx)
+      const getReq = store.get(originalMutationId)
+      getReq.onsuccess = () => {
+        if (!getReq.result) {
+          tx.abort()
+          return
+        }
+        // 2. Mark original as failed
+        store.put({ ...getReq.result, status: 'failed' })
+        // 3. Insert rebased mutation
+        store.put(rebased)
+      }
+      tx.oncomplete = () => resolve(rebased.mutation_id)
+      tx.onerror = () => reject(tx.error)
+      tx.onabort = () => reject(tx.error || new Error('transaction aborted'))
+    })
+    return rebased.mutation_id
+  }
+
+  /** Update the server-assigned revision on a local link or folder record. */
+  async function updateObjectRevision(storeName, objectId, revision) {
+    if (storeName !== STORES.LINKS && storeName !== STORES.FOLDERS) {
+      throw new Error('Invalid store: must be links or folders')
+    }
+    const db = await open()
+    const record = await getRecord(db, storeName, objectId)
+    if (!record) return
+    await putRecord(db, storeName, { ...record, revision })
+  }
+
   return {
     getAllLinks,
     upsertLink,
@@ -299,5 +445,12 @@ export function createIndexedDBRepository({ dbName = defaultDBName() } = {}) {
     saveSettings,
     replaceAll,
     close,
+    // --- pending-mutation queue (v2) ---
+    addPendingMutation,
+    getPendingMutations,
+    markMutationSucceeded,
+    markMutationFailed,
+    rebasePendingMutation,
+    updateObjectRevision,
   }
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { nextTick } from 'vue'
+import { nextTick, effectScope } from 'vue'
 import { getStorageKey } from '../utils/environment.js'
 import 'fake-indexeddb/auto'
 import { repository } from '../storage/repository.js'
@@ -786,6 +786,242 @@ describe('useLinks', () => {
       links.value[0].title = 'changed'
       await flush()
       expect(storageError.value).toBe('')
+    })
+  })
+
+  describe('authenticated sync queueing', () => {
+    it('queues a create mutation with base_revision 0 for a new authenticated link', async () => {
+      const { session, initSession } = await import('../auth/session.js')
+      // Restore an authenticated session through the real HTTP adapter (Phase A):
+      // a mocked GET /api/me that the Worker would answer for a valid session.
+      vi.stubGlobal('fetch', vi.fn(async (url) => {
+        if (url === '/api/me') return new Response(JSON.stringify({ authenticated: true, accountId: 'memory-user' }), { status: 200 })
+        if (url === '/auth/logout') return new Response(null, { status: 200 })
+        return new Response(null, { status: 404 })
+      }))
+      await initSession()
+      const { useLinks } = await import('./useLinks.js')
+      const { links, addLink } = useLinks()
+      const link = await addLink({ originalUrl: 'https://example.com/synced', _prefetchedMeta: { title: 'S', description: '', image: '', domain: 'example.com' }, _prefetchedUrl: 'https://example.com/synced' })
+      expect(link.revision).toBe(0)
+      await flush()
+      const pending = await repository.getPendingMutations()
+      expect(pending.length).toBe(1)
+      expect(pending[0].operation).toBe('create')
+      expect(pending[0].object_type).toBe('link')
+      expect(pending[0].object_id).toBe(link.id)
+      expect(pending[0].base_revision).toBe(0)
+      expect(pending[0].account_id).toBe('memory-user')
+      expect(links.value.length).toBe(1) // local-first data still present
+      await session.logout()
+      vi.unstubAllGlobals()
+    })
+  })
+
+  describe('mergeLinks — device/source (savedFrom) preservation across import', () => {
+    function importedLink(normalizedUrl, title, savedFrom) {
+      return {
+        id: 'imp-' + normalizedUrl.replace(/[^a-z0-9]/gi, ''),
+        originalUrl: normalizedUrl,
+        normalizedUrl,
+        url: normalizedUrl,
+        domain: 'example.com',
+        title,
+        description: '',
+        image: '',
+        tags: [],
+        category: 'Other',
+        important: false,
+        mustHave: false,
+        favorite: false,
+        folderId: null,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        savedFrom,
+      }
+    }
+
+    it('keep-existing (skip) does not overwrite the local link device metadata', async () => {
+      const { useLinks } = await import('./useLinks.js')
+      const { links, addLink, mergeLinks } = useLinks()
+      // existing local link, saved on Windows
+      await addLink({ originalUrl: 'https://example.com/a', _prefetchedMeta: { title: 'A', description: '', image: '', domain: 'example.com' }, _prefetchedUrl: 'https://example.com/a' })
+      links.value[0].savedFrom = 'Windows'
+      await flush()
+      const createdAt = links.value[0].createdAt
+      const id = links.value[0].id
+
+      // incoming backup link is a duplicate (same url) saved on Android
+      const res = mergeLinks([importedLink('https://example.com/a', 'A (backup)', 'Android')], 'skip')
+
+      expect(res.newCount).toBe(0)
+      expect(res.replacedCount).toBe(0)
+      expect(links.value.length).toBe(1)
+      const kept = links.value[0]
+      // local link untouched: same id, same date, same device metadata
+      expect(kept.id).toBe(id)
+      expect(kept.createdAt).toBe(createdAt)
+      expect(kept.savedFrom).toBe('Windows')
+      // persisted with the local Windows metadata
+      await flush()
+      const stored = await repository.getAllLinks()
+      expect(stored[0].savedFrom).toBe('Windows')
+    })
+
+    it('replace-existing preserves the BACKUP link device metadata (Windows stays Windows)', async () => {
+      const { useLinks } = await import('./useLinks.js')
+      const { links, addLink, mergeLinks } = useLinks()
+      await addLink({ originalUrl: 'https://example.com/b', _prefetchedMeta: { title: 'B', description: '', image: '', domain: 'example.com' }, _prefetchedUrl: 'https://example.com/b' })
+      links.value[0].savedFrom = 'Android'
+      await flush()
+      const id = links.value[0].id
+      const createdAt = links.value[0].createdAt
+
+      // backup says Windows — replace must retain Windows (backup metadata), not the local Android
+      mergeLinks([importedLink('https://example.com/b', 'B (backup)', 'Windows')], 'replace')
+
+      const replaced = links.value.find(l => l.id === id)
+      expect(replaced.title).toBe('B (backup)') // backup version applied
+      expect(replaced.savedFrom).toBe('Windows') // backup device metadata retained
+      expect(replaced.createdAt).toBe(createdAt) // local date preserved
+      await flush()
+      const stored = await repository.getAllLinks()
+      expect(stored[0].savedFrom).toBe('Windows')
+    })
+
+    it('added new links retain the backup device metadata', async () => {
+      const { useLinks } = await import('./useLinks.js')
+      const { links, mergeLinks } = useLinks()
+      const res = mergeLinks([importedLink('https://example.com/new', 'New', 'Windows')], 'skip')
+      expect(res.newCount).toBe(1)
+      expect(links.value[0].savedFrom).toBe('Windows')
+      await flush()
+      const stored = await repository.getAllLinks()
+      expect(stored[0].savedFrom).toBe('Windows')
+    })
+
+    it('added new links with no device metadata stay Unknown (never re-detected from the importing device)', async () => {
+      const { useLinks } = await import('./useLinks.js')
+      const { links, mergeLinks } = useLinks()
+      // DataBackup always passes normalizer output, so a backup link with no
+      // savedFrom arrives here as 'Unknown' (normalizeLink default) — never as
+      // the importing device's platform. Assert mergeLinks keeps that intact.
+      const res = mergeLinks([importedLink('https://example.com/nometa', 'No Meta', 'Unknown')], 'skip')
+      expect(res.newCount).toBe(1)
+      // not stamped with the importing device's platform
+      expect(links.value[0].savedFrom).toBe('Unknown')
+      await flush()
+      const stored = await repository.getAllLinks()
+      expect(stored[0].savedFrom).toBe('Unknown')
+    })
+  })
+
+  describe('remote pull reactivity (inbound sync)', () => {
+    // Simulates the coordinator writing an authoritative remote object into
+    // IndexedDB directly (exactly what pullAndReconcile/applyServerObject does),
+    // then signaling the composable via notifyDataChanged.
+    async function pullLinkIntoRepo(record) {
+      await repository.upsertLink(record)
+      const { notifyDataChanged } = await import('../storage/dataChanges.js')
+      notifyDataChanged()
+    }
+
+    it('pulled link appears in the reactive ref immediately without a reload', async () => {
+      const { useLinks } = await import('./useLinks.js')
+      const { links } = useLinks()
+      expect(links.value.length).toBe(0)
+      // authorize like the repository does (id + revision), as the server sends it
+      await pullLinkIntoRepo({
+        id: 'server-link-1', object_id: 'server-link-1', revision: 7,
+        url: 'https://pulled.example', normalizedUrl: 'https://pulled.example',
+        originalUrl: 'https://pulled.example', title: 'Pulled!', description: '',
+        image: '', domain: 'pulled.example', category: 'Other', tags: [],
+        important: false, mustHave: false, favorite: false, folderId: null,
+        status: null, createdAt: '2026-01-01T00:00:00.000Z', savedFrom: 'Cloud',
+      })
+      await flush()
+      expect(links.value.length).toBe(1)
+      expect(links.value[0].title).toBe('Pulled!')
+      // server revision preserved locally
+      expect(links.value[0].revision).toBe(7)
+    })
+
+    it('remote pull does not enqueue a pending mutation', async () => {
+      const { useLinks } = await import('./useLinks.js')
+      useLinks()
+      await pullLinkIntoRepo({
+        id: 'server-link-2', object_id: 'server-link-2', revision: 1,
+        url: 'https://pulled2.example', normalizedUrl: 'https://pulled2.example',
+        originalUrl: 'https://pulled2.example', title: 'Pulled 2', description: '',
+        image: '', domain: 'pulled2.example', category: 'Other', tags: [],
+        important: false, mustHave: false, favorite: false, folderId: null,
+        status: null, createdAt: '2026-01-01T00:00:00.000Z', savedFrom: 'Cloud',
+      })
+      await flush()
+      const pending = await repository.getPendingMutations()
+      expect(pending.length).toBe(0)
+    })
+
+    it('pulling the same server object again does not duplicate it', async () => {
+      const { useLinks } = await import('./useLinks.js')
+      const { links } = useLinks()
+      const record = {
+        id: 'server-link-3', object_id: 'server-link-3', revision: 2,
+        url: 'https://pulled3.example', normalizedUrl: 'https://pulled3.example',
+        originalUrl: 'https://pulled3.example', title: 'Pulled 3', description: '',
+        image: '', domain: 'pulled3.example', category: 'Other', tags: [],
+        important: false, mustHave: false, favorite: false, folderId: null,
+        status: null, createdAt: '2026-01-01T00:00:00.000Z', savedFrom: 'Cloud',
+      }
+      await pullLinkIntoRepo(record)
+      await flush()
+      await pullLinkIntoRepo(record)
+      await flush()
+      expect(links.value.length).toBe(1)
+    })
+
+    it('unsubscribes the change listener when the composable scope is disposed (no duplicate/stale listeners)', async () => {
+      // Isolate from the shared module scope: prior unscoped useLinks() mounts in
+      // this file leave persistent module-level listeners whose deep watches
+      // would otherwise write to IndexedDB concurrently with this test's reload.
+      vi.resetModules()
+      const { useLinks } = await import('./useLinks.js')
+      const { notifyDataChanged } = await import('../storage/dataChanges.js')
+      const { repository: freshRepo } = await import('../storage/repository.js')
+
+      // Seed IndexedDB so a notifying listener WOULD reload data into its ref.
+      await freshRepo.upsertLink({
+        id: 'server-seed', object_id: 'server-seed', revision: 1,
+        url: 'https://seed.example', normalizedUrl: 'https://seed.example',
+        originalUrl: 'https://seed.example', title: 'Seed', description: '',
+        image: '', domain: 'seed.example', category: 'Other', tags: [],
+        important: false, mustHave: false, favorite: false, folderId: null,
+        status: null, createdAt: '2026-01-01T00:00:00.000Z', savedFrom: 'Cloud',
+      })
+
+      // Mount instance A inside its own scope, then tear the scope down.
+      const scopeA = effectScope()
+      let linksA
+      scopeA.run(() => {
+        linksA = useLinks().links
+      })
+      scopeA.stop() // should remove A's listener
+
+      // A stale listener would reload this ref; a properly unsubscribed one won't.
+      notifyDataChanged()
+      await flush()
+      expect(linksA.value.length).toBe(0)
+
+      // A live instance still reacts -> subscribe works and only live scopes listen.
+      const scopeB = effectScope()
+      let linksB
+      scopeB.run(() => {
+        linksB = useLinks().links
+      })
+      notifyDataChanged()
+      await flush()
+      expect(linksB.value.length).toBe(1)
+      expect(linksB.value[0].title).toBe('Seed')
+      scopeB.stop()
     })
   })
 })

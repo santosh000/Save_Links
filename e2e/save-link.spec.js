@@ -64,8 +64,8 @@ test.describe('Save Links E2E', () => {
     await expect(page.locator('.stats').getByText('Must Have', { exact: true })).toBeVisible()
     await expect(page.locator('.stats').getByText('Favorites', { exact: true })).toBeVisible()
     await expect(page.getByText('By category', { exact: true })).toBeVisible()
-    // profile
-    await expect(page.locator('.profile')).toBeVisible()
+    // profile (identity in the header)
+    await expect(page.locator('.identity-btn')).toBeVisible()
     await expect(page.getByText('Local User')).toBeVisible()
     // about
     await expect(page.getByText('About Save Links')).toBeVisible()

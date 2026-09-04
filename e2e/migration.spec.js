@@ -10,9 +10,14 @@ import { test, expect } from '@playwright/test'
 // seeding after that would never migrate.
 
 async function clearStorage(page) {
+  // Navigate to app URL first to get a valid page context for localStorage/IndexedDB access.
+  // This triggers an initial migration with empty storage (marker becomes 'complete'),
+  // but we immediately clear all storage including the marker, so the test's
+  // subsequent navigation will re-run migration with the test's seeded data.
   await page.goto('/')
   await page.evaluate(async () => {
     localStorage.clear()
+    sessionStorage.clear()
     // links live in IndexedDB (localStorage is only the v1 recovery source);
     // without this, a "clear" silently keeps the previous data
     const dbs = await (indexedDB.databases ? indexedDB.databases() : Promise.resolve([]))
@@ -21,7 +26,8 @@ async function clearStorage(page) {
       req.onsuccess = req.onerror = req.onblocked = () => resolve()
     })))
   })
-  await page.reload()
+  // Do NOT reload here. The test will seed data and navigate, triggering
+  // migration with the test's seeded data (since we cleared the 'complete' marker).
 }
 
 function seedLegacyData(links, folders, profile, appearance, colorScheme) {

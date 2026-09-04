@@ -21,6 +21,11 @@ test-results/
 .env
 .env.*
 !.env.example
+# Phase 3C-1: local Worker secrets for `wrangler dev` (needed for the OAuth
+# spike). Optional and gitignored; format documented in MAINTAINERS.md.
+# {env}.dev.vars matching is supported for preview environments.
+.dev.vars
+.dev.vars.*
 
 # Editor directories and files
 .vscode/*

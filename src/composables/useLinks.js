@@ -1,10 +1,16 @@
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onScopeDispose, getCurrentScope } from 'vue'
 import { repository } from '../storage/repository.js'
 import { bootState } from '../storage/migration.js'
+import { onDataChanged } from '../storage/dataChanges.js'
 import { categorizeUrl, getDomain, normalizeUrl } from '../utils/categorize.js'
-import { normalizeLink } from '../domain/link.js'
+import { normalizeLink, generateId } from '../domain/link.js'
 import { fetchMetadata, guessTitleSync } from '../utils/metadata.js'
 import { detectPlatform } from '../utils/device.js'
+import { session } from '../auth/session.js'
+import { syncNow } from './useSync.js'
+
+// Internal flag to prevent watch from overwriting remote pull data
+let isReloadingFromRemote = false
 
 export const STATUSES = ['important', 'must-have']
 
@@ -17,10 +23,6 @@ export class DuplicateLinkError extends Error {
     this.name = 'DuplicateLinkError'
     this.existing = existing
   }
-}
-
-function newLinkId() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
 }
 
 // True when the submission carries prefetched metadata for the SAME
@@ -72,7 +74,10 @@ function buildLinkSpec(payload, normalized) {
     mustHave,
     favorite,
     folderId,
-    status: important && mustHave ? 'both' : important ? 'important' : mustHave ? 'must-have' : null
+    status: important && mustHave ? 'both' : important ? 'important' : mustHave ? 'must-have' : null,
+    // v2 sync field — new objects start at revision 0 (server-authoritative
+    // once server ACK lands; never incremented locally)
+    revision: 0
   }
 }
 
@@ -84,8 +89,30 @@ export function useLinks() {
   const links = ref(bootState.ready ? bootState.links : [])
   const storageError = ref('')
 
+  // Reload the reactive list when authoritative data changes in IndexedDB from
+  // OUTSIDE this composable (a cloud pull/reconcile writes through the
+  // repository directly). Reading back through the single repository keeps one
+  // source of truth; updating the same refs local CRUD uses makes pulled links
+  // appear without a page refresh.
+  const unsubscribeDataChanged = onDataChanged(async () => {
+    try {
+      isReloadingFromRemote = true
+      links.value = await repository.getAllLinks()
+    } catch (err) {
+      console.warn('reload links from storage failed', err)
+    } finally {
+      isReloadingFromRemote = false
+    }
+  })
+  // Release the subscription when this composable's scope is torn down, so a
+  // remount/HMR cannot leave a stale listener holding the old ref. Only bind to
+  // a scope when one is active (component setup / effectScope); standalone
+  // invocations have no scope to dispose.
+  if (getCurrentScope()) onScopeDispose(unsubscribeDataChanged)
+
   // persist automatically — keep in-memory state on storage failure
   watch(links, (val) => {
+    if (isReloadingFromRemote) return
     repository.setAllLinks(val)
       .then(() => {
         if (storageError.value) storageError.value = ''
@@ -123,8 +150,24 @@ export function useLinks() {
     if (existing && !options.allowDuplicate) throw new DuplicateLinkError(existing)
 
     const spec = buildLinkSpec(payload, normalized)
-    const link = { id: newLinkId(), createdAt: new Date().toISOString(), savedFrom: detectPlatform(), ...spec }
+    const link = { id: generateId(), createdAt: new Date().toISOString(), savedFrom: detectPlatform(), ...spec }
     links.value.unshift(link)
+
+    // Create pending mutation for sync (if authenticated)
+    const accountId = session.getState().user?.id
+    if (accountId) {
+      await repository.addPendingMutation(
+        'create',
+        link.id,
+        'link',
+        link,
+        accountId,
+        link.revision // base_revision = 0 for new objects
+      )
+      // Automatic push for authenticated users
+      syncNow().catch(err => console.warn('Auto-sync failed:', err))
+    }
+
     enrichMetadata(link.id, normalized, payload)
     return link
   }
@@ -152,7 +195,21 @@ export function useLinks() {
       image: spec.image
     })
     const updated = links.value.find(l => l.id === id) || null
-    if (updated) enrichMetadata(updated.id, normalized, payload)
+    if (updated) {
+      enrichMetadata(updated.id, normalized, payload)
+      // Create pending mutation for sync (if authenticated)
+      const accountId = session.getState().user?.id
+      if (accountId) {
+        await repository.addPendingMutation(
+          'update',
+          updated.id,
+          'link',
+          updated,
+          accountId,
+          updated.revision
+        )
+      }
+    }
     return updated
   }
 
@@ -181,7 +238,7 @@ export function useLinks() {
       .catch(() => {}) // enrichment is best-effort; never surface or interrupt
   }
 
-  function updateLink(id, patch) {
+  async function updateLink(id, patch) {
     const idx = links.value.findIndex(l => l.id === id)
     if (idx === -1) return
     const merged = { ...links.value[idx], ...patch }
@@ -210,6 +267,21 @@ export function useLinks() {
     if (patch.normalizedUrl) merged.url = patch.normalizedUrl
     if (patch.url && !patch.normalizedUrl) merged.normalizedUrl = patch.url
     links.value.splice(idx, 1, merged)
+
+    // Create pending mutation for sync (if authenticated)
+    const accountId = session.getState().user?.id
+    if (accountId) {
+      await repository.addPendingMutation(
+        'update',
+        merged.id,
+        'link',
+        merged,
+        accountId,
+        merged.revision
+      ).catch(err => console.warn('Failed to queue mutation:', err))
+      // Automatic push for authenticated users
+      syncNow().catch(err => console.warn('Auto-sync failed:', err))
+    }
   }
 
   function toggleImportant(id) {
@@ -238,13 +310,76 @@ export function useLinks() {
     else if (status === 'must-have') toggleMustHave(id)
   }
 
-  function removeLink(id) {
+  async function removeLink(id) {
+    const link = links.value.find(l => l.id === id)
     links.value = links.value.filter(l => l.id !== id)
+
+    // Create pending mutation for sync (if authenticated)
+    if (link) {
+      const accountId = session.getState().user?.id
+      if (accountId) {
+        await repository.addPendingMutation(
+          'delete',
+          id,
+          'link',
+          { id },
+          accountId,
+          link.revision
+        ).catch(err => console.warn('Failed to queue mutation:', err))
+        // Automatic push for authenticated users
+        syncNow().catch(err => console.warn('Auto-sync failed:', err))
+      }
+    }
   }
 
   function setLinks(newLinks) {
-    // Replace all links (used by backup import) — keep in-memory state, persist via watch
+    // Replace all links (used by backup import with replace strategy) — keep in-memory state, persist via watch
     links.value = Array.isArray(newLinks) ? newLinks.map(normalizeLink).filter(Boolean) : []
+  }
+
+  // Merge imported links with existing links using the given strategy
+  // strategy: 'skip' (default) - keep existing, ignore imported duplicates
+  // strategy: 'replace' - replace existing duplicates with imported versions (preserving id/createdAt/user fields)
+  function mergeLinks(importedLinks, strategy = 'skip') {
+    const existing = links.value
+    const existingByUrl = new Map()
+    for (const l of existing) {
+      if (l.normalizedUrl) existingByUrl.set(l.normalizedUrl, l)
+    }
+
+    const newLinks = []
+    const merged = [...existing]
+
+    for (const imported of importedLinks) {
+      if (!imported.normalizedUrl) continue
+      const existingLink = existingByUrl.get(imported.normalizedUrl)
+      if (existingLink) {
+        if (strategy === 'replace') {
+          const idx = merged.findIndex(l => l.id === existingLink.id)
+          if (idx !== -1) {
+            const preserved = {
+              id: existingLink.id,
+              createdAt: existingLink.createdAt,
+              folderId: existingLink.folderId,
+              tags: existingLink.tags,
+              important: existingLink.important,
+              mustHave: existingLink.mustHave,
+              favorite: existingLink.favorite,
+              revision: existingLink.revision,
+              account_id: existingLink.account_id,
+            }
+            merged[idx] = { ...imported, ...preserved }
+          }
+        }
+      } else {
+        const newLink = { ...imported, id: imported.id || generateId() }
+        merged.push(newLink)
+        newLinks.push(newLink)
+      }
+    }
+
+    links.value = merged
+    return { newCount: newLinks.length, replacedCount: strategy === 'replace' ? (importedLinks.length - newLinks.length) : 0 }
   }
 
   function moveLinksFromFolder(folderId) {
@@ -257,6 +392,18 @@ export function useLinks() {
       return l
     })
     return changed
+  }
+
+  // Count links that are local/anonymous (no account_id or account_id is null/empty)
+  // Exclude links that have been explicitly marked as "kept_local" after a Keep Local choice
+  function getAnonymousLinksCount() {
+    return links.value.filter(l => !l.account_id && !l.kept_local).length
+  }
+
+  // Get all anonymous links for sync conversion
+  // Exclude links that have been explicitly marked as kept_local
+  function getAnonymousLinks() {
+    return links.value.filter(l => !l.account_id && !l.kept_local)
   }
 
   return {
@@ -276,6 +423,9 @@ export function useLinks() {
     toggleFavorite,
     removeLink,
     setLinks,
-    moveLinksFromFolder
+    mergeLinks,
+    moveLinksFromFolder,
+    getAnonymousLinksCount,
+    getAnonymousLinks
   }
 }
