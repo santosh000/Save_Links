@@ -31,6 +31,7 @@ import { STORES } from '../storage/indexeddb.js'
 import { session } from '../auth/session.js'
 import { notifyDataChanged } from '../storage/dataChanges.js'
 import { pushMutation, pullObjects } from './protocol.js'
+import { beginSync, endSync } from './syncState.js'
 
 const OBJECT_TYPE_TO_STORE = {
   link: STORES.LINKS,
@@ -234,77 +235,101 @@ export async function syncNow({
   const accountId = session.getState().user?.id
   if (!accountId) return summary
 
-  // 1. Pull + reconcile. If the pull cannot be performed, the sync stops here
-  //    (no push, no false success) per the pull→reconcile→push ordering.
-  const pull = await pullAndReconcile({ pullFn, repo })
-  summary.pulled = pull.pulled
-  summary.applied = pull.applied
-  summary.skippedLocal = pull.skippedLocal
-  summary.skippedStale = pull.skippedStale
-  if (pull.unavailable) {
-    summary.unavailable = 1
-    return summary
-  }
-  if (pull.rejected) {
-    summary.failed = 1
-    return summary
-  }
-
-  // 2. Push drain (existing behavior, unchanged).
-  const mutations = await repo.getPendingMutations()
-  const myMutations = mutations.filter(m => m.account_id === accountId)
-
-  for (const mutation of myMutations) {
-    summary.pushed++
-
-    // The composables store payloads as JS objects; the server expects a JSON
-    // string. Stringify here so pushMutation sends the correct wire format.
-    const payload = typeof mutation.payload === 'string'
-      ? mutation.payload
-      : JSON.stringify(mutation.payload)
-
-    let result
-    try {
-      result = await pushFn({ ...mutation, payload })
-    } catch {
-      // Network-level failure — fetch threw (DNS, TLS, offline). Leave the
-      // mutation pending for retry.
-      summary.unavailable++
-      continue
+  // Mark the outbox as in-flight so addPendingMutation never rewrites a record
+  // inside this run's push snapshot (see src/sync/syncState.js). Covers the
+  // full pull → reconcile → push so queue writes during any phase behave
+  // exactly as before coalescing existed.
+  beginSync()
+  try {
+    // 1. Pull + reconcile. If the pull cannot be performed, the sync stops here
+    //    (no push, no false success) per the pull→reconcile→push ordering.
+    const pull = await pullAndReconcile({ pullFn, repo })
+    summary.pulled = pull.pulled
+    summary.applied = pull.applied
+    summary.skippedLocal = pull.skippedLocal
+    summary.skippedStale = pull.skippedStale
+    if (pull.unavailable) {
+      summary.unavailable = 1
+      return summary
+    }
+    if (pull.rejected) {
+      summary.failed = 1
+      return summary
     }
 
-    switch (result.kind) {
-      case 'accepted': {
-        // Server accepted the mutation — sync local revision to the
-        // authoritative value. No content change: the server already has
-        // the payload; the local object already has the user's content.
-        const storeName = OBJECT_TYPE_TO_STORE[mutation.object_type]
-        if (storeName && result.resultRevision != null) {
-          await repo.updateObjectRevision(storeName, mutation.object_id, result.resultRevision)
-        }
-        await repo.markMutationSucceeded(mutation.mutation_id)
-        summary.succeeded++
-        break
-      }
-      case 'conflict': {
-        // Chunk 4: rebase against server state. The rebased mutation is
-        // pending and will be processed on the next syncNow() call.
-        await rebaseConflict(mutation, result.current, repo)
-        summary.conflict++
-        break
-      }
-      case 'rejected': {
-        // Client error (400/401/403). Not retryable — mark failed.
-        await repo.markMutationFailed(mutation.mutation_id)
-        summary.failed++
-        break
-      }
-      case 'unavailable': {
-        // Server error or network issue. Leave pending for retry.
+    // 2. Push drain (existing behavior, unchanged).
+    const mutations = await repo.getPendingMutations()
+    const myMutations = mutations.filter(m => m.account_id === accountId)
+
+    for (const mutation of myMutations) {
+      summary.pushed++
+
+      // Persist the pushed marker BEFORE the network attempt. The request may
+      // be delivered and committed server-side with its response lost; from
+      // then on this mutation_id must never be coalesced into or dropped
+      // locally (addPendingMutation refuses to touch pushed=true records), so
+      // a retry replays the SAME payload while any newer edit stays a separate
+      // mutation. If the marker cannot be persisted, the mutation is NOT
+      // protected — send nothing this cycle (counted unavailable, still
+      // pending, retried later by the same path).
+      try {
+        await repo.markMutationPushed(mutation.mutation_id)
+      } catch {
         summary.unavailable++
-        break
+        continue
+      }
+
+      // The composables store payloads as JS objects; the server expects a JSON
+      // string. Stringify here so pushMutation sends the correct wire format.
+      const payload = typeof mutation.payload === 'string'
+        ? mutation.payload
+        : JSON.stringify(mutation.payload)
+
+      let result
+      try {
+        result = await pushFn({ ...mutation, payload })
+      } catch {
+        // Network-level failure — fetch threw (DNS, TLS, offline). Leave the
+        // mutation pending for retry.
+        summary.unavailable++
+        continue
+      }
+
+      switch (result.kind) {
+        case 'accepted': {
+          // Server accepted the mutation — sync local revision to the
+          // authoritative value. No content change: the server already has
+          // the payload; the local object already has the user's content.
+          const storeName = OBJECT_TYPE_TO_STORE[mutation.object_type]
+          if (storeName && result.resultRevision != null) {
+            await repo.updateObjectRevision(storeName, mutation.object_id, result.resultRevision)
+          }
+          await repo.markMutationSucceeded(mutation.mutation_id)
+          summary.succeeded++
+          break
+        }
+        case 'conflict': {
+          // Chunk 4: rebase against server state. The rebased mutation is
+          // pending and will be processed on the next syncNow() call.
+          await rebaseConflict(mutation, result.current, repo)
+          summary.conflict++
+          break
+        }
+        case 'rejected': {
+          // Client error (400/401/403). Not retryable — mark failed.
+          await repo.markMutationFailed(mutation.mutation_id)
+          summary.failed++
+          break
+        }
+        case 'unavailable': {
+          // Server error or network issue. Leave pending for retry.
+          summary.unavailable++
+          break
+        }
       }
     }
+  } finally {
+    endSync()
   }
 
   return summary

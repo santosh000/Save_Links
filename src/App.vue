@@ -219,6 +219,29 @@ watch(() => authState.value.status, (newStatus, oldStatus) => {
 let syncPollingInterval = null
 const POLLING_INTERVAL_MS = 30000 // 30 seconds
 
+// True while the tab is hidden (visibility-state). Drives the immediate-sync
+// on a genuine hidden → visible transition; repeated 'visible' events without
+// an intervening 'hidden' event never re-trigger it.
+let wasTabHidden = false
+
+function isAuthenticatedAndOnline() {
+  const state = session.getState()
+  if (state.status !== 'authenticated' || !state.user) return false
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return false
+  return true
+}
+
+/** Fire-and-forget background sync (poll tick and visibility resume share one quiet path). */
+async function backgroundSync() {
+  try {
+    const { syncNow } = await import('./composables/useSync.js')
+    await syncNow()
+  } catch (err) {
+    // Log but don't spam user with toasts for background sync failures
+    console.warn('Background sync failed:', err)
+  }
+}
+
 function startSyncPolling() {
   if (syncPollingInterval) return // Already polling
   const state = session.getState()
@@ -229,16 +252,7 @@ function startSyncPolling() {
     if (document.visibilityState !== 'visible') return
     // Only poll when online
     if (typeof navigator !== 'undefined' && navigator.onLine === false) return
-    const state = session.getState()
-    if (state.status !== 'authenticated' || !state.user) return // Stop if logged out
-
-    try {
-      const { syncNow } = await import('./composables/useSync.js')
-      await syncNow()
-    } catch (err) {
-      // Log but don't spam user with toasts for background polling failures
-      console.warn('Background sync failed:', err)
-    }
+    await backgroundSync()
   }, POLLING_INTERVAL_MS)
 }
 
@@ -250,14 +264,27 @@ function stopSyncPolling() {
 }
 
 // Handle visibility changes to pause/resume polling
-onMounted(() => {
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-      startSyncPolling()
-    } else {
-      stopSyncPolling()
+function onVisibilityChange() {
+  if (document.visibilityState === 'visible') {
+    // Restart polling (guarded: startSyncPolling never creates a duplicate
+    // interval) AND run one immediate sync on a genuine hidden → visible
+    // transition, so the tab does not wait up to a full poll interval to
+    // discover remote changes. The inflight lock inside useSync dedupes
+    // this against any poll tick already running.
+    const resumingFromHidden = wasTabHidden
+    wasTabHidden = false
+    startSyncPolling()
+    if (resumingFromHidden && isAuthenticatedAndOnline()) {
+      backgroundSync()
     }
-  })
+  } else {
+    wasTabHidden = true
+    stopSyncPolling()
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('visibilitychange', onVisibilityChange)
   // Start polling if already authenticated on mount
   const state = session.getState()
   if (state.status === 'authenticated' && state.user) {
@@ -266,6 +293,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  document.removeEventListener('visibilitychange', onVisibilityChange)
   authUnsubscribe?.()
   stopSyncPolling()
 })

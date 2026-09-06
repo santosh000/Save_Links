@@ -25,6 +25,7 @@
 import { ENVIRONMENT } from '../utils/environment.js'
 import { normalizeLink } from '../domain/link.js'
 import { APPEARANCE_VALUES, COLOR_SCHEME_VALUES, DEFAULT_APPEARANCE, DEFAULT_COLOR_SCHEME } from '../utils/storage.js'
+import { isSyncing } from '../sync/syncState.js'
 
 export const INDEXEDDB_DB_VERSION = 2
 export const STORES = { LINKS: 'links', FOLDERS: 'folders', KV: 'kv', PENDING_MUTATIONS: 'pending_mutations' }
@@ -143,6 +144,67 @@ export function sanitizeFolder(raw) {
     // Track if user explicitly chose to keep this folder local after login
     kept_local: typeof raw.kept_local === 'boolean' ? raw.kept_local : false,
   }
+}
+
+/**
+ * Outbox coalescing rules (Performance Optimization #1).
+ *
+ * Given an EXISTING pending mutation and an INCOMING mutation for the same
+ * (account_id, object_type, object_id), decide whether the pair can be folded
+ * into one representative pending mutation (so obsolete intermediate states
+ * are never pushed):
+ *
+ *   create → create  rewrite: stays create, latest payload wins
+ *   create → update  rewrite: stays create (the server never saw the object —
+ *                   an update claim would conflict off-null), latest wins
+ *   create → delete  drop:    the object never reached the server; the pair
+ *                   has no net effect — nothing is queued
+ *   update → update  rewrite: stays update, latest payload wins
+ *   update → delete  rewrite: becomes delete (delete payload), so the object
+ *                   is removed server-side even if an earlier update had
+ *                   created it — the obsolete update is never pushed
+ *   delete → delete  rewrite: stays delete, latest payload wins
+ *   delete → update  rewrite: becomes update with the latest payload. The
+ *                   pending delete never reached the server, so updating is
+ *                   the net intent; pushing the delete first would tombstone
+ *                   the object and every follow-up update would conflict
+ *                   against the tombstone forever (server preserves
+ *                   tombstones)
+ *   update → create / delete → create: append (no merge) — unreachable
+ *                   through app flows (ids are generated once per object);
+ *                   kept separate to be safe
+ *
+ * A rewrite preserves the EXISTING record's mutation_id (identity contract:
+ * it has never been seen by the server while pending) and its base_revision —
+ * while a mutation is pending for an object, the local object's revision
+ * cannot change (the pull skips objects with pending local mutations, and no
+ * accepted push can occur for a pending record), so the original claim stays
+ * valid.
+ *
+ * @param {Object} existing — a pending mutation record
+ * @param {string} incomingType — 'create' | 'update' | 'delete'
+ * @param {*} incomingPayload — the incoming mutation's payload
+ * @returns {{action:'rewrite', record:Object}|{action:'drop'}|{action:'append'}}
+ */
+export function resolveCoalescing(existing, incomingType, incomingPayload) {
+  if (existing.operation === 'create') {
+    if (incomingType === 'delete') return { action: 'drop' }
+    if (incomingType === 'create' || incomingType === 'update') {
+      return { action: 'rewrite', record: { ...existing, payload: incomingPayload } }
+    }
+    return { action: 'append' }
+  }
+  if (existing.operation === 'update') {
+    if (incomingType === 'update' || incomingType === 'delete') {
+      return { action: 'rewrite', record: { ...existing, operation: incomingType, payload: incomingPayload } }
+    }
+    return { action: 'append' }
+  }
+  // existing.operation === 'delete'
+  if (incomingType === 'delete' || incomingType === 'update') {
+    return { action: 'rewrite', record: { ...existing, operation: incomingType, payload: incomingPayload } }
+  }
+  return { action: 'append' }
 }
 
 export function createIndexedDBRepository({ dbName = defaultDBName() } = {}) {
@@ -344,6 +406,48 @@ export function createIndexedDBRepository({ dbName = defaultDBName() } = {}) {
     if (typeof baseRevision !== 'number' || baseRevision < 0) {
       throw new Error('base_revision must be a non-negative integer')
     }
+    const db = await open()
+
+    // Outbox coalescing: fold this mutation into the latest existing PENDING
+    // mutation for the same (account_id, object_type, object_id) so obsolete
+    // intermediate states are never pushed (e.g. create → create → update
+    // pushes once with the final payload). Skipped entirely while a sync is in
+    // flight — a rewrite could drop a payload a concurrent accepted response
+    // is about to acknowledge (see src/sync/syncState.js).
+    if (!isSyncing()) {
+      const records = await getAllRecords(db, STORES.PENDING_MUTATIONS)
+      let existing = null
+      for (const r of records) {
+        if (r.status === 'pending' && r.account_id === accountId && r.object_type === objectType && r.object_id === objectId) {
+          // ISO createdAt strings sort lexicographically = chronologically.
+          if (!existing || r.createdAt > existing.createdAt) existing = r
+        }
+      }
+      if (existing) {
+        // A mutation that has ALREADY been pushed (pushed=true — persisted
+        // before the coordinator's push attempt) may have been applied and
+        // ledgered server-side even though its response was lost. Reusing its
+        // mutation_id would make the server idempotency-replay acknowledge the
+        // NEW payload without applying it (silent loss of the newest edit), so
+        // it is NEVER coalesced into or dropped — new work appends fresh.
+        // Old records without the field default to unattempted (pushed=false)
+        // and keep the ordinary coalescing rules.
+        if (existing.pushed !== true) {
+          const decision = resolveCoalescing(existing, type, payload)
+          if (decision.action === 'drop') {
+            // create → delete before any push: the pair has no net effect —
+            // retire the pending create so nothing obsolete is pushed.
+            await deleteRecord(db, STORES.PENDING_MUTATIONS, existing.mutation_id)
+            return null
+          }
+          if (decision.action === 'rewrite') {
+            await putRecord(db, STORES.PENDING_MUTATIONS, decision.record)
+            return decision.record.mutation_id
+          }
+        }
+      }
+    }
+
     const mutation = {
       mutation_id: crypto.randomUUID(),
       account_id: accountId,
@@ -354,8 +458,12 @@ export function createIndexedDBRepository({ dbName = defaultDBName() } = {}) {
       payload,
       createdAt: new Date().toISOString(),
       status: 'pending',
+      // Flipped to true by the coordinator BEFORE the mutation is sent to the
+      // server (see markMutationPushed). A pushed mutation may have been
+      // committed server-side with its response lost, so it must never be
+      // coalesced into or dropped afterward.
+      pushed: false,
     }
-    const db = await open()
     await putRecord(db, STORES.PENDING_MUTATIONS, mutation)
     return mutation.mutation_id
   }
@@ -381,6 +489,24 @@ export function createIndexedDBRepository({ dbName = defaultDBName() } = {}) {
     const record = await getRecord(db, STORES.PENDING_MUTATIONS, mutationId)
     if (!record) throw new Error('Pending mutation not found')
     await putRecord(db, STORES.PENDING_MUTATIONS, { ...record, status: 'failed' })
+  }
+
+  /**
+   * Persist pushed=true on a pending mutation BEFORE the coordinator hands it
+   * to the network. Once set, the mutation may have been committed and
+   * ledgered server-side with its response lost, so addPendingMutation will
+   * never coalesce into it or drop it — newer work for the same object
+   * appends as a fresh mutation with its own mutation_id (safe replay).
+   *
+   * Throws when the record does not exist, so the caller can abort the push
+   * rather than send a mutation it could not mark.
+   */
+  async function markMutationPushed(mutationId) {
+    const db = await open()
+    const record = await getRecord(db, STORES.PENDING_MUTATIONS, mutationId)
+    if (!record) throw new Error('Pending mutation not found')
+    if (record.pushed === true) return
+    await putRecord(db, STORES.PENDING_MUTATIONS, { ...record, pushed: true })
   }
 
   /**
@@ -450,6 +576,7 @@ export function createIndexedDBRepository({ dbName = defaultDBName() } = {}) {
     getPendingMutations,
     markMutationSucceeded,
     markMutationFailed,
+    markMutationPushed,
     rebasePendingMutation,
     updateObjectRevision,
   }

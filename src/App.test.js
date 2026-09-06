@@ -452,3 +452,132 @@ describe('App — anonymous → authenticated sync flow', () => {
     })
   })
 })
+
+describe('Visibility resume — immediate sync (Optimization #2)', () => {
+  function setDocumentVisibility(state) {
+    Object.defineProperty(document, 'visibilityState', { value: state, configurable: true })
+    document.dispatchEvent(new Event('visibilitychange'))
+  }
+
+  async function mountAuthenticated() {
+    setAuth('authenticated', { id: 'acc-1', name: 'Test' })
+    if (h.initResolve) {
+      h.initResolve({ id: 'acc-1', name: 'Test' })
+      h.initResolve = null
+    }
+    await flush()
+    const wrapper = mountApp()
+    await flush()
+    return wrapper
+  }
+
+  afterEach(() => {
+    setDocumentVisibility('visible')
+  })
+
+  it('hidden → visible while authenticated triggers exactly one immediate sync', async () => {
+    const wrapper = await mountAuthenticated()
+    expect(h.syncNowMock).toHaveBeenCalledTimes(1) // initial restore sync
+    h.syncNowMock.mockClear()
+
+    setDocumentVisibility('hidden')
+    setDocumentVisibility('visible')
+    await flush()
+
+    expect(h.syncNowMock).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('hidden → visible while unauthenticated does not sync', async () => {
+    setAuth('anonymous', null)
+    if (h.initResolve) {
+      h.initResolve(null)
+      h.initResolve = null
+    }
+    await flush()
+    const wrapper = mountApp()
+    await flush()
+    h.syncNowMock.mockClear()
+
+    setDocumentVisibility('hidden')
+    setDocumentVisibility('visible')
+    await flush()
+
+    expect(h.syncNowMock).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('hidden → visible while offline does not sync', async () => {
+    const wrapper = await mountAuthenticated()
+    h.syncNowMock.mockClear()
+
+    const original = navigator.onLine
+    Object.defineProperty(navigator, 'onLine', { value: false, configurable: true })
+    try {
+      setDocumentVisibility('hidden')
+      setDocumentVisibility('visible')
+      await flush()
+      expect(h.syncNowMock).not.toHaveBeenCalled()
+    } finally {
+      Object.defineProperty(navigator, 'onLine', { value: original, configurable: true })
+      wrapper.unmount()
+    }
+  })
+
+  it('repeated visible events without an intervening hidden event do not duplicate the sync', async () => {
+    const wrapper = await mountAuthenticated()
+    h.syncNowMock.mockClear()
+
+    setDocumentVisibility('hidden')
+    setDocumentVisibility('visible')
+    await flush()
+    expect(h.syncNowMock).toHaveBeenCalledTimes(1)
+
+    // Duplicate 'visible' events with no hidden transition in between.
+    setDocumentVisibility('visible')
+    setDocumentVisibility('visible')
+    await flush()
+
+    expect(h.syncNowMock).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('each hidden → visible cycle triggers exactly one immediate sync', async () => {
+    const wrapper = await mountAuthenticated()
+    h.syncNowMock.mockClear()
+
+    setDocumentVisibility('hidden')
+    setDocumentVisibility('visible')
+    await flush()
+    setDocumentVisibility('hidden')
+    setDocumentVisibility('visible')
+    await flush()
+
+    expect(h.syncNowMock).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
+
+  it('polling interval stays 30000ms and a visible event never creates a second interval', async () => {
+    setAuth('authenticated', { id: 'acc-1', name: 'Test' })
+    if (h.initResolve) {
+      h.initResolve({ id: 'acc-1', name: 'Test' })
+      h.initResolve = null
+    }
+    await flush()
+    const intervalSpy = vi.spyOn(globalThis, 'setInterval')
+    const wrapper = mountApp()
+    await flush()
+    h.syncNowMock.mockClear()
+
+    const pollCalls = () => intervalSpy.mock.calls.filter(c => c[1] === 30000)
+    expect(pollCalls().length).toBe(1) // mounted once → exactly one poll interval
+
+    setDocumentVisibility('visible') // no hidden transition beforehand: no resume sync, no new interval
+    await flush()
+    expect(pollCalls().length).toBe(1)
+    expect(h.syncNowMock).not.toHaveBeenCalled()
+
+    intervalSpy.mockRestore()
+    wrapper.unmount()
+  })
+})

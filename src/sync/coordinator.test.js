@@ -30,6 +30,7 @@ function makeRepo(mutations = []) {
       updateRevision: [],
       markSucceeded: [],
       markFailed: [],
+      markPushed: [],
       rebased: [],
       upsert: [],
       deleted: [],
@@ -53,6 +54,11 @@ function makeRepo(mutations = []) {
       this.calls.markFailed.push(mutationId)
       const m = pending.find(x => x.mutation_id === mutationId)
       if (m) m.status = 'failed'
+    },
+    async markMutationPushed(mutationId) {
+      this.calls.markPushed.push(mutationId)
+      const m = pending.find(x => x.mutation_id === mutationId)
+      if (m) m.pushed = true
     },
     async rebasePendingMutation(originalMutationId, rebased) {
       this.calls.rebased.push({ originalMutationId, rebased })

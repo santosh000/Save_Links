@@ -1,7 +1,8 @@
 import 'fake-indexeddb/auto'
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { createIndexedDBRepository, INDEXEDDB_DB_VERSION, STORES, defaultDBName, upgrade } from './indexeddb.js'
+import { createIndexedDBRepository, INDEXEDDB_DB_VERSION, STORES, defaultDBName, upgrade, resolveCoalescing } from './indexeddb.js'
 import { generateId } from '../domain/link.js'
+import { beginSync, endSync, isSyncing } from '../sync/syncState.js'
 
 // jsdom ships no IndexedDB; fake-indexeddb (test-only devDependency) provides a
 // spec-faithful in-memory implementation. Each test gets a clean database.
@@ -566,6 +567,257 @@ it('persists folders and deletes by id', async () => {
       await repo.rebasePendingMutation(mid, rebased)
       const pending = await repo.getPendingMutations()
       expect(pending[0].account_id).toBe('acc-xyz')
+    })
+  })
+
+  describe('outbox coalescing (resolveCoalescing)', () => {
+    const existing = (operation, over = {}) => ({
+      mutation_id: 'existing-001',
+      account_id: 'acc1',
+      object_id: 'a',
+      object_type: 'link',
+      operation,
+      base_revision: 0,
+      payload: { id: 'a', title: 'old' },
+      createdAt: '2026-01-01T00:00:00.000Z',
+      status: 'pending',
+      ...over,
+    })
+
+    it('create → update rewrites in place, stays a create, latest payload wins', () => {
+      const d = resolveCoalescing(existing('create'), 'update', { id: 'a', title: 'new' })
+      expect(d.action).toBe('rewrite')
+      expect(d.record.operation).toBe('create')
+      expect(d.record.payload).toEqual({ id: 'a', title: 'new' })
+      expect(d.record.mutation_id).toBe('existing-001') // identity preserved
+      expect(d.record.base_revision).toBe(0) // original claim preserved
+    })
+
+    it('create → create rewrites in place, stays a create, latest payload wins', () => {
+      const d = resolveCoalescing(existing('create'), 'create', { id: 'a', title: 'new' })
+      expect(d.action).toBe('rewrite')
+      expect(d.record.operation).toBe('create')
+      expect(d.record.payload.title).toBe('new')
+    })
+
+    it('create → delete drops the pair', () => {
+      const d = resolveCoalescing(existing('create'), 'delete', { id: 'a' })
+      expect(d.action).toBe('drop')
+    })
+
+    it('update → update rewrites in place, latest payload wins', () => {
+      const d = resolveCoalescing(existing('update'), 'update', { id: 'a', title: 'new' })
+      expect(d.action).toBe('rewrite')
+      expect(d.record.operation).toBe('update')
+      expect(d.record.payload.title).toBe('new')
+    })
+
+    it('update → delete becomes a delete with the delete payload', () => {
+      const d = resolveCoalescing(existing('update'), 'delete', { id: 'a' })
+      expect(d.action).toBe('rewrite')
+      expect(d.record.operation).toBe('delete')
+      expect(d.record.payload).toEqual({ id: 'a' })
+    })
+
+    it('delete → update becomes an update with the latest payload', () => {
+      const d = resolveCoalescing(existing('delete'), 'update', { id: 'a', title: 'new' })
+      expect(d.action).toBe('rewrite')
+      expect(d.record.operation).toBe('update')
+      expect(d.record.payload.title).toBe('new')
+    })
+
+    it('delete → delete rewrites in place, stays a delete', () => {
+      const d = resolveCoalescing(existing('delete'), 'delete', { id: 'a' })
+      expect(d.action).toBe('rewrite')
+      expect(d.record.operation).toBe('delete')
+    })
+
+    it('update → create and delete → create are not merged (append)', () => {
+      expect(resolveCoalescing(existing('update'), 'create', { id: 'a' }).action).toBe('append')
+      expect(resolveCoalescing(existing('delete'), 'create', { id: 'a' }).action).toBe('append')
+    })
+  })
+
+  describe('outbox coalescing (addPendingMutation)', () => {
+    it('three consecutive updates collapse to one mutation with the latest payload and original identity', async () => {
+      const repo = makeRepo()
+      const firstId = await repo.addPendingMutation('create', 'a', 'link', link('a', { title: 'v1' }), 'acc1', 0)
+      await repo.addPendingMutation('update', 'a', 'link', link('a', { title: 'v2' }), 'acc1', 0)
+      await repo.addPendingMutation('update', 'a', 'link', link('a', { title: 'v3' }), 'acc1', 0)
+
+      const pending = await repo.getPendingMutations()
+      expect(pending.length).toBe(1)
+      expect(pending[0].mutation_id).toBe(firstId) // identity preserved
+      expect(pending[0].operation).toBe('create')
+      expect(pending[0].payload.title).toBe('v3')
+      expect(pending[0].base_revision).toBe(0)
+    })
+
+    it('create → update keeps exactly one pending create with the latest payload', async () => {
+      const repo = makeRepo()
+      const firstId = await repo.addPendingMutation('create', 'a', 'link', link('a', { title: 'v1' }), 'acc1', 0)
+      const ret = await repo.addPendingMutation('update', 'a', 'link', link('a', { title: 'v2' }), 'acc1', 0)
+
+      expect(ret).toBe(firstId)
+      const pending = await repo.getPendingMutations()
+      expect(pending.length).toBe(1)
+      expect(pending[0].operation).toBe('create')
+      expect(pending[0].payload.title).toBe('v2')
+    })
+
+    it('create → delete before any push queues nothing', async () => {
+      const repo = makeRepo()
+      await repo.addPendingMutation('create', 'a', 'link', link('a'), 'acc1', 0)
+      const ret = await repo.addPendingMutation('delete', 'a', 'link', { id: 'a' }, 'acc1', 0)
+
+      expect(ret).toBeNull()
+      expect(await repo.getPendingMutations()).toEqual([])
+    })
+
+    it('update → delete collapses to a single delete mutation', async () => {
+      const repo = makeRepo()
+      const firstId = await repo.addPendingMutation('update', 'a', 'link', link('a', { title: 'v1' }), 'acc1', 2)
+      await repo.addPendingMutation('delete', 'a', 'link', { id: 'a' }, 'acc1', 2)
+
+      const pending = await repo.getPendingMutations()
+      expect(pending.length).toBe(1)
+      expect(pending[0].mutation_id).toBe(firstId)
+      expect(pending[0].operation).toBe('delete')
+      expect(pending[0].payload).toEqual({ id: 'a' })
+      expect(pending[0].base_revision).toBe(2)
+    })
+
+    it('delete → update collapses to a single update mutation with the latest payload', async () => {
+      const repo = makeRepo()
+      const firstId = await repo.addPendingMutation('delete', 'a', 'link', { id: 'a' }, 'acc1', 3)
+      await repo.addPendingMutation('update', 'a', 'link', link('a', { title: 'v2' }), 'acc1', 3)
+
+      const pending = await repo.getPendingMutations()
+      expect(pending.length).toBe(1)
+      expect(pending[0].mutation_id).toBe(firstId)
+      expect(pending[0].operation).toBe('update')
+      expect(pending[0].payload.title).toBe('v2')
+      expect(pending[0].base_revision).toBe(3)
+    })
+
+    it('does not coalesce across different object ids', async () => {
+      const repo = makeRepo()
+      await repo.addPendingMutation('update', 'a', 'link', link('a'), 'acc1', 0)
+      await repo.addPendingMutation('update', 'b', 'link', link('b'), 'acc1', 0)
+      expect((await repo.getPendingMutations()).length).toBe(2)
+    })
+
+    it('does not coalesce across different object types', async () => {
+      const repo = makeRepo()
+      await repo.addPendingMutation('update', 'a', 'link', link('a'), 'acc1', 0)
+      await repo.addPendingMutation('update', 'a', 'folder', { id: 'a', name: 'F' }, 'acc1', 0)
+      expect((await repo.getPendingMutations()).length).toBe(2)
+    })
+
+    it('does not coalesce across different accounts', async () => {
+      const repo = makeRepo()
+      await repo.addPendingMutation('update', 'a', 'link', link('a'), 'acc1', 0)
+      await repo.addPendingMutation('update', 'a', 'link', link('a', { title: 'v2' }), 'acc2', 0)
+      expect((await repo.getPendingMutations()).length).toBe(2)
+    })
+
+    it('does not coalesce with succeeded or failed records — appends a fresh pending mutation', async () => {
+      const repo = makeRepo()
+      const createId = await repo.addPendingMutation('create', 'a', 'link', link('a'), 'acc1', 0)
+      await repo.markMutationSucceeded(createId)
+      const secondId = await repo.addPendingMutation('update', 'a', 'link', link('a', { title: 'v2' }), 'acc1', 0)
+
+      expect(secondId).not.toBe(createId)
+      const pending = await repo.getPendingMutations()
+      expect(pending.length).toBe(1)
+      expect(pending[0].mutation_id).toBe(secondId)
+      expect(pending[0].operation).toBe('update')
+
+      await repo.markMutationFailed(secondId)
+      const thirdId = await repo.addPendingMutation('update', 'a', 'link', link('a', { title: 'v3' }), 'acc1', 0)
+      expect(thirdId).not.toBe(secondId)
+      expect((await repo.getPendingMutations()).length).toBe(1)
+      expect((await repo.getPendingMutations())[0].mutation_id).toBe(thirdId)
+    })
+
+    it('does not coalesce while a sync is in flight — plain append (safe fallback)', async () => {
+      const repo = makeRepo()
+      await repo.addPendingMutation('create', 'a', 'link', link('a', { title: 'v1' }), 'acc1', 0)
+      expect(isSyncing()).toBe(false)
+
+      beginSync()
+      try {
+        await repo.addPendingMutation('update', 'a', 'link', link('a', { title: 'v2' }), 'acc1', 0)
+        const pending = await repo.getPendingMutations()
+        expect(pending.length).toBe(2) // record may be inside the push snapshot
+      } finally {
+        endSync()
+      }
+      expect(isSyncing()).toBe(false)
+
+      // After the sync ends, coalescing resumes for the next append.
+      await repo.addPendingMutation('update', 'a', 'link', link('a', { title: 'v3' }), 'acc1', 0)
+      const pending = await repo.getPendingMutations()
+      expect(pending.length).toBe(2) // latest append folded into the newest pending
+      const latest = pending.find(m => m.payload.title === 'v3')
+      expect(latest).toBeDefined()
+    })
+
+    it('a pushed=true pending mutation is never coalesced into — fresh update appends', async () => {
+      const repo = makeRepo()
+      const createId = await repo.addPendingMutation('create', 'a', 'link', link('a', { title: 'v1' }), 'acc1', 0)
+      await repo.markMutationPushed(createId)
+
+      const ret = await repo.addPendingMutation('update', 'a', 'link', link('a', { title: 'v2' }), 'acc1', 0)
+
+      expect(ret).not.toBe(createId) // fresh mutation_id — the pushed one replays safely on retry
+      const pending = await repo.getPendingMutations()
+      expect(pending.length).toBe(2)
+      expect(pending.find(m => m.mutation_id === createId)).toMatchObject({ operation: 'create', payload: link('a', { title: 'v1' }), pushed: true })
+      const fresh = pending.find(m => m.mutation_id === ret)
+      expect(fresh).toMatchObject({ operation: 'update', payload: link('a', { title: 'v2' }), pushed: false })
+    })
+
+    it('a pushed=true pending create is never dropped by a delete — fresh delete appends', async () => {
+      const repo = makeRepo()
+      const createId = await repo.addPendingMutation('create', 'a', 'link', link('a'), 'acc1', 0)
+      await repo.markMutationPushed(createId)
+
+      const ret = await repo.addPendingMutation('delete', 'a', 'link', { id: 'a' }, 'acc1', 0)
+
+      expect(ret).not.toBe(createId)
+      const pending = await repo.getPendingMutations()
+      expect(pending.length).toBe(2) // create may replay; delete must NOT disappear
+      expect(pending.find(m => m.mutation_id === createId)).toBeDefined()
+      expect(pending.find(m => m.mutation_id === ret)).toMatchObject({ operation: 'delete', payload: { id: 'a' }, pushed: false })
+    })
+
+    it('markMutationPushed persists pushed=true and throws for a missing record', async () => {
+      const repo = makeRepo()
+      const id = await repo.addPendingMutation('create', 'a', 'link', link('a'), 'acc1', 0)
+
+      const before = await repo.getPendingMutations()
+      expect(before[0].pushed).toBe(false) // new records start unattempted
+
+      await repo.markMutationPushed(id)
+      expect((await repo.getPendingMutations())[0].pushed).toBe(true)
+
+      await expect(repo.markMutationPushed('missing-id')).rejects.toThrow('Pending mutation not found')
+    })
+
+    it('offline queueing still works: coalesced mutations accumulate locally and stay pending', async () => {
+      const repo = makeRepo()
+      await repo.addPendingMutation('create', 'a', 'link', link('a', { title: 'v1' }), 'acc1', 0)
+      await repo.addPendingMutation('update', 'a', 'link', link('a', { title: 'v2' }), 'acc1', 0)
+      await repo.addPendingMutation('update', 'a', 'link', link('a', { title: 'v3' }), 'acc1', 0)
+      await repo.addPendingMutation('create', 'b', 'folder', { id: 'b', name: 'F' }, 'acc1', 0)
+
+      const pending = await repo.getPendingMutations()
+      expect(pending.length).toBe(2) // one per object, latest payloads
+      expect(pending.find(m => m.object_id === 'a').payload.title).toBe('v3')
+      expect(pending.find(m => m.object_id === 'a').operation).toBe('create')
+      expect(pending.find(m => m.object_id === 'b').operation).toBe('create')
+      expect(pending.every(m => m.status === 'pending')).toBe(true)
     })
   })
 })

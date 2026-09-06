@@ -127,3 +127,272 @@ describe('coordinator -> real repository -> notifyDataChanged -> mounted useLink
     scope.stop()
   })
 })
+
+describe('outbox coalescing end-to-end (real repository + coordinator, injected transports)', () => {
+  async function bootAuthenticatedRepo() {
+    const { syncNow } = await import('./coordinator.js')
+    const { repository } = await import('../storage/repository.js')
+    const { session } = await import('../auth/session.js')
+    await session.login()
+    return { syncNow, repository }
+  }
+
+  async function pendingFor(repository, objectId) {
+    const all = await repository.getPendingMutations()
+    return all.filter(m => m.object_id === objectId)
+  }
+
+  it('three consecutive updates are pushed exactly ONCE with the latest payload', async () => {
+    const { syncNow, repository } = await bootAuthenticatedRepo()
+    const id = 'coalesce-push-once'
+
+    await repository.addPendingMutation('create', id, 'link', { id, title: 'v1' }, 'acc-1', 0)
+    await repository.addPendingMutation('update', id, 'link', { id, title: 'v2' }, 'acc-1', 0)
+    await repository.addPendingMutation('update', id, 'link', { id, title: 'v3' }, 'acc-1', 0)
+
+    const pushFn = vi.fn(async () => ({ kind: 'accepted', resultRevision: 1 }))
+    await syncNow({ pushFn, pullFn: async () => ({ kind: 'ok', objects: [] }) })
+
+    expect(pushFn).toHaveBeenCalledTimes(1)
+    const sent = JSON.parse(pushFn.mock.calls[0][0].payload)
+    expect(sent.title).toBe('v3')
+    expect(await pendingFor(repository, id)).toEqual([])
+  })
+
+  it('create then delete before any push sends nothing (no obsolete mutation pushed)', async () => {
+    const { syncNow, repository } = await bootAuthenticatedRepo()
+    const id = 'coalesce-create-delete'
+
+    await repository.addPendingMutation('create', id, 'link', { id, title: 'v1' }, 'acc-1', 0)
+    await repository.addPendingMutation('delete', id, 'link', { id }, 'acc-1', 0)
+
+    const pushFn = vi.fn(async () => ({ kind: 'accepted', resultRevision: 1 }))
+    const summary = await syncNow({ pushFn, pullFn: async () => ({ kind: 'ok', objects: [] }) })
+
+    expect(pushFn).not.toHaveBeenCalled()
+    expect(summary.pushed).toBe(0)
+    expect(await pendingFor(repository, id)).toEqual([])
+  })
+
+  it('retry behavior unchanged: an unavailable response keeps the single coalesced mutation pending; the next sync pushes it', async () => {
+    const { syncNow, repository } = await bootAuthenticatedRepo()
+    const id = 'coalesce-retry'
+
+    await repository.addPendingMutation('create', id, 'link', { id, title: 'v1' }, 'acc-1', 0)
+    await repository.addPendingMutation('update', id, 'link', { id, title: 'v2' }, 'acc-1', 0)
+    expect((await pendingFor(repository, id)).length).toBe(1)
+
+    const pushFn = vi.fn(async () => ({ kind: 'unavailable', status: 503, reason: 'x' }))
+    let summary = await syncNow({ pushFn, pullFn: async () => ({ kind: 'ok', objects: [] }) })
+    expect(pushFn).toHaveBeenCalledTimes(1)
+    expect(summary.unavailable).toBe(1)
+    expect((await pendingFor(repository, id)).length).toBe(1) // still pending, retried later
+
+    pushFn.mockImplementation(async () => ({ kind: 'accepted', resultRevision: 1 }))
+    summary = await syncNow({ pushFn, pullFn: async () => ({ kind: 'ok', objects: [] }) })
+    expect(summary.succeeded).toBe(1)
+    expect(await pendingFor(repository, id)).toEqual([])
+  })
+
+  it('conflict handling remains correct for a coalesced create: rebases as update against server revision', async () => {
+    const { syncNow, repository } = await bootAuthenticatedRepo()
+    const id = 'coalesce-conflict'
+
+    // Server already holds revision 3 for this object (e.g. another device).
+    await repository.addPendingMutation('create', id, 'link', { id, title: 'v1' }, 'acc-1', 0)
+    await repository.addPendingMutation('update', id, 'link', { id, title: 'v2' }, 'acc-1', 0)
+    expect((await pendingFor(repository, id)).length).toBe(1)
+
+    const serverCurrent = {
+      object_id: id, object_type: 'link', revision: 3, deleted: false, deleted_at: null,
+      payload: { id, title: 'server' },
+    }
+    const pushFn = vi.fn(async () => ({ kind: 'conflict', reason: 'stale base', current: serverCurrent }))
+    const summary = await syncNow({ pushFn, pullFn: async () => ({ kind: 'ok', objects: [] }) })
+
+    expect(summary.conflict).toBe(1)
+    const pending = await pendingFor(repository, id)
+    expect(pending.length).toBe(1) // rebased mutation, processed next cycle
+    expect(pending[0].operation).toBe('update') // create-on-existing converts to update
+    expect(pending[0].base_revision).toBe(3) // rebased against the server revision
+    expect(pending[0].status).toBe('pending') // waits for the next cycle
+  })
+
+  it('response-lost create → update: the newer payload is never replayed away and lands on the server', async () => {
+    const { syncNow, repository } = await bootAuthenticatedRepo()
+    const id = 'lost-create-update'
+
+    // Miniature in-memory server, faithful to store.js semantics: a ledger of
+    // applied mutation_ids (idempotency replay returns the ORIGINAL result
+    // without touching the object) and create/update/delete revision gates.
+    // Drain order inside IndexedDB is by mutation_id (primary key), NOT
+    // insertion order, so the fake must be identity-aware: the FIRST create it
+    // ever sees is committed + ledgered and THEN the response is lost.
+    const state = { revision: 0, deleted: false, payload: null }
+    const ledger = new Map()
+    let firstCreateSent = false
+    const parse = (p) => (typeof p === 'string' ? JSON.parse(p) : p)
+    const pushFn = vi.fn(async (m) => {
+      if (ledger.has(m.mutation_id)) return { kind: 'accepted', resultRevision: ledger.get(m.mutation_id) }
+      if (m.operation === 'create') {
+        state.revision = 1
+        state.deleted = false
+        state.payload = parse(m.payload)
+        ledger.set(m.mutation_id, 1)
+        if (!firstCreateSent) {
+          // Server committed, response lost — the client sees only a network error.
+          firstCreateSent = true
+          throw new Error('network: response lost after server commit')
+        }
+        return { kind: 'accepted', resultRevision: 1 }
+      }
+      if (state.deleted) return { kind: 'conflict', current: { revision: state.revision, deleted: true, payload: null } }
+      if (m.base_revision !== state.revision) {
+        return { kind: 'conflict', current: { revision: state.revision, deleted: false, payload: state.payload } }
+      }
+      state.revision += 1
+      if (m.operation === 'delete') {
+        state.deleted = true
+        state.payload = null
+      } else {
+        state.payload = parse(m.payload)
+      }
+      ledger.set(m.mutation_id, state.revision)
+      return { kind: 'accepted', resultRevision: state.revision }
+    })
+
+    // cycle 1: the create's request is delivered and committed server-side,
+    // but the response is lost. The client counts unavailable and the record
+    // keeps its pushed=true marker.
+    await repository.addPendingMutation('create', id, 'link', { id, title: 'v1' }, 'acc-1', 0)
+    let summary = await syncNow({ pushFn, pullFn: async () => ({ kind: 'ok', objects: [] }) })
+    expect(summary.unavailable).toBe(1)
+    let pending = await pendingFor(repository, id)
+    expect(pending.length).toBe(1)
+    expect(pending[0].pushed).toBe(true)
+
+    // User edits to v2 while the create is still pending: the pushed create is
+    // never rewritten — a fresh update mutation with its own id appends.
+    await repository.addPendingMutation('update', id, 'link', { id, title: 'v2' }, 'acc-1', 0)
+    pending = await pendingFor(repository, id)
+    expect(pending.length).toBe(2)
+    const create = pending.find(m => m.operation === 'create')
+    const fresh = pending.find(m => m.operation === 'update')
+    expect(create.payload.title).toBe('v1') // original create untouched
+    expect(create.pushed).toBe(true)
+    expect(fresh).toBeDefined()
+    expect(fresh.mutation_id).not.toBe(create.mutation_id)
+    expect(fresh.pushed).toBe(false)
+
+    // cycle 2: the old create idempotency-replays (original payload, NOT
+    // re-applied); the fresh update conflicts (server at rev 1) and rebases as
+    // update@1. Order inside the drain is irrelevant — both converge.
+    summary = await syncNow({ pushFn, pullFn: async () => ({ kind: 'ok', objects: [] }) })
+    expect(summary.succeeded).toBe(1) // the create replay
+    expect(summary.conflict).toBe(1) // the fresh update rebased
+    pending = await pendingFor(repository, id)
+    expect(pending.length).toBe(1) // only the rebased update remains
+    expect(pending[0].operation).toBe('update')
+    expect(pending[0].base_revision).toBe(1)
+
+    // cycle 3: the rebased update applies — the newest payload is on the server.
+    summary = await syncNow({ pushFn, pullFn: async () => ({ kind: 'ok', objects: [] }) })
+    expect(summary.succeeded).toBe(1)
+    expect(await pendingFor(repository, id)).toEqual([])
+    expect(state.payload).toEqual({ id, title: 'v2' }) // newest content, not the replayed v1
+  })
+
+  it('response-lost create → delete: the delete intent is never dropped and the server object ends deleted', async () => {
+    const { syncNow, repository } = await bootAuthenticatedRepo()
+    const id = 'lost-create-delete'
+
+    const state = { revision: 0, deleted: false, payload: null }
+    const ledger = new Map()
+    let firstCreateSent = false
+    const parse = (p) => (typeof p === 'string' ? JSON.parse(p) : p)
+    const pushFn = vi.fn(async (m) => {
+      if (ledger.has(m.mutation_id)) return { kind: 'accepted', resultRevision: ledger.get(m.mutation_id) }
+      if (m.operation === 'create') {
+        state.revision = 1
+        state.deleted = false
+        state.payload = parse(m.payload)
+        ledger.set(m.mutation_id, 1)
+        if (!firstCreateSent) {
+          firstCreateSent = true
+          throw new Error('network: response lost after server commit')
+        }
+        return { kind: 'accepted', resultRevision: 1 }
+      }
+      if (state.deleted) return { kind: 'conflict', current: { revision: state.revision, deleted: true, payload: null } }
+      if (m.base_revision !== state.revision) {
+        return { kind: 'conflict', current: { revision: state.revision, deleted: false, payload: state.payload } }
+      }
+      state.revision += 1
+      if (m.operation === 'delete') {
+        state.deleted = true
+        state.payload = null
+      } else {
+        state.payload = parse(m.payload)
+      }
+      ledger.set(m.mutation_id, state.revision)
+      return { kind: 'accepted', resultRevision: state.revision }
+    })
+
+    // cycle 1: create delivered + committed server-side, response lost.
+    await repository.addPendingMutation('create', id, 'link', { id, title: 'v1' }, 'acc-1', 0)
+    let summary = await syncNow({ pushFn, pullFn: async () => ({ kind: 'ok', objects: [] }) })
+    expect(summary.unavailable).toBe(1)
+    let pending = await pendingFor(repository, id)
+    expect(pending.length).toBe(1)
+    expect(pending[0].pushed).toBe(true)
+
+    // User deletes before retry: the pushed create must NOT be dropped — a
+    // fresh delete mutation stays queued next to it.
+    await repository.addPendingMutation('delete', id, 'link', { id }, 'acc-1', 0)
+    pending = await pendingFor(repository, id)
+    expect(pending.length).toBe(2)
+    const create = pending.find(m => m.operation === 'create')
+    const freshDelete = pending.find(m => m.operation === 'delete')
+    expect(create).toBeDefined()
+    expect(create.pushed).toBe(true)
+    expect(freshDelete).toBeDefined()
+    expect(freshDelete.mutation_id).not.toBe(create.mutation_id)
+
+    // cycle 2: create replays; the fresh delete conflicts (rev 1) and rebases
+    // as delete@1 — order inside the drain is irrelevant.
+    summary = await syncNow({ pushFn, pullFn: async () => ({ kind: 'ok', objects: [] }) })
+    expect(summary.succeeded).toBe(1)
+    expect(summary.conflict).toBe(1)
+    pending = await pendingFor(repository, id)
+    expect(pending.length).toBe(1)
+    expect(pending[0].operation).toBe('delete')
+    expect(pending[0].base_revision).toBe(1)
+
+    // cycle 3: the rebased delete applies — final server state is deleted.
+    summary = await syncNow({ pushFn, pullFn: async () => ({ kind: 'ok', objects: [] }) })
+    expect(summary.succeeded).toBe(1)
+    expect(await pendingFor(repository, id)).toEqual([])
+    expect(state.deleted).toBe(true)
+  })
+
+  it('syncState recovers after a push that throws: isSyncing() is false and a later sync succeeds', async () => {
+    const { syncNow, repository } = await bootAuthenticatedRepo()
+    const { isSyncing } = await import('./syncState.js')
+    const id = 'throw-recovery'
+    const pushFn = vi.fn(async () => { throw new Error('flaky network') })
+
+    await repository.addPendingMutation('create', id, 'link', { id, title: 'v1' }, 'acc-1', 0)
+    const summary = await syncNow({ pushFn, pullFn: async () => ({ kind: 'ok', objects: [] }) })
+
+    expect(summary.unavailable).toBe(1)
+    expect(isSyncing()).toBe(false) // begin/end stayed balanced under the throw
+
+    // The marker was persisted before the attempt, so the mutation remains
+    // protected; a second, healthy sync completes normally.
+    expect((await pendingFor(repository, id))[0].pushed).toBe(true)
+    pushFn.mockImplementation(async () => ({ kind: 'accepted', resultRevision: 1 }))
+    const retry = await syncNow({ pushFn, pullFn: async () => ({ kind: 'ok', objects: [] }) })
+    expect(retry.succeeded).toBe(1)
+    expect(await pendingFor(repository, id)).toEqual([])
+  })
+})
