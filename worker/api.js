@@ -30,6 +30,7 @@ import {
   revokeSessionByToken,
   createSession,
   applyObjectMutation,
+  applyObjectMutationsBatch,
   getObjectsForAccount,
 } from './db/store.js'
 import {
@@ -149,6 +150,19 @@ export async function handleApiSessionRefresh(request, env, { now = Date.now() }
   }
 }
 
+/** Map a store result.current object to the wire conflict shape (no detail leakage). */
+function conflictCurrent(c) {
+  if (!c) return null
+  return {
+    object_id: c.object_id,
+    object_type: c.object_type,
+    revision: c.revision,
+    deleted: c.deleted === 1,
+    deleted_at: c.deleted_at,
+    payload: safePayload(c.payload),
+  }
+}
+
 // ---- POST /api/sync/mutation -------------------------------------------------
 
 const SYNC_BODY_MAX = 512 * 1024
@@ -217,18 +231,7 @@ export async function handleApiSyncMutation(request, env, { now = Date.now() } =
       return jsonResponse(200, { accepted: true, result_revision: result.resultRevision })
     }
     if (result.kind === 'conflict') {
-      const c = result.current
-      const current = c
-        ? {
-            object_id: c.object_id,
-            object_type: c.object_type,
-            revision: c.revision,
-            deleted: c.deleted === 1,
-            deleted_at: c.deleted_at,
-            payload: safePayload(c.payload),
-          }
-        : null
-      return jsonResponse(409, { accepted: false, reason: 'revision_conflict', current })
+      return jsonResponse(409, { accepted: false, reason: 'revision_conflict', current: conflictCurrent(result.current) })
     }
     return jsonResponse(500, { error: 'server_error' })
   } catch {
@@ -311,6 +314,102 @@ function parseMutation(body) {
   if (typeof payload !== 'string' || payload.length === 0 || payload.length > SYNC_BODY_MAX) return null
 
   return { mutationId, objectType, objectId, operation, baseRevision, payload }
+}
+
+// ---- POST /api/sync/mutations ------------------------------------------------
+
+const SYNC_BATCH_MAX = 25
+
+/**
+ * Apply a batch of queued client mutations against the server-authoritative
+ * object storage. This is the D1/network round-trip reduction for Push:
+ *   - HTTP: N+1 requests → 1 + ⌈N/25⌉ requests (the +1 is the pull).
+ *   - D1 statements: auth resolves once per request (2 statements). After
+ *     that, per-entry applies cost 2 statements (claim + object write in one
+ *     db.batch()); an all-update/delete batch of N entries is 2 + 2N.
+ *     Creates additionally perform one ledger replay probe per create before
+ *     the batch write, so an all-create batch of N entries is 2 + 3N.
+ *     (No wall-clock improvement is claimed.)
+ *
+ * Security flow mirrors handleApiSyncMutation, auth once at the top:
+ *   1. POST                                            (router)
+ *   2. missing DB binding                              -> 503
+ *   3. Origin/Referer gate (state-changing)            -> 403 / 503
+ *   4. read presented session cookie, resolve account  -> 401 on any failure
+ *   5. parse + structurally validate the JSON body     -> 400 on malformed
+ *   6. validate array (1..SYNC_BATCH_MAX entries)      -> 400
+ *   7. delegate the whole batch to store.applyObjectMutationsBatch
+ *   8. map the structured results to HTTP
+ *
+ * Each entry carries exactly the single-endpoint wire fields (mutation_id,
+ * object_type, object_id, operation, base_revision, payload); account_id is
+ * NEVER read from the body. Per-entry failure isolation: a failing entry
+ * yields { kind: 'error' } and does not fail its siblings.
+ *
+ * Response mapping:
+ *   applied / replay -> 200 { accepted: true, results: [{mutation_id, accepted:true, result_revision}] }
+ *   conflict         -> 200 { accepted: true, results: [{mutation_id, accepted:false, reason:'revision_conflict', current}] }
+ *   error            -> 200 { accepted: true, results: [{mutation_id, accepted:false, reason:'server_error'}] }
+ *   malformed / cap  -> 400
+ *   auth failure     -> 401
+ *   unavailable      -> 503
+ */
+export async function handleApiSyncMutations(request, env, { now = Date.now() } = {}) {
+  if (!env.DB) return jsonResponse(503, { error: 'unavailable' })
+
+  const gate = requireApiOrigin(request, env)
+  if (gate.status) {
+    return jsonResponse(gate.status, gate.status === 503 ? { error: 'unavailable' } : { error: 'forbidden' })
+  }
+
+  const presented = readSessionCookie(request)
+  if (!presented) return jsonResponse(401, { error: 'unauthenticated' })
+
+  try {
+    const session = await getSessionByToken(env.DB, { token: presented.token, now })
+    if (!session) return jsonResponse(401, { error: 'unauthenticated' })
+    const account = await getAccount(env.DB, { accountId: session.account_id })
+    if (!account) return jsonResponse(401, { error: 'unauthenticated' })
+    const accountId = account.account_id
+
+    let body
+    try {
+      const raw = await request.text()
+      if (raw.length > SYNC_BODY_MAX) return jsonResponse(400, { error: 'malformed_mutation' })
+      body = JSON.parse(raw)
+    } catch {
+      return jsonResponse(400, { error: 'malformed_mutation' })
+    }
+
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return jsonResponse(400, { error: 'malformed_mutation' })
+    const { mutations: rawMutations } = body
+    if (!Array.isArray(rawMutations) || rawMutations.length === 0 || rawMutations.length > SYNC_BATCH_MAX) {
+      return jsonResponse(400, { error: 'malformed_mutation' })
+    }
+
+    const mutations = []
+    for (const entry of rawMutations) {
+      const parsed = parseMutation(entry)
+      if (!parsed) return jsonResponse(400, { error: 'malformed_mutation' })
+      mutations.push(parsed)
+    }
+
+    const batchResults = await applyObjectMutationsBatch(env.DB, { accountId, mutations, now })
+
+    const results = batchResults.map(({ mutationId, result }) => {
+      if (result.kind === 'applied' || result.kind === 'replay') {
+        return { mutation_id: mutationId, accepted: true, result_revision: result.resultRevision }
+      }
+      if (result.kind === 'conflict') {
+        return { mutation_id: mutationId, accepted: false, reason: 'revision_conflict', current: conflictCurrent(result.current) }
+      }
+      return { mutation_id: mutationId, accepted: false, reason: 'server_error' }
+    })
+
+    return jsonResponse(200, { accepted: true, results })
+  } catch {
+    return jsonResponse(500, { error: 'server_error' })
+  }
 }
 
 // ---- Reusable API boundary convention (for state-changing endpoints) ----------

@@ -30,13 +30,21 @@ import { repository } from '../storage/repository.js'
 import { STORES } from '../storage/indexeddb.js'
 import { session } from '../auth/session.js'
 import { notifyDataChanged } from '../storage/dataChanges.js'
-import { pushMutation, pullObjects } from './protocol.js'
+import { pushMutations, pullObjects } from './protocol.js'
 import { beginSync, endSync } from './syncState.js'
 
 const OBJECT_TYPE_TO_STORE = {
   link: STORES.LINKS,
   folder: STORES.FOLDERS,
 }
+
+/**
+ * Push drain chunk size (Opt #3). One chunk = one POST /api/sync/mutations
+ * request that batches up to this many mutations server-side, cutting the
+ * http N+1 and the D1 work per mutation (see worker/db/store.js
+ * applyObjectMutationsBatch). Must match the server's 25-entry cap.
+ */
+export const PUSH_BATCH_SIZE = 25
 
 /**
  * Handle a conflict response from the server. Creates a rebased pending
@@ -220,13 +228,15 @@ export async function pullAndReconcile({ pullFn = pullObjects, repo = repository
  * as a successful sync.
  *
  * @param {Object} [options]
- * @param {Function} [options.pushFn] — injectable pushMutation (default: module import)
+ * @param {Function} [options.pushFn] — injectable per-chunk push
+ *   (mutationsArray -> Promise<resultsArray>, aligned with input; default:
+ *   protocol.pushMutations)
  * @param {Function} [options.pullFn] — injectable pullObjects (default: module import)
  * @param {Object} [options.repo] — injectable repository (default: singleton)
  * @returns {Promise<{ pushed: number, succeeded: number, failed: number, conflict: number, unavailable: number, pulled: number, applied: number, skippedLocal: number, skippedStale: number }>}
  */
 export async function syncNow({
-  pushFn = pushMutation,
+  pushFn = pushMutations,
   pullFn = pullObjects,
   repo = repository,
 } = {}) {
@@ -257,74 +267,92 @@ export async function syncNow({
       return summary
     }
 
-    // 2. Push drain (existing behavior, unchanged).
+    // 2. Push drain (batched, Opt #3): chunks of PUSH_BATCH_SIZE mutations.
+    //    Within a chunk, EVERY member's pushed marker is persisted BEFORE the
+    //    request goes out — so a lost response cannot drop a committed
+    //    mutation (marker-first is what makes re-sends replay idempotently).
+    //    Then ONE pushFn(chunk) call sends them all; results are aligned with
+    //    the chunk and handled by the unchanged per-result switch.
     const mutations = await repo.getPendingMutations()
     const myMutations = mutations.filter(m => m.account_id === accountId)
 
-    for (const mutation of myMutations) {
-      summary.pushed++
+    for (let i = 0; i < myMutations.length; i += PUSH_BATCH_SIZE) {
+      const chunk = myMutations.slice(i, i + PUSH_BATCH_SIZE)
+      summary.pushed += chunk.length
 
-      // Persist the pushed marker BEFORE the network attempt. The request may
-      // be delivered and committed server-side with its response lost; from
-      // then on this mutation_id must never be coalesced into or dropped
-      // locally (addPendingMutation refuses to touch pushed=true records), so
-      // a retry replays the SAME payload while any newer edit stays a separate
-      // mutation. If the marker cannot be persisted, the mutation is NOT
-      // protected — send nothing this cycle (counted unavailable, still
-      // pending, retried later by the same path).
-      try {
-        await repo.markMutationPushed(mutation.mutation_id)
-      } catch {
-        summary.unavailable++
-        continue
+      // Phase A — persist the pushed marker for EVERY member before any
+      // network I/O (same rationale as the single-mutation path). If a
+      // member's marker cannot be persisted, that member is NOT sent this
+      // cycle: an unprotected send risks local coalescing dropping a committed
+      // server mutation after a lost response. Members whose markers
+      // succeeded are still sent — the chunk shrinks, safety is per-member.
+      const inFlight = []
+      for (const mutation of chunk) {
+        try {
+          await repo.markMutationPushed(mutation.mutation_id)
+          inFlight.push(mutation)
+        } catch {
+          summary.unavailable++
+        }
       }
+      if (inFlight.length === 0) continue
 
-      // The composables store payloads as JS objects; the server expects a JSON
-      // string. Stringify here so pushMutation sends the correct wire format.
-      const payload = typeof mutation.payload === 'string'
-        ? mutation.payload
-        : JSON.stringify(mutation.payload)
+      // Phase B — one batched request for the in-flight members. The
+      // composables store payloads as JS objects; the server expects a JSON
+      // string, so stringify here (the ORIGINAL records are used for the
+      // result handling below so rebaseConflict keeps the object payload).
+      const wireChunk = inFlight.map(m => ({
+        ...m,
+        payload: typeof m.payload === 'string' ? m.payload : JSON.stringify(m.payload),
+      }))
 
-      let result
+      let results
       try {
-        result = await pushFn({ ...mutation, payload })
+        results = await pushFn(wireChunk)
       } catch {
         // Network-level failure — fetch threw (DNS, TLS, offline). Leave the
-        // mutation pending for retry.
-        summary.unavailable++
+        // members pending for retry.
+        summary.unavailable += inFlight.length
         continue
       }
 
-      switch (result.kind) {
-        case 'accepted': {
-          // Server accepted the mutation — sync local revision to the
-          // authoritative value. No content change: the server already has
-          // the payload; the local object already has the user's content.
-          const storeName = OBJECT_TYPE_TO_STORE[mutation.object_type]
-          if (storeName && result.resultRevision != null) {
-            await repo.updateObjectRevision(storeName, mutation.object_id, result.resultRevision)
+      // Phase C — per-result handling, unchanged semantics. Results are
+      // aligned with wireChunk (and thus inFlight) in input order.
+      for (let j = 0; j < inFlight.length; j++) {
+        const mutation = inFlight[j]
+        const result = results?.[j] ?? { kind: 'unavailable' }
+
+        switch (result.kind) {
+          case 'accepted': {
+            // Server accepted the mutation — sync local revision to the
+            // authoritative value. No content change: the server already has
+            // the payload; the local object already has the user's content.
+            const storeName = OBJECT_TYPE_TO_STORE[mutation.object_type]
+            if (storeName && result.resultRevision != null) {
+              await repo.updateObjectRevision(storeName, mutation.object_id, result.resultRevision)
+            }
+            await repo.markMutationSucceeded(mutation.mutation_id)
+            summary.succeeded++
+            break
           }
-          await repo.markMutationSucceeded(mutation.mutation_id)
-          summary.succeeded++
-          break
-        }
-        case 'conflict': {
-          // Chunk 4: rebase against server state. The rebased mutation is
-          // pending and will be processed on the next syncNow() call.
-          await rebaseConflict(mutation, result.current, repo)
-          summary.conflict++
-          break
-        }
-        case 'rejected': {
-          // Client error (400/401/403). Not retryable — mark failed.
-          await repo.markMutationFailed(mutation.mutation_id)
-          summary.failed++
-          break
-        }
-        case 'unavailable': {
-          // Server error or network issue. Leave pending for retry.
-          summary.unavailable++
-          break
+          case 'conflict': {
+            // Chunk 4: rebase against server state. The rebased mutation is
+            // pending and will be processed on the next syncNow() call.
+            await rebaseConflict(mutation, result.current, repo)
+            summary.conflict++
+            break
+          }
+          case 'rejected': {
+            // Client error (400/401/403). Not retryable — mark failed.
+            await repo.markMutationFailed(mutation.mutation_id)
+            summary.failed++
+            break
+          }
+          case 'unavailable': {
+            // Server error or network issue. Leave pending for retry.
+            summary.unavailable++
+            break
+          }
         }
       }
     }

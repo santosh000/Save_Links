@@ -72,14 +72,21 @@ function makeRepo(mutations = []) {
   }
 }
 
-function mockPush(results) {
-  // results: array of return values, one per call (cycling if fewer than calls)
-  let call = 0
-  return vi.fn(() => {
-    const r = results[Math.min(call, results.length - 1)]
-    call++
-    if (r instanceof Error) return Promise.reject(r)
-    return Promise.resolve(r)
+function mockBatchPush(results) {
+  // results: per-MEMBER return values across the whole drain, in queue order
+  // (cycling the last result when shorter — mirrors the old per-call mock).
+  // The chunked contract: pushFn(chunk) -> Promise<resultsArray>, one result
+  // per member, aligned with the input chunk.
+  let member = 0
+  return vi.fn((chunk) => {
+    const out = chunk.map(() => {
+      const r = results[Math.min(member, results.length - 1)]
+      member++
+      return r
+    })
+    const err = out.find(r => r instanceof Error)
+    if (err) return Promise.reject(err)
+    return Promise.resolve(out)
   })
 }
 
@@ -92,6 +99,7 @@ vi.mock('../auth/session.js', () => ({
 // by default (push-only tests). Individual pull tests override pullFn instead.
 vi.mock('./protocol.js', () => ({
   pushMutation: vi.fn(),
+  pushMutations: vi.fn(),
   pullObjects: vi.fn(() => Promise.resolve({ kind: 'ok', objects: [] })),
 }))
 
@@ -235,7 +243,7 @@ describe('rebaseConflict', () => {
 describe('syncNow', () => {
   it('returns zeros when queue is empty', async () => {
     const repo = makeRepo([])
-    const pushFn = mockPush([])
+    const pushFn = mockBatchPush([])
     const result = await syncNow({ pushFn, repo })
     expect(result).toEqual(BASE_SUMMARY)
     expect(pushFn).not.toHaveBeenCalled()
@@ -247,7 +255,7 @@ describe('syncNow', () => {
     realSession.getState = () => ({ status: 'anonymous', user: null })
     try {
       const repo = makeRepo([makeMutation()])
-      const pushFn = mockPush([])
+      const pushFn = mockBatchPush([])
       const result = await syncNow({ pushFn, repo })
       expect(result).toEqual(BASE_SUMMARY)
       expect(pushFn).not.toHaveBeenCalled()
@@ -260,17 +268,17 @@ describe('syncNow', () => {
     const own = makeMutation({ mutation_id: 'own-1', account_id: 'acc-1' })
     const other = makeMutation({ mutation_id: 'other-1', account_id: 'acc-999' })
     const repo = makeRepo([own, other])
-    const pushFn = mockPush([{ kind: 'accepted', resultRevision: 1 }])
+    const pushFn = mockBatchPush([{ kind: 'accepted', resultRevision: 1 }])
     const result = await syncNow({ pushFn, repo })
     expect(result.pushed).toBe(1)
     expect(pushFn).toHaveBeenCalledOnce()
-    expect(pushFn.mock.calls[0][0].mutation_id).toBe('own-1')
+    expect(pushFn.mock.calls[0][0][0].mutation_id).toBe('own-1')
   })
 
   it('successful create: updates local revision and marks succeeded', async () => {
     const m = makeMutation({ object_type: 'link', operation: 'create' })
     const repo = makeRepo([m])
-    const pushFn = mockPush([{ kind: 'accepted', resultRevision: 1 }])
+    const pushFn = mockBatchPush([{ kind: 'accepted', resultRevision: 1 }])
     const result = await syncNow({ pushFn, repo })
     expect(result).toEqual({ ...BASE_SUMMARY, pushed: 1, succeeded: 1, failed: 0, conflict: 0, unavailable: 0 })
     expect(repo.calls.updateRevision).toEqual([
@@ -282,7 +290,7 @@ describe('syncNow', () => {
   it('successful update: increments revision from server', async () => {
     const m = makeMutation({ operation: 'update', base_revision: 1 })
     const repo = makeRepo([m])
-    const pushFn = mockPush([{ kind: 'accepted', resultRevision: 2 }])
+    const pushFn = mockBatchPush([{ kind: 'accepted', resultRevision: 2 }])
     const result = await syncNow({ pushFn, repo })
     expect(result.succeeded).toBe(1)
     expect(repo.calls.updateRevision[0].revision).toBe(2)
@@ -291,7 +299,7 @@ describe('syncNow', () => {
   it('successful delete: updates revision and marks succeeded', async () => {
     const m = makeMutation({ object_type: 'folder', operation: 'delete', base_revision: 3 })
     const repo = makeRepo([m])
-    const pushFn = mockPush([{ kind: 'accepted', resultRevision: 4 }])
+    const pushFn = mockBatchPush([{ kind: 'accepted', resultRevision: 4 }])
     const result = await syncNow({ pushFn, repo })
     expect(result.succeeded).toBe(1)
     expect(repo.calls.updateRevision).toEqual([
@@ -303,7 +311,7 @@ describe('syncNow', () => {
   it('conflict: rebase creates a new pending mutation', async () => {
     const m = makeMutation()
     const repo = makeRepo([m])
-    const pushFn = mockPush([{
+    const pushFn = mockBatchPush([{
       kind: 'conflict',
       reason: 'revision_conflict',
       current: { object_id: 'obj-1', object_type: 'link', revision: 5, deleted: false, deleted_at: null, payload: {} },
@@ -320,7 +328,7 @@ describe('syncNow', () => {
   it('conflict with null current: marks failed, no rebase', async () => {
     const m = makeMutation()
     const repo = makeRepo([m])
-    const pushFn = mockPush([{
+    const pushFn = mockBatchPush([{
       kind: 'conflict',
       reason: 'revision_conflict',
       current: null,
@@ -334,7 +342,7 @@ describe('syncNow', () => {
   it('rejected (400/401/403): marks failed, not retryable', async () => {
     const m = makeMutation()
     const repo = makeRepo([m])
-    const pushFn = mockPush([{ kind: 'rejected', status: 401, reason: 'unauthenticated' }])
+    const pushFn = mockBatchPush([{ kind: 'rejected', status: 401, reason: 'unauthenticated' }])
     const result = await syncNow({ pushFn, repo })
     expect(result).toEqual({ ...BASE_SUMMARY, pushed: 1, succeeded: 0, failed: 1, conflict: 0, unavailable: 0 })
     expect(repo.calls.markFailed).toEqual(['mut-001'])
@@ -344,7 +352,7 @@ describe('syncNow', () => {
   it('unavailable (500/503): leaves pending, does not mark anything', async () => {
     const m = makeMutation()
     const repo = makeRepo([m])
-    const pushFn = mockPush([{ kind: 'unavailable', status: 503, reason: 'unavailable' }])
+    const pushFn = mockBatchPush([{ kind: 'unavailable', status: 503, reason: 'unavailable' }])
     const result = await syncNow({ pushFn, repo })
     expect(result).toEqual({ ...BASE_SUMMARY, pushed: 1, succeeded: 0, failed: 0, conflict: 0, unavailable: 1 })
     expect(repo.calls.markFailed).toEqual([])
@@ -355,7 +363,7 @@ describe('syncNow', () => {
   it('network failure (fetch throws): leaves pending', async () => {
     const m = makeMutation()
     const repo = makeRepo([m])
-    const pushFn = mockPush([new Error('Failed to fetch')])
+    const pushFn = mockBatchPush([new Error('Failed to fetch')])
     const result = await syncNow({ pushFn, repo })
     expect(result).toEqual({ ...BASE_SUMMARY, pushed: 1, succeeded: 0, failed: 0, conflict: 0, unavailable: 1 })
     expect(repo.calls.markFailed).toEqual([])
@@ -365,9 +373,9 @@ describe('syncNow', () => {
   it('retry preserves the same mutation_id', async () => {
     const m = makeMutation({ mutation_id: 'stable-id-42' })
     const repo = makeRepo([m])
-    const pushFn = mockPush([{ kind: 'accepted', resultRevision: 1 }])
+    const pushFn = mockBatchPush([{ kind: 'accepted', resultRevision: 1 }])
     await syncNow({ pushFn, repo })
-    const sent = pushFn.mock.calls[0][0]
+    const sent = pushFn.mock.calls[0][0][0]
     expect(sent.mutation_id).toBe('stable-id-42')
   })
 
@@ -376,14 +384,16 @@ describe('syncNow', () => {
     const m2 = makeMutation({ mutation_id: 'm-2', object_id: 'obj-2', operation: 'update', base_revision: 1 })
     const m3 = makeMutation({ mutation_id: 'm-3', object_id: 'obj-3', operation: 'delete', base_revision: 2 })
     const repo = makeRepo([m1, m2, m3])
-    const pushFn = mockPush([
+    const pushFn = mockBatchPush([
       { kind: 'accepted', resultRevision: 1 },
       { kind: 'accepted', resultRevision: 2 },
       { kind: 'accepted', resultRevision: 3 },
     ])
     const result = await syncNow({ pushFn, repo })
     expect(result).toEqual({ ...BASE_SUMMARY, pushed: 3, succeeded: 3, failed: 0, conflict: 0, unavailable: 0 })
-    expect(pushFn.mock.calls.map(c => c[0].mutation_id)).toEqual(['m-1', 'm-2', 'm-3'])
+    // All 3 fit in one batch request, in queue order.
+    expect(pushFn).toHaveBeenCalledOnce()
+    expect(pushFn.mock.calls[0][0].map(x => x.mutation_id)).toEqual(['m-1', 'm-2', 'm-3'])
   })
 
   it('mixed results: accepted, conflict (rebased), rejected, unavailable', async () => {
@@ -392,7 +402,7 @@ describe('syncNow', () => {
     const m3 = makeMutation({ mutation_id: 'm-3' })
     const m4 = makeMutation({ mutation_id: 'm-4' })
     const repo = makeRepo([m1, m2, m3, m4])
-    const pushFn = mockPush([
+    const pushFn = mockBatchPush([
       { kind: 'accepted', resultRevision: 1 },
       { kind: 'conflict', reason: 'revision_conflict', current: { revision: 3, object_id: 'obj-1', object_type: 'link', deleted: false, deleted_at: null, payload: {} } },
       { kind: 'rejected', status: 400, reason: 'malformed_mutation' },
@@ -409,9 +419,9 @@ describe('syncNow', () => {
     const objPayload = { id: 'obj-1', url: 'https://example.com', title: 'Test' }
     const m = makeMutation({ payload: objPayload })
     const repo = makeRepo([m])
-    const pushFn = mockPush([{ kind: 'accepted', resultRevision: 1 }])
+    const pushFn = mockBatchPush([{ kind: 'accepted', resultRevision: 1 }])
     await syncNow({ pushFn, repo })
-    const sent = pushFn.mock.calls[0][0]
+    const sent = pushFn.mock.calls[0][0][0]
     expect(typeof sent.payload).toBe('string')
     expect(JSON.parse(sent.payload)).toEqual(objPayload)
   })
@@ -420,16 +430,16 @@ describe('syncNow', () => {
     const strPayload = '{"id":"obj-1","url":"https://example.com"}'
     const m = makeMutation({ payload: strPayload })
     const repo = makeRepo([m])
-    const pushFn = mockPush([{ kind: 'accepted', resultRevision: 1 }])
+    const pushFn = mockBatchPush([{ kind: 'accepted', resultRevision: 1 }])
     await syncNow({ pushFn, repo })
-    const sent = pushFn.mock.calls[0][0]
+    const sent = pushFn.mock.calls[0][0][0]
     expect(sent.payload).toBe(strPayload)
   })
 
   it('local revision is never incremented by the coordinator', async () => {
     const m = makeMutation({ base_revision: 0 })
     const repo = makeRepo([m])
-    const pushFn = mockPush([{ kind: 'accepted', resultRevision: 1 }])
+    const pushFn = mockBatchPush([{ kind: 'accepted', resultRevision: 1 }])
     await syncNow({ pushFn, repo })
     expect(repo.calls.updateRevision[0].revision).toBe(1)
   })
@@ -437,7 +447,7 @@ describe('syncNow', () => {
   it('does not update revision on unavailable — leaves mutation pending', async () => {
     const m = makeMutation()
     const repo = makeRepo([m])
-    const pushFn = mockPush([{ kind: 'unavailable', status: 503, reason: 'unavailable' }])
+    const pushFn = mockBatchPush([{ kind: 'unavailable', status: 503, reason: 'unavailable' }])
     await syncNow({ pushFn, repo })
     expect(repo.calls.updateRevision).toEqual([])
     expect(repo.calls.markFailed).toEqual([])
@@ -446,7 +456,7 @@ describe('syncNow', () => {
   it('object_type folder maps to the folders store', async () => {
     const m = makeMutation({ object_type: 'folder' })
     const repo = makeRepo([m])
-    const pushFn = mockPush([{ kind: 'accepted', resultRevision: 1 }])
+    const pushFn = mockBatchPush([{ kind: 'accepted', resultRevision: 1 }])
     await syncNow({ pushFn, repo })
     expect(repo.calls.updateRevision[0].storeName).toBe('folders')
   })
@@ -454,9 +464,122 @@ describe('syncNow', () => {
   it('object_type link maps to the links store', async () => {
     const m = makeMutation({ object_type: 'link' })
     const repo = makeRepo([m])
-    const pushFn = mockPush([{ kind: 'accepted', resultRevision: 1 }])
+    const pushFn = mockBatchPush([{ kind: 'accepted', resultRevision: 1 }])
     await syncNow({ pushFn, repo })
     expect(repo.calls.updateRevision[0].storeName).toBe('links')
+  })
+
+  // --- Opt #3 batched push tests ---
+
+  it('30 mutations drain in 2 requests: chunk 1 = 25, chunk 2 = 5', async () => {
+    const repo = makeRepo(Array.from({ length: 30 }, (_, i) =>
+      makeMutation({ mutation_id: `m-${i}`, object_id: `obj-${i}` })))
+    const results = Array.from({ length: 30 }, (_, i) => ({ kind: 'accepted', resultRevision: i + 1 }))
+    const pushFn = mockBatchPush(results)
+    const result = await syncNow({ pushFn, repo })
+    expect(result).toEqual({ ...BASE_SUMMARY, pushed: 30, succeeded: 30, failed: 0, conflict: 0, unavailable: 0 })
+    expect(pushFn).toHaveBeenCalledTimes(2)
+    expect(pushFn.mock.calls[0][0]).toHaveLength(25)
+    expect(pushFn.mock.calls[1][0]).toHaveLength(5)
+    // Total drained = all 30, queue order preserved across the two chunks.
+    const sentIds = pushFn.mock.calls.flatMap(c => c[0].map(x => x.mutation_id))
+    expect(sentIds.slice(0, 25)).toEqual(Array.from({ length: 25 }, (_, i) => `m-${i}`))
+    expect(sentIds.slice(25)).toEqual(Array.from({ length: 5 }, (_, i) => `m-${i + 25}`))
+  })
+
+  it('marks EVERY member pushed BEFORE the batch request goes out (marker-first)', async () => {
+    const repo = makeRepo(Array.from({ length: 3 }, (_, i) =>
+      makeMutation({ mutation_id: `m-${i}` })))
+    const pushFn = mockBatchPush([{ kind: 'accepted', resultRevision: 1 }])
+    await syncNow({ pushFn, repo })
+
+    // All 3 markers were persisted before the single pushFn call.
+    expect(repo.calls.markPushed).toEqual(['m-0', 'm-1', 'm-2'])
+    expect(pushFn).toHaveBeenCalledTimes(1)
+    expect(pushFn.mock.calls[0][0]).toHaveLength(3)
+  })
+
+  it('marker failure: that member is NOT sent (counted unavailable), siblings still are', async () => {
+    const repo = makeRepo([
+      makeMutation({ mutation_id: 'broken' }),
+      makeMutation({ mutation_id: 'fine-1', object_id: 'obj-2' }),
+      makeMutation({ mutation_id: 'fine-2', object_id: 'obj-3' }),
+    ])
+    // Only 'broken' fails to mark pushed.
+    repo.markMutationPushed = vi.fn(async (mutationId) => {
+      if (mutationId === 'broken') throw new Error('idb tx failed')
+      repo.calls.markPushed.push(mutationId)
+    })
+    const pushFn = mockBatchPush([{ kind: 'accepted', resultRevision: 1 }])
+    const result = await syncNow({ pushFn, repo })
+    expect(result.unavailable).toBe(1)
+    expect(result.succeeded).toBe(2)
+    // The unsafe member was never sent; the safe ones share one batch request.
+    expect(pushFn).toHaveBeenCalledOnce()
+    expect(pushFn.mock.calls[0][0].map(x => x.mutation_id)).toEqual(['fine-1', 'fine-2'])
+  })
+
+  it('chunk 1 fully accepted, chunk 2 rejected -> succeeded 25, failed 5', async () => {
+    const repo = makeRepo(Array.from({ length: 30 }, (_, i) =>
+      makeMutation({ mutation_id: `m-${i}` })))
+    const results = [
+      ...Array.from({ length: 25 }, () => ({ kind: 'accepted', resultRevision: 1 })),
+      ...Array.from({ length: 5 }, () => ({ kind: 'rejected', status: 401, reason: 'unauthenticated' })),
+    ]
+    const pushFn = mockBatchPush(results)
+    const result = await syncNow({ pushFn, repo })
+    expect(result.succeeded).toBe(25)
+    expect(result.failed).toBe(5)
+    expect(repo.calls.markSucceeded).toHaveLength(25)
+    expect(repo.calls.markFailed).toEqual(['m-25', 'm-26', 'm-27', 'm-28', 'm-29'])
+  })
+
+  it('network failure on a chunk: whole chunk left pending, counted unavailable', async () => {
+    const repo = makeRepo(Array.from({ length: 30 }, (_, i) =>
+      makeMutation({ mutation_id: `m-${i}` })))
+    // Chunk 1 succeeds (25 accepted), chunk 2 (5) throws (offline mid-sync).
+    let call = 0
+    const pushFn = vi.fn((chunk) => {
+      call++
+      if (call === 1) return Promise.resolve(chunk.map(() => ({ kind: 'accepted', resultRevision: 1 })))
+      return Promise.reject(new Error('offline'))
+    })
+    const result = await syncNow({ pushFn, repo })
+    expect(result.succeeded).toBe(25)
+    expect(result.unavailable).toBe(5)
+    expect(repo.calls.markSucceeded).toHaveLength(25)
+  })
+
+  it('mixed results inside ONE chunk: accepted, conflict (rebased), rejected, unavailable', async () => {
+    const repo = makeRepo([
+      makeMutation({ mutation_id: 'm-1' }),
+      makeMutation({ mutation_id: 'm-2' }),
+      makeMutation({ mutation_id: 'm-3' }),
+      makeMutation({ mutation_id: 'm-4' }),
+    ])
+    const pushFn = mockBatchPush([
+      { kind: 'accepted', resultRevision: 1 },
+      { kind: 'conflict', reason: 'revision_conflict', current: { revision: 3, object_id: 'obj-1', object_type: 'link', deleted: false, deleted_at: null, payload: {} } },
+      { kind: 'rejected', status: 400, reason: 'malformed_mutation' },
+      { kind: 'unavailable', status: 500, reason: 'server_error' },
+    ])
+    const result = await syncNow({ pushFn, repo })
+    expect(result).toEqual({ ...BASE_SUMMARY, pushed: 4, succeeded: 1, failed: 1, conflict: 1, unavailable: 1 })
+    expect(repo.calls.markSucceeded).toEqual(['m-1'])
+    expect(repo.calls.markFailed).toEqual(['m-3'])
+    expect(repo.calls.rebased).toHaveLength(1)
+  })
+
+  it('rebase inside a batch keeps the ORIGINAL object payload (not the stringified wire copy)', async () => {
+    const payload = { id: 'obj-1', title: 'Test', tags: ['a', 'b'] }
+    const repo = makeRepo([makeMutation({ operation: 'update', payload })])
+    const pushFn = mockBatchPush([{
+      kind: 'conflict',
+      reason: 'revision_conflict',
+      current: { revision: 2, deleted: false, deleted_at: null, payload: {}, object_id: 'obj-1', object_type: 'link' },
+    }])
+    await syncNow({ pushFn, repo })
+    expect(repo.calls.rebased[0].rebased.payload).toEqual(payload)
   })
 
   // --- Chunk 4 rebase integration tests ---
@@ -464,7 +587,7 @@ describe('syncNow', () => {
   it('conflict rebase creates a new pending mutation with unique mutation_id', async () => {
     const m = makeMutation({ mutation_id: 'orig-123' })
     const repo = makeRepo([m])
-    const pushFn = mockPush([{
+    const pushFn = mockBatchPush([{
       kind: 'conflict',
       reason: 'revision_conflict',
       current: { revision: 4, deleted: false, deleted_at: null, payload: {}, object_id: 'obj-1', object_type: 'link' },
@@ -478,7 +601,7 @@ describe('syncNow', () => {
   it('conflict rebase: CREATE converts to UPDATE', async () => {
     const m = makeMutation({ operation: 'create', payload: { id: 'obj-1', title: 'New' } })
     const repo = makeRepo([m])
-    const pushFn = mockPush([{
+    const pushFn = mockBatchPush([{
       kind: 'conflict',
       reason: 'revision_conflict',
       current: { revision: 2, deleted: false, deleted_at: null, payload: {}, object_id: 'obj-1', object_type: 'link' },
@@ -490,7 +613,7 @@ describe('syncNow', () => {
   it('conflict rebase: UPDATE stays UPDATE', async () => {
     const m = makeMutation({ operation: 'update', base_revision: 1, payload: { id: 'obj-1', title: 'V2' } })
     const repo = makeRepo([m])
-    const pushFn = mockPush([{
+    const pushFn = mockBatchPush([{
       kind: 'conflict',
       reason: 'revision_conflict',
       current: { revision: 5, deleted: false, deleted_at: null, payload: {}, object_id: 'obj-1', object_type: 'link' },
@@ -503,7 +626,7 @@ describe('syncNow', () => {
   it('conflict rebase: DELETE against live object stays DELETE', async () => {
     const m = makeMutation({ operation: 'delete', payload: { id: 'obj-1' } })
     const repo = makeRepo([m])
-    const pushFn = mockPush([{
+    const pushFn = mockBatchPush([{
       kind: 'conflict',
       reason: 'revision_conflict',
       current: { revision: 8, deleted: false, deleted_at: null, payload: {}, object_id: 'obj-1', object_type: 'link' },
@@ -516,7 +639,7 @@ describe('syncNow', () => {
   it('conflict rebase: DELETE against already-deleted object marks succeeded', async () => {
     const m = makeMutation({ operation: 'delete', payload: { id: 'obj-1' } })
     const repo = makeRepo([m])
-    const pushFn = mockPush([{
+    const pushFn = mockBatchPush([{
       kind: 'conflict',
       reason: 'revision_conflict',
       current: { revision: 6, deleted: true, deleted_at: 999, payload: null, object_id: 'obj-1', object_type: 'link' },
@@ -530,7 +653,7 @@ describe('syncNow', () => {
     const m = makeMutation({ mutation_id: 'first' })
     const repo = makeRepo([m])
     // First call: conflict -> creates rebased mutation
-    const pushFn = mockPush([{
+    const pushFn = mockBatchPush([{
       kind: 'conflict',
       reason: 'revision_conflict',
       current: { revision: 1, deleted: false, deleted_at: null, payload: {}, object_id: 'obj-1', object_type: 'link' },
@@ -546,7 +669,7 @@ describe('syncNow', () => {
     const m1 = makeMutation({ mutation_id: 'm-1', object_id: 'obj-1' })
     const m2 = makeMutation({ mutation_id: 'm-2', object_id: 'obj-2', operation: 'update', base_revision: 1 })
     const repo = makeRepo([m1, m2])
-    const pushFn = mockPush([
+    const pushFn = mockBatchPush([
       { kind: 'conflict', reason: 'revision_conflict', current: { revision: 3, deleted: false, deleted_at: null, payload: {}, object_id: 'obj-1', object_type: 'link' } },
       { kind: 'conflict', reason: 'revision_conflict', current: { revision: 7, deleted: false, deleted_at: null, payload: {}, object_id: 'obj-2', object_type: 'link' } },
     ])
@@ -561,7 +684,7 @@ describe('syncNow', () => {
     const payload = { id: 'obj-1', title: 'Test', tags: ['a', 'b'] }
     const m = makeMutation({ operation: 'update', payload })
     const repo = makeRepo([m])
-    const pushFn = mockPush([{
+    const pushFn = mockBatchPush([{
       kind: 'conflict',
       reason: 'revision_conflict',
       current: { revision: 2, deleted: false, deleted_at: null, payload: {}, object_id: 'obj-1', object_type: 'link' },
@@ -574,7 +697,7 @@ describe('syncNow', () => {
     const payload = '{"id":"obj-1","title":"Test"}'
     const m = makeMutation({ operation: 'update', payload })
     const repo = makeRepo([m])
-    const pushFn = mockPush([{
+    const pushFn = mockBatchPush([{
       kind: 'conflict',
       reason: 'revision_conflict',
       current: { revision: 3, deleted: false, deleted_at: null, payload: {}, object_id: 'obj-1', object_type: 'link' },
@@ -586,7 +709,7 @@ describe('syncNow', () => {
   it('unavailable/network failure creates no rebased mutation', async () => {
     const m = makeMutation()
     const repo = makeRepo([m])
-    const pushFn = mockPush([new Error('network error')])
+    const pushFn = mockBatchPush([new Error('network error')])
     const result = await syncNow({ pushFn, repo })
     expect(result.unavailable).toBe(1)
     expect(repo.calls.rebased).toEqual([])
@@ -595,7 +718,7 @@ describe('syncNow', () => {
   it('rejected mutation creates no rebased mutation', async () => {
     const m = makeMutation()
     const repo = makeRepo([m])
-    const pushFn = mockPush([{ kind: 'rejected', status: 400, reason: 'malformed' }])
+    const pushFn = mockBatchPush([{ kind: 'rejected', status: 400, reason: 'malformed' }])
     const result = await syncNow({ pushFn, repo })
     expect(result.failed).toBe(1)
     expect(repo.calls.rebased).toEqual([])
@@ -604,7 +727,7 @@ describe('syncNow', () => {
   it('no local revision increment occurs during rebase', async () => {
     const m = makeMutation({ operation: 'update', base_revision: 0 })
     const repo = makeRepo([m])
-    const pushFn = mockPush([{
+    const pushFn = mockBatchPush([{
       kind: 'conflict',
       reason: 'revision_conflict',
       current: { revision: 5, deleted: false, deleted_at: null, payload: {}, object_id: 'obj-1', object_type: 'link' },
@@ -618,7 +741,7 @@ describe('syncNow', () => {
     const m = makeMutation({ mutation_id: 'first' })
     const repo = makeRepo([m])
     // First syncNow: conflict -> rebase
-    const pushFn1 = mockPush([{
+    const pushFn1 = mockBatchPush([{
       kind: 'conflict',
       reason: 'revision_conflict',
       current: { revision: 1, deleted: false, deleted_at: null, payload: {}, object_id: 'obj-1', object_type: 'link' },
@@ -627,7 +750,7 @@ describe('syncNow', () => {
     expect(repo.pending.filter(x => x.status === 'pending').length).toBe(1)
 
     // Second syncNow: the rebased mutation is now pending
-    const pushFn2 = mockPush([{ kind: 'accepted', resultRevision: 2 }])
+    const pushFn2 = mockBatchPush([{ kind: 'accepted', resultRevision: 2 }])
     const result2 = await syncNow({ pushFn: pushFn2, repo })
     expect(result2.succeeded).toBe(1)
     expect(pushFn2).toHaveBeenCalledOnce()
@@ -645,7 +768,7 @@ describe('syncNow', () => {
         { object_id: 'remote-1', object_type: 'link', revision: 3, deleted: false, deleted_at: null, payload: { id: 'remote-1', title: 'from server' }, created_at: 1, updated_at: 2 },
       ],
     })
-    const pushFn = mockPush([{ kind: 'accepted', resultRevision: 2 }])
+    const pushFn = mockBatchPush([{ kind: 'accepted', resultRevision: 2 }])
     const result = await syncNow({ pullFn, pushFn, repo })
 
     // pull applied the server object
@@ -661,7 +784,7 @@ describe('syncNow', () => {
   it('pull is unavailable: no push occurs and unavailable is reported (no false success)', async () => {
     const repo = makeRepo([makeMutation()])
     const pullFn = vi.fn().mockResolvedValue({ kind: 'unavailable', status: 503, reason: 'unavailable' })
-    const pushFn = mockPush([{ kind: 'accepted', resultRevision: 1 }])
+    const pushFn = mockBatchPush([{ kind: 'accepted', resultRevision: 1 }])
     const result = await syncNow({ pullFn, pushFn, repo })
     expect(result.unavailable).toBe(1)
     expect(result.succeeded).toBe(0)
@@ -671,7 +794,7 @@ describe('syncNow', () => {
   it('pull is rejected (401): reported as failed, no push', async () => {
     const repo = makeRepo([makeMutation()])
     const pullFn = vi.fn().mockResolvedValue({ kind: 'rejected', status: 401, reason: 'unauthenticated' })
-    const pushFn = mockPush([{ kind: 'accepted', resultRevision: 1 }])
+    const pushFn = mockBatchPush([{ kind: 'accepted', resultRevision: 1 }])
     const result = await syncNow({ pullFn, pushFn, repo })
     expect(result.failed).toBe(1)
     expect(pushFn).not.toHaveBeenCalled()
@@ -680,7 +803,7 @@ describe('syncNow', () => {
   it('pull network failure (fetch throws): unavailable, no push', async () => {
     const repo = makeRepo([makeMutation()])
     const pullFn = vi.fn().mockRejectedValue(new Error('offline'))
-    const pushFn = mockPush([{ kind: 'accepted', resultRevision: 1 }])
+    const pushFn = mockBatchPush([{ kind: 'accepted', resultRevision: 1 }])
     const result = await syncNow({ pullFn, pushFn, repo })
     expect(result.unavailable).toBe(1)
     expect(pushFn).not.toHaveBeenCalled()

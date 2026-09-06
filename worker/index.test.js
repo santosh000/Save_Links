@@ -77,6 +77,23 @@ describe('worker routing', () => {
     expect(env.ASSETS.fetch).not.toHaveBeenCalled()
   })
 
+  it('routes POST /api/sync/mutations to the Worker and enforces POST (Opt #3)', async () => {
+    const env = makeEnv({ ...WITH_DB, APPROVED_ORIGINS: 'http://localhost:8787' })
+    // POST with a valid origin but no session cookie -> 401 proves it reached the batch handler
+    const post = await worker.fetch(new Request('http://localhost:8787/api/sync/mutations', {
+      method: 'POST',
+      headers: { Origin: 'http://localhost:8787' },
+    }), env)
+    expect(post.status).toBe(401)
+    expect(env.ASSETS.fetch).not.toHaveBeenCalled()
+
+    // GET on the batch route is method-disallowed (405 + Allow: POST), not 404
+    const get = await worker.fetch(new Request('http://localhost:8787/api/sync/mutations'), env)
+    expect(get.status).toBe(405)
+    expect(get.headers.get('allow')).toBe('POST')
+    expect(env.ASSETS.fetch).not.toHaveBeenCalled()
+  })
+
   it('keeps everything else on the assets boundary: / and real files', async () => {
     const env = makeEnv()
     for (const path of ['/', '/sw.js', '/manifest.webmanifest', '/assets/app-abc123.js', '/some/spa/route']) {

@@ -25,7 +25,7 @@
 // /api/session/refresh, session validation on app requests beyond these
 // handlers, the HTTP AuthAdapter bridge, any frontend coupling, cloud sync.
 import { handleOAuthLogin, handleOAuthCallback, handleAuthMe, handleAuthLogout } from './auth.js'
-import { handleApiMe, handleApiSessionRefresh, handleApiSyncMutation, handleApiSyncObjects } from './api.js'
+import { handleApiMe, handleApiSessionRefresh, handleApiSyncMutation, handleApiSyncMutations, handleApiSyncObjects } from './api.js'
 
 const AUTH_ROUTES = new Map([
   ['/auth/github/login', { allow: ['GET'], handler: handleOAuthLogin }],
@@ -38,6 +38,7 @@ const API_ROUTES = new Map([
   ['/api/me', { allow: ['GET'], handler: handleApiMe }],
   ['/api/session/refresh', { allow: ['POST'], handler: handleApiSessionRefresh }],
   ['/api/sync/mutation', { allow: ['POST'], handler: handleApiSyncMutation }],
+  ['/api/sync/mutations', { allow: ['POST'], handler: handleApiSyncMutations }],
   ['/api/sync/objects', { allow: ['GET'], handler: handleApiSyncObjects }],
 ])
 

@@ -1,7 +1,7 @@
 // Tests for the cloud sync client transport (src/sync/protocol.js).
 // Mocks fetch; never hits a real network or IndexedDB.
 import { describe, it, expect, vi } from 'vitest'
-import { pushMutation, pullObjects } from './protocol.js'
+import { pushMutation, pushMutations, pullObjects } from './protocol.js'
 
 const BASE_MUTATION = {
   mutation_id: 'test-mutation-001',
@@ -134,6 +134,107 @@ describe('pushMutation — client transport', () => {
     await pushMutation(folderMutation, { fetch: fetchFn })
     const sent = JSON.parse(fetchFn.mock.calls[0][1].body)
     expect(sent.object_type).toBe('folder')
+  })
+})
+
+describe('pushMutations — batched client transport', () => {
+  const M1 = { ...BASE_MUTATION, mutation_id: 'batch-1', object_id: 'obj-1' }
+  const M2 = { ...BASE_MUTATION, mutation_id: 'batch-2', object_id: 'obj-2', operation: 'update', base_revision: 1 }
+  const M3 = { ...BASE_MUTATION, mutation_id: 'batch-3', object_id: 'obj-3', operation: 'delete', base_revision: 2 }
+
+  it('sends one request to /api/sync/mutations with a mutations array, no account_id', async () => {
+    const fetchFn = mockFetch(200, { accepted: true, results: [
+      { mutation_id: 'batch-1', accepted: true, result_revision: 1 },
+      { mutation_id: 'batch-2', accepted: true, result_revision: 2 },
+    ] })
+    await pushMutations([M1, M2], { fetch: fetchFn })
+
+    expect(fetchFn).toHaveBeenCalledOnce()
+    const [url, opts] = fetchFn.mock.calls[0]
+    expect(url).toBe('/api/sync/mutations')
+    expect(opts.method).toBe('POST')
+    expect(opts.headers['Content-Type']).toBe('application/json')
+
+    const sent = JSON.parse(opts.body)
+    expect(sent.mutations).toEqual([
+      { mutation_id: 'batch-1', object_type: 'link', object_id: 'obj-1', operation: 'create', base_revision: 0, payload: BASE_MUTATION.payload },
+      { mutation_id: 'batch-2', object_type: 'link', object_id: 'obj-2', operation: 'update', base_revision: 1, payload: BASE_MUTATION.payload },
+    ])
+    expect(sent.mutations[0]).not.toHaveProperty('account_id')
+  })
+
+  it('uses apiOrigin prefix when provided', async () => {
+    const fetchFn = mockFetch(200, { accepted: true, results: [] })
+    await pushMutations([M1], { fetch: fetchFn, apiOrigin: 'https://api.example.com' })
+    expect(fetchFn.mock.calls[0][0]).toBe('https://api.example.com/api/sync/mutations')
+  })
+
+  it('maps per-entry accepted results back in input order with mutation_id', async () => {
+    const fetchFn = mockFetch(200, { accepted: true, results: [
+      { mutation_id: 'batch-2', accepted: true, result_revision: 2 },
+      { mutation_id: 'batch-1', accepted: true, result_revision: 1 },
+    ] })
+    // Server response is REORDERED — results must still pair by mutation_id.
+    const results = await pushMutations([M1, M2], { fetch: fetchFn })
+    expect(results).toEqual([
+      { kind: 'accepted', mutationId: 'batch-1', resultRevision: 1 },
+      { kind: 'accepted', mutationId: 'batch-2', resultRevision: 2 },
+    ])
+  })
+
+  it('maps per-entry conflicts with the server current object', async () => {
+    const current = { object_id: 'obj-2', object_type: 'link', revision: 5, deleted: false, deleted_at: null, payload: {} }
+    const fetchFn = mockFetch(200, { accepted: true, results: [
+      { mutation_id: 'batch-1', accepted: true, result_revision: 1 },
+      { mutation_id: 'batch-2', accepted: false, reason: 'revision_conflict', current },
+    ] })
+    const results = await pushMutations([M1, M2], { fetch: fetchFn })
+    expect(results[0]).toEqual({ kind: 'accepted', mutationId: 'batch-1', resultRevision: 1 })
+    expect(results[1]).toEqual({ kind: 'conflict', mutationId: 'batch-2', reason: 'revision_conflict', current })
+  })
+
+  it('maps a per-entry server error (server_error) to unavailable/retryable', async () => {
+    const fetchFn = mockFetch(200, { accepted: true, results: [
+      { mutation_id: 'batch-1', accepted: false, reason: 'server_error' },
+    ] })
+    const results = await pushMutations([M1], { fetch: fetchFn })
+    expect(results).toEqual([
+      { kind: 'unavailable', mutationId: 'batch-1', status: 500, reason: 'server_error' },
+    ])
+  })
+
+  it('a missing/unknown result entry degrades to unavailable (retryable), not a mis-pairing', async () => {
+    const fetchFn = mockFetch(200, { accepted: true, results: [
+      { mutation_id: 'batch-1', accepted: true, result_revision: 1 },
+      // batch-2's result is omitted entirely
+    ] })
+    const results = await pushMutations([M1, M2], { fetch: fetchFn })
+    expect(results[0].kind).toBe('accepted')
+    expect(results[1]).toEqual({ kind: 'unavailable', mutationId: 'batch-2', status: 500, reason: 'server_error' })
+  })
+
+  it('whole-request client error (401) -> one rejected result per member', async () => {
+    const fetchFn = mockFetch(401, { error: 'unauthenticated' })
+    const results = await pushMutations([M1, M2, M3], { fetch: fetchFn })
+    expect(results).toEqual([
+      { kind: 'rejected', mutationId: 'batch-1', status: 401, reason: 'unauthenticated' },
+      { kind: 'rejected', mutationId: 'batch-2', status: 401, reason: 'unauthenticated' },
+      { kind: 'rejected', mutationId: 'batch-3', status: 401, reason: 'unauthenticated' },
+    ])
+  })
+
+  it('whole-request availability error (503) -> one unavailable result per member', async () => {
+    const fetchFn = mockFetch(503, { error: 'unavailable' })
+    const results = await pushMutations([M1, M2], { fetch: fetchFn })
+    expect(results).toEqual([
+      { kind: 'unavailable', mutationId: 'batch-1', status: 503, reason: 'unavailable' },
+      { kind: 'unavailable', mutationId: 'batch-2', status: 503, reason: 'unavailable' },
+    ])
+  })
+
+  it('network failure (fetch throws) propagates the error', async () => {
+    const fetchFn = vi.fn().mockRejectedValue(new Error('Network error'))
+    await expect(pushMutations([M1], { fetch: fetchFn })).rejects.toThrow('Network error')
   })
 })
 

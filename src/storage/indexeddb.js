@@ -100,11 +100,46 @@ function getAllRecords(db, storeName) {
   })
 }
 
-function getRecord(db, storeName, key) {
+/**
+ * Read-modify-write ONE record inside a SINGLE readwrite transaction. The read
+ * and the write share the transaction's snapshot and serialization, so a write
+ * can never build on a stale read and the operation costs ONE transaction
+ * instead of two for the previous get-in-a-readonly-tx + put-in-a-readwrite-tx
+ * pattern. Same shape as rebasePendingMutation's atomic rebase.
+ *
+ * @param {IDBDatabase} db
+ * @param {string} storeName
+ * @param {string} key
+ * @param {(record: Object) => Object | undefined} transform
+ *   Return the record to persist; return undefined to leave the record untouched.
+ * @param {Object} [opts]
+ * @param {boolean} [opts.required] — when true, a missing record aborts the
+ *   transaction and rejects with opts.missingMessage
+ * @param {string} [opts.missingMessage]
+ * @returns {Promise<void>}
+ */
+function updateRecordInOneTx(db, storeName, key, transform, { required = false, missingMessage = 'Record not found' } = {}) {
   return new Promise((resolve, reject) => {
-    const req = db.transaction(storeName, 'readonly').objectStore(storeName).get(key)
-    req.onsuccess = () => resolve(req.result)
-    req.onerror = () => reject(req.error)
+    const tx = db.transaction(storeName, 'readwrite')
+    const store = tx.objectStore(storeName)
+    const getReq = store.get(key)
+    getReq.onsuccess = () => {
+      const record = getReq.result
+      if (!record) {
+        if (required) {
+          // Settle FIRST so the specific error is what the caller sees;
+          // the abort below only guarantees nothing can be written.
+          reject(new Error(missingMessage))
+          tx.abort()
+        }
+        return
+      }
+      const next = transform(record)
+      if (next !== undefined) store.put(next)
+    }
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error || new Error('transaction aborted'))
   })
 }
 
@@ -475,20 +510,28 @@ export function createIndexedDBRepository({ dbName = defaultDBName() } = {}) {
     return records.filter((m) => m.status !== 'succeeded' && m.status !== 'failed')
   }
 
-  /** Mark a pending mutation as succeeded */
+  /** Mark a pending mutation as succeeded (single transaction) */
   async function markMutationSucceeded(mutationId) {
     const db = await open()
-    const record = await getRecord(db, STORES.PENDING_MUTATIONS, mutationId)
-    if (!record) throw new Error('Pending mutation not found')
-    await putRecord(db, STORES.PENDING_MUTATIONS, { ...record, status: 'succeeded' })
+    await updateRecordInOneTx(
+      db,
+      STORES.PENDING_MUTATIONS,
+      mutationId,
+      (record) => ({ ...record, status: 'succeeded' }),
+      { required: true, missingMessage: 'Pending mutation not found' },
+    )
   }
 
-  /** Mark a pending mutation as failed */
+  /** Mark a pending mutation as failed (single transaction) */
   async function markMutationFailed(mutationId) {
     const db = await open()
-    const record = await getRecord(db, STORES.PENDING_MUTATIONS, mutationId)
-    if (!record) throw new Error('Pending mutation not found')
-    await putRecord(db, STORES.PENDING_MUTATIONS, { ...record, status: 'failed' })
+    await updateRecordInOneTx(
+      db,
+      STORES.PENDING_MUTATIONS,
+      mutationId,
+      (record) => ({ ...record, status: 'failed' }),
+      { required: true, missingMessage: 'Pending mutation not found' },
+    )
   }
 
   /**
@@ -503,10 +546,16 @@ export function createIndexedDBRepository({ dbName = defaultDBName() } = {}) {
    */
   async function markMutationPushed(mutationId) {
     const db = await open()
-    const record = await getRecord(db, STORES.PENDING_MUTATIONS, mutationId)
-    if (!record) throw new Error('Pending mutation not found')
-    if (record.pushed === true) return
-    await putRecord(db, STORES.PENDING_MUTATIONS, { ...record, pushed: true })
+    // Single transaction: the marker is persisted atomically before the
+    // coordinator hands the mutation to the network. An already-pushed record
+    // is left untouched (transform returns undefined; the tx commits empty).
+    await updateRecordInOneTx(
+      db,
+      STORES.PENDING_MUTATIONS,
+      mutationId,
+      (record) => (record.pushed === true ? undefined : { ...record, pushed: true }),
+      { required: true, missingMessage: 'Pending mutation not found' },
+    )
   }
 
   /**
@@ -545,15 +594,14 @@ export function createIndexedDBRepository({ dbName = defaultDBName() } = {}) {
     return rebased.mutation_id
   }
 
-  /** Update the server-assigned revision on a local link or folder record. */
+  /** Update the server-assigned revision on a local link or folder record (single transaction). */
   async function updateObjectRevision(storeName, objectId, revision) {
     if (storeName !== STORES.LINKS && storeName !== STORES.FOLDERS) {
       throw new Error('Invalid store: must be links or folders')
     }
     const db = await open()
-    const record = await getRecord(db, storeName, objectId)
-    if (!record) return
-    await putRecord(db, storeName, { ...record, revision })
+    // Missing record = nothing to update: the tx commits without writes.
+    await updateRecordInOneTx(db, storeName, objectId, (record) => ({ ...record, revision }))
   }
 
   return {

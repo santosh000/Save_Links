@@ -29,6 +29,7 @@ import {
   generateSessionToken,
   hashSessionToken,
   applyObjectMutation,
+  applyObjectMutationsBatch,
   getObject,
   getObjectsForAccount,
   purgeExpiredTombstones,
@@ -457,6 +458,193 @@ describe('cloud sync objects (Chunk 2)', () => {
       const res = await applyObjectMutation(db, { accountId, mutationId, objectType: 'link', objectId, operation: 'update', baseRevision: 1, payload: '{"v":3}', now: NOW })
       expect(res).toEqual({ kind: 'replay', resultRevision: 2 })
       expect((await getObject(db, { accountId, objectType: 'link', objectId })).revision).toBe(2)
+    })
+  })
+
+  describe('applyObjectMutationsBatch (lean batch, Opt #3)', () => {
+    /** Entry builder: defaults to create, callers override the needed fields. */
+    function m(over = {}) {
+      return {
+        mutationId: crypto.randomUUID(), objectType: 'link', objectId: crypto.randomUUID(),
+        operation: 'create', baseRevision: 0, payload: '{}', ...over,
+      }
+    }
+
+    describe('determinism (computed result_revision === ledger value)', () => {
+      it('create: computed 1 matches ledger, object at rev 1', async () => {
+        const accountId = await freshAccount()
+        const entry = m()
+        const [r] = await applyObjectMutationsBatch(db, { accountId, mutations: [entry], now: NOW })
+        expect(r.result.kind).toBe('applied')
+        const ledger = await db.prepare('SELECT result_revision FROM sync_mutations WHERE account_id = ? AND mutation_id = ?').bind(accountId, entry.mutationId).first()
+        expect(r.result.resultRevision).toBe(1)
+        expect(ledger.result_revision).toBe(1)
+        expect((await getObject(db, { accountId, objectType: 'link', objectId: entry.objectId })).revision).toBe(1)
+      })
+
+      it('update: computed rev+1 matches ledger', async () => {
+        const accountId = await freshAccount()
+        const { mutationId: a, objectId } = m()
+        await applyObjectMutation(db, { accountId, mutationId: a, objectType: 'link', objectId, operation: 'create', baseRevision: 0, payload: '{}', now: NOW })
+        const update = m({ mutationId: crypto.randomUUID(), objectId, operation: 'update', baseRevision: 1, payload: '{"v":2}' })
+        const [r] = await applyObjectMutationsBatch(db, { accountId, mutations: [update], now: NOW })
+        expect(r.result.kind).toBe('applied')
+        const ledger = await db.prepare('SELECT result_revision FROM sync_mutations WHERE account_id = ? AND mutation_id = ?').bind(accountId, update.mutationId).first()
+        expect(r.result.resultRevision).toBe(2)
+        expect(ledger.result_revision).toBe(2)
+      })
+
+      it('delete: computed rev+1 matches ledger', async () => {
+        const accountId = await freshAccount()
+        const { mutationId: a, objectId } = m()
+        await applyObjectMutation(db, { accountId, mutationId: a, objectType: 'link', objectId, operation: 'create', baseRevision: 0, payload: '{}', now: NOW })
+        const del = m({ mutationId: crypto.randomUUID(), objectId, operation: 'delete', baseRevision: 1, payload: '{}' })
+        const [r] = await applyObjectMutationsBatch(db, { accountId, mutations: [del], now: NOW })
+        expect(r.result.kind).toBe('applied')
+        const ledger = await db.prepare('SELECT result_revision FROM sync_mutations WHERE account_id = ? AND mutation_id = ?').bind(accountId, del.mutationId).first()
+        expect(r.result.resultRevision).toBe(2)
+        expect(ledger.result_revision).toBe(2)
+      })
+    })
+
+    describe('replay (re-sent pushed mutation after lost response)', () => {
+      it('already-committed mutation_id -> replay with ORIGINAL result, object untouched', async () => {
+        const accountId = await freshAccount()
+        const entry = m({ payload: '{"title":"A"}' })
+        const first = await applyObjectMutation(db, { accountId, mutationId: entry.mutationId, objectType: 'link', objectId: entry.objectId, operation: 'create', baseRevision: 0, payload: '{"title":"A"}', now: NOW })
+        expect(first.kind).toBe('applied')
+        // Re-send the same mutation via the batch path with a DIFFERENT payload
+        // (as a real lost-response retry would) -> must NOT re-apply.
+        const [r] = await applyObjectMutationsBatch(db, { accountId, mutations: [{ ...entry, payload: '{"title":"B"}' }], now: NOW })
+        expect(r.result).toEqual({ kind: 'replay', resultRevision: 1 })
+        const row = await getObject(db, { accountId, objectType: 'link', objectId: entry.objectId })
+        expect(row.revision).toBe(1)
+        expect(row.payload).toBe('{"title":"A"}')
+      })
+
+      it('create replay after tombstone purge does NOT resurrect the object (Finding #1 regression)', async () => {
+        const accountId = await freshAccount()
+        const createEntry = m({ payload: '{"title":"original"}' })
+        const objectId = createEntry.objectId
+
+        // 1. Apply the create via the batch path, then verify it is live at revision 1
+        //    and that the ledger recorded result_revision 1.
+        const [createRes] = await applyObjectMutationsBatch(db, { accountId, mutations: [createEntry], now: NOW })
+        expect(createRes.result).toEqual({ kind: 'applied', resultRevision: 1 })
+        const created = await getObject(db, { accountId, objectType: 'link', objectId })
+        expect(created).toMatchObject({ revision: 1, deleted: 0 })
+
+        // 2. Tombstone the object with a delete mutation (rev 1 -> 2), then hard-delete
+        //    the row the way purgeExpiredTombstones does (DELETE the tombstone) — but
+        //    scoped to this account+object: purge itself is account-global and would
+        //    sweep other tests' tombstones from this shared in-memory DB.
+        const [deleteRes] = await applyObjectMutationsBatch(db, {
+          accountId,
+          mutations: [{ ...m(), objectId, operation: 'delete', baseRevision: 1, payload: '{}' }],
+          now: NOW,
+        })
+        expect(deleteRes.result).toEqual({ kind: 'applied', resultRevision: 2 })
+        const purgeRes = await db.prepare(
+          'DELETE FROM sync_objects WHERE account_id = ? AND object_id = ? AND deleted = 1'
+        ).bind(accountId, objectId).run()
+        expect(purgeRes.meta.changes).toBe(1)
+        expect(await getObject(db, { accountId, objectType: 'link', objectId })).toBeNull()
+
+        // 3. Replay the SAME create mutation (as a lost-response retry would). The object
+        //    row is gone, but the ledger says the mutation was already processed: it must
+        //    replay idempotently and must NOT re-insert a live revision-1 object.
+        const [replayRes] = await applyObjectMutationsBatch(db, { accountId, mutations: [createEntry], now: NOW })
+        expect(replayRes.result).toEqual({ kind: 'replay', resultRevision: 1 })
+        expect(await getObject(db, { accountId, objectType: 'link', objectId })).toBeNull()
+        const objRows = await db.prepare('SELECT 1 FROM sync_objects WHERE account_id = ? AND object_id = ?').bind(accountId, objectId).all()
+        expect(objRows.results.length).toBe(0)
+        const ledger = await db.prepare('SELECT result_revision FROM sync_mutations WHERE account_id = ? AND mutation_id = ?').bind(accountId, createEntry.mutationId).first()
+        expect(ledger.result_revision).toBe(1)
+      })
+
+      it('ONE replayed entry among several applied entries stays isolated (siblings applied)', async () => {
+        const accountId = await freshAccount()
+        const committed = m()
+        await applyObjectMutation(db, { accountId, mutationId: committed.mutationId, objectType: 'link', objectId: committed.objectId, operation: 'create', baseRevision: 0, payload: '{}', now: NOW })
+        const fresh = m()
+        const results = await applyObjectMutationsBatch(db, {
+          accountId,
+          mutations: [{ ...committed, operation: 'update', baseRevision: 1, payload: '{"dup":1}' }, fresh],
+          now: NOW,
+        })
+        expect(results.length).toBe(2)
+        expect(results[0].result).toEqual({ kind: 'replay', resultRevision: 1 })
+        expect(results[1].result.kind).toBe('applied')
+      })
+    })
+
+    describe('per-entry isolation (one bad entry never fails its siblings)', () => {
+      it('a store-validation failure yields error without applying siblings', async () => {
+        const accountId = await freshAccount()
+        const bad = m({ objectType: 'nope' })           // fails requireObjectType
+        const good = m()
+        const results = await applyObjectMutationsBatch(db, { accountId, mutations: [bad, good], now: NOW })
+        expect(results.length).toBe(2)
+        expect(results[0].result).toEqual({ kind: 'error' })
+        expect(results[1].result.kind).toBe('applied')
+      })
+
+      it('still applies the siblings that came BEFORE and AFTER the bad entry (preserves order)', async () => {
+        const accountId = await freshAccount()
+        const [first, bad, last] = [m(), m({ objectId: '' }), m()]
+        const results = await applyObjectMutationsBatch(db, { accountId, mutations: [first, bad, last], now: NOW })
+        expect(results.map((r) => r.result.kind)).toEqual(['applied', 'error', 'applied'])
+      })
+    })
+
+    describe('mixed operations in one batch (order preserved)', () => {
+      it('create -> update -> delete chain applies in order with chained revisions', async () => {
+        const accountId = await freshAccount()
+        const objectId = crypto.randomUUID()
+        const mutations = [
+          m({ mutationId: crypto.randomUUID(), objectId, operation: 'create', baseRevision: 0, payload: '{"v":1}' }),
+          m({ mutationId: crypto.randomUUID(), objectId, operation: 'update', baseRevision: 1, payload: '{"v":2}' }),
+          m({ mutationId: crypto.randomUUID(), objectId, operation: 'delete', baseRevision: 2, payload: '{}' }),
+        ]
+        const results = await applyObjectMutationsBatch(db, { accountId, mutations, now: NOW })
+        expect(results.map((r) => r.result.kind)).toEqual(['applied', 'applied', 'applied'])
+        expect(results.map((r) => r.result.resultRevision)).toEqual([1, 2, 3])
+        const row = await getObject(db, { accountId, objectType: 'link', objectId })
+        expect(row.deleted).toBe(1)
+        expect(row.revision).toBe(3)
+      })
+
+      it('a conflict mid-chain leaves prior entries applied and reports current', async () => {
+        const accountId = await freshAccount()
+        const objectId = crypto.randomUUID()
+        const create = m({ mutationId: crypto.randomUUID(), objectId, operation: 'create', baseRevision: 0, payload: '{}' })
+        const stale = m({ mutationId: crypto.randomUUID(), objectId, operation: 'update', baseRevision: 0, payload: '{"stale":1}' })
+        const results = await applyObjectMutationsBatch(db, { accountId, mutations: [create, stale], now: NOW })
+        expect(results[0].result.kind).toBe('applied')
+        expect(results[1].result.kind).toBe('conflict')
+        expect(results[1].result.current.revision).toBe(1)
+      })
+    })
+
+    describe('scoping & validation', () => {
+      it('a create for an object another account owns is independent (per-account namespace)', async () => {
+        const a1 = await freshAccount()
+        const a2 = await freshAccount()
+        const objectId = crypto.randomUUID()
+        await applyObjectMutation(db, { accountId: a1, mutationId: crypto.randomUUID(), objectType: 'link', objectId, operation: 'create', baseRevision: 0, payload: '{}', now: NOW })
+        const [r] = await applyObjectMutationsBatch(db, { accountId: a2, mutations: [m({ objectId, operation: 'create', baseRevision: 0 })], now: NOW })
+        expect(r.result.kind).toBe('applied') // a2's own namespace is empty
+      })
+
+      it('rejects a non-array mutations argument', async () => {
+        const accountId = await freshAccount()
+        await expect(applyObjectMutationsBatch(db, { accountId, mutations: 'nope', now: NOW })).rejects.toThrow()
+      })
+
+      it('empty array resolves to empty results', async () => {
+        const accountId = await freshAccount()
+        expect(await applyObjectMutationsBatch(db, { accountId, mutations: [], now: NOW })).toEqual([])
+      })
     })
   })
 

@@ -86,6 +86,89 @@ export async function pushMutation(
   }
 }
 
+const SYNC_MUTATIONS_ENDPOINT = '/api/sync/mutations'
+
+/**
+ * Push a batch of pending mutations to the server in ONE request (the push
+ * side of the D1/network round-trip reduction). Each chunk member uses the
+ * exact single-endpoint wire fields; account_id is never sent.
+ *
+ * Also the coordinator's default per-chunk push: a chunk of N pending
+ * mutations becomes 1 HTTP request instead of N.
+ *
+ * Every response maps to a typed result PER MEMBER, aligned with the input
+ * array (each result carries its mutation_id):
+ *   - per-entry accepted  -> { kind: 'accepted', mutationId, resultRevision }
+ *   - per-entry conflict  -> { kind: 'conflict', mutationId, reason, current }
+ *   - per-entry error     -> { kind: 'unavailable', mutationId, status: 500, reason } (retryable)
+ *   - whole-request client error (400/401/403) -> one { kind: 'rejected', mutationId, status, reason } per member
+ *   - whole-request server error (503/500/other) -> one { kind: 'unavailable', mutationId, status, reason } per member
+ *
+ * The coordinator's per-result switch therefore stays unchanged: a whole-
+ * request failure surfaces as the same typed kinds, one per member. Members
+ * are matched to server results by mutation_id so a reordered/omitted server
+ * array degrades gracefully (missing entry -> unavailable -> retried).
+ *
+ * @param {Array<Object>} mutations — pending-mutations records from IndexedDB
+ * @param {Object} [options]
+ * @param {Function} [options.fetch] — injectable fetch (default: globalThis.fetch)
+ * @param {string} [options.apiOrigin] — origin prefix (default: '' = same-origin)
+ * @returns {Promise<Array<Object>>} one typed result per input member, input order
+ */
+export async function pushMutations(
+  mutations,
+  { fetch: fetchFn = globalThis.fetch, apiOrigin = '' } = {},
+) {
+  const url = `${apiOrigin}${SYNC_MUTATIONS_ENDPOINT}`
+  const res = await fetchFn(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      mutations: mutations.map((m) => ({
+        mutation_id: m.mutation_id,
+        object_type: m.object_type,
+        object_id: m.object_id,
+        operation: m.operation,
+        base_revision: m.base_revision,
+        payload: m.payload,
+      })),
+    }),
+  })
+
+  const body = await res.json().catch(() => null)
+
+  // --- success: map the per-entry results back to the input members ---
+  if (res.status === 200 && body?.accepted === true && Array.isArray(body.results)) {
+    const byId = new Map()
+    for (const r of body.results) {
+      if (r && r.mutation_id) byId.set(r.mutation_id, r)
+    }
+    return mutations.map((m) => {
+      const r = byId.get(m.mutation_id)
+      if (r && r.accepted === true && Number.isInteger(r.result_revision)) {
+        return { kind: 'accepted', mutationId: m.mutation_id, resultRevision: r.result_revision }
+      }
+      if (r && r.accepted === false && r.reason === 'revision_conflict') {
+        return { kind: 'conflict', mutationId: m.mutation_id, reason: r.reason, current: r.current }
+      }
+      // Per-entry server error (or an unexpected result shape): retryable.
+      return { kind: 'unavailable', mutationId: m.mutation_id, status: 500, reason: r?.reason ?? 'server_error' }
+    })
+  }
+
+  // --- client error: malformed request or auth failure (mirror pushMutation) ---
+  if (res.status === 400 || res.status === 401 || res.status === 403) {
+    return mutations.map((m) => ({
+      kind: 'rejected', mutationId: m.mutation_id, status: res.status, reason: body?.error ?? 'unknown',
+    }))
+  }
+
+  // --- server unavailable: 503, 500, or network failure (mirror pushMutation) ---
+  return mutations.map((m) => ({
+    kind: 'unavailable', mutationId: m.mutation_id, status: res.status, reason: body?.error ?? 'unknown',
+  }))
+}
+
 const SYNC_OBJECTS_ENDPOINT = '/api/sync/objects'
 
 /**

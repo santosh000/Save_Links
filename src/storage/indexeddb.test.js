@@ -95,6 +95,25 @@ async function closeAllRepos() {
   repos = []
 }
 
+// Count IndexedDB transactions by wrapping fake-indexeddb's transaction()
+// (fake-indexeddb/auto installs IDBDatabase globally; the repository opens
+// connections from the same global factory, so every repo transaction runs
+// through this prototype).
+function installTransactionCounter() {
+  const calls = []
+  const original = IDBDatabase.prototype.transaction
+  IDBDatabase.prototype.transaction = function (...args) {
+    calls.push(args)
+    return original.apply(this, args)
+  }
+  return {
+    calls,
+    restore() {
+      IDBDatabase.prototype.transaction = original
+    },
+  }
+}
+
 describe('indexeddb repository', () => {
   beforeEach(async () => {
     await closeAllRepos()
@@ -818,6 +837,97 @@ it('persists folders and deletes by id', async () => {
       expect(pending.find(m => m.object_id === 'a').operation).toBe('create')
       expect(pending.find(m => m.object_id === 'b').operation).toBe('create')
       expect(pending.every(m => m.status === 'pending')).toBe(true)
+    })
+  })
+
+  describe('single-transaction mutation writes (transaction overhead reduction)', () => {
+    it('markMutationPushed: exactly ONE transaction — first call and repeat (already pushed)', async () => {
+      const repo = makeRepo()
+      const id = await repo.addPendingMutation('create', 'a', 'link', link('a'), 'acc1', 0)
+
+      const counter = installTransactionCounter()
+      try {
+        await repo.markMutationPushed(id)
+        await repo.markMutationPushed(id) // already pushed — no write, still one tx
+        expect(counter.calls).toHaveLength(2)
+      } finally {
+        counter.restore()
+      }
+    })
+
+    it('markMutationSucceeded: exactly ONE transaction', async () => {
+      const repo = makeRepo()
+      const id = await repo.addPendingMutation('create', 'a', 'link', link('a'), 'acc1', 0)
+
+      const counter = installTransactionCounter()
+      try {
+        await repo.markMutationSucceeded(id)
+        expect(counter.calls).toHaveLength(1)
+      } finally {
+        counter.restore()
+      }
+      expect((await repo.getPendingMutations()).length).toBe(0) // no longer pending
+    })
+
+    it('markMutationFailed: exactly ONE transaction', async () => {
+      const repo = makeRepo()
+      const id = await repo.addPendingMutation('create', 'a', 'link', link('a'), 'acc1', 0)
+
+      const counter = installTransactionCounter()
+      try {
+        await repo.markMutationFailed(id)
+        expect(counter.calls).toHaveLength(1)
+      } finally {
+        counter.restore()
+      }
+      expect((await repo.getPendingMutations()).length).toBe(0) // no longer pending
+    })
+
+    it('updateObjectRevision: exactly ONE transaction for existing and missing records', async () => {
+      const repo = makeRepo()
+      await repo.upsertLink(link('a')) // local record exists
+
+      const counter = installTransactionCounter()
+      try {
+        await repo.updateObjectRevision(STORES.LINKS, 'a', 5) // existing → revision written
+        await repo.updateObjectRevision(STORES.LINKS, 'missing', 5) // missing → no-op, still one tx
+        expect(counter.calls).toHaveLength(2)
+      } finally {
+        counter.restore()
+      }
+      expect((await repo.getAllLinks()).find(l => l.id === 'a').revision).toBe(5)
+      // missing record: no-op — nothing was created, nothing thrown
+      expect((await repo.getAllLinks()).find(l => l.id === 'missing')).toBeUndefined()
+    })
+
+    it('markMutationSucceeded / markMutationFailed reject a missing record with the same error as before', async () => {
+      const repo = makeRepo()
+      await expect(repo.markMutationSucceeded('missing-id')).rejects.toThrow('Pending mutation not found')
+      await expect(repo.markMutationFailed('missing-id')).rejects.toThrow('Pending mutation not found')
+    })
+
+    it('rebasePendingMutation: exactly ONE transaction (atomic failed + rebased insert)', async () => {
+      const repo = makeRepo()
+      const id = await repo.addPendingMutation('create', 'a', 'link', link('a'), 'acc1', 0)
+
+      const counter = installTransactionCounter()
+      try {
+        await repo.rebasePendingMutation(id, {
+          mutation_id: 'rebased-1',
+          account_id: 'acc1',
+          object_id: 'a',
+          object_type: 'link',
+          operation: 'update',
+          base_revision: 1,
+          payload: link('a'),
+          createdAt: '2024-01-01T00:00:00.000Z',
+          status: 'pending',
+        })
+        expect(counter.calls).toHaveLength(1)
+      } finally {
+        counter.restore()
+      }
+      expect((await repo.getPendingMutations()).find(m => m.mutation_id === 'rebased-1')).toBeDefined()
     })
   })
 })

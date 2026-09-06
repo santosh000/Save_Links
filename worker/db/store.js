@@ -298,6 +298,67 @@ export async function getObjectsForAccount(db, { accountId }) {
 }
 
 /**
+ * Build the claim + object-write SQL for ONE atomic batch. The claim's
+ * INSERT...SELECT only inserts (changes = 1) when the object is in the exact
+ * pre-mutation state the operation needs; the object write is gated by the
+ * SAME condition, so both commit together or neither does.
+ *
+ * The returned resultRevision is the value the claim records — and, because
+ * the object write commits under the SAME revision gate, the exact revision
+ * the object ends at: 1 for create, base_revision + 1 for update/delete.
+ * The lean batch path returns it without a ledger re-read (proven equal to
+ * the ledger by applyObjectMutationsBatch's determinism test); the single
+ * path re-reads the ledger for the recorded value.
+ */
+function buildMutationSql({ accountId, mutationId, objectType, objectId, operation, baseRevision, payload, now }) {
+  let claimSql, objSql, claimParams, objParams, resultRevision
+
+  if (operation === 'create') {
+    // CREATE: base_revision must be 0 (checked by the caller) and the object
+    // must be ABSENT. result_revision = 1.
+    claimSql = `INSERT OR IGNORE INTO sync_mutations
+      (account_id, mutation_id, object_id, object_type, operation, base_revision, status, result_revision, applied_at)
+      SELECT ?, ?, ?, ?, ?, ?, 'applied', 1, ?
+      WHERE NOT EXISTS (SELECT 1 FROM sync_objects WHERE account_id = ? AND object_id = ?)`
+    claimParams = [accountId, mutationId, objectId, objectType, operation, baseRevision, now, accountId, objectId]
+    objSql = `INSERT INTO sync_objects
+      (account_id, object_id, object_type, revision, deleted, deleted_at, payload, created_at, updated_at)
+      SELECT ?, ?, ?, 1, 0, NULL, ?, ?, ?
+      WHERE NOT EXISTS (SELECT 1 FROM sync_objects WHERE account_id = ? AND object_id = ?)`
+    objParams = [accountId, objectId, objectType, payload, now, now, accountId, objectId]
+    resultRevision = 1
+  } else if (operation === 'update') {
+    // UPDATE: base_revision must equal the current live revision; result = rev+1.
+    claimSql = `INSERT OR IGNORE INTO sync_mutations
+      (account_id, mutation_id, object_id, object_type, operation, base_revision, status, result_revision, applied_at)
+      SELECT account_id, ?, object_id, object_type, ?, ?, 'applied', revision + 1, ?
+      FROM sync_objects
+      WHERE account_id = ? AND object_id = ? AND deleted = 0 AND revision = ?`
+    claimParams = [mutationId, operation, baseRevision, now, accountId, objectId, baseRevision]
+    objSql = `UPDATE sync_objects
+      SET revision = revision + 1, payload = ?, deleted = 0, deleted_at = NULL, updated_at = ?
+      WHERE account_id = ? AND object_id = ? AND deleted = 0 AND revision = ?`
+    objParams = [payload, now, accountId, objectId, baseRevision]
+    resultRevision = baseRevision + 1
+  } else {
+    // DELETE: base_revision must equal the current live revision; result = rev+1.
+    claimSql = `INSERT OR IGNORE INTO sync_mutations
+      (account_id, mutation_id, object_id, object_type, operation, base_revision, status, result_revision, applied_at)
+      SELECT account_id, ?, object_id, object_type, ?, ?, 'applied', revision + 1, ?
+      FROM sync_objects
+      WHERE account_id = ? AND object_id = ? AND deleted = 0 AND revision = ?`
+    claimParams = [mutationId, operation, baseRevision, now, accountId, objectId, baseRevision]
+    objSql = `UPDATE sync_objects
+      SET revision = revision + 1, deleted = 1, deleted_at = ?, updated_at = ?
+      WHERE account_id = ? AND object_id = ? AND deleted = 0 AND revision = ?`
+    objParams = [now, now, accountId, objectId, baseRevision]
+    resultRevision = baseRevision + 1
+  }
+
+  return { claimSql, claimParams, objSql, objParams, resultRevision }
+}
+
+/**
  * Atomically apply one client mutation for an account and record its outcome
  * in the idempotency ledger — or return the original result if this exact
  * mutation_id was already applied.
@@ -354,50 +415,9 @@ export async function applyObjectMutation(db, {
     return { kind: 'replay', resultRevision: prior.result_revision }
   }
 
-  // Build the claim + object-write SQL for ONE atomic batch. The claim's
-  // INSERT...SELECT only inserts (changes = 1) when the object is in the
-  // exact pre-mutation state the operation needs; the object write is gated
-  // by the SAME condition, so both commit together or neither does.
-  let claimSql, objSql, claimParams, objParams
-
-  if (operation === 'create') {
-    // CREATE: base_revision must be 0 (checked above) and the object must be
-    // ABSENT. result_revision = 1.
-    claimSql = `INSERT OR IGNORE INTO sync_mutations
-      (account_id, mutation_id, object_id, object_type, operation, base_revision, status, result_revision, applied_at)
-      SELECT ?, ?, ?, ?, ?, ?, 'applied', 1, ?
-      WHERE NOT EXISTS (SELECT 1 FROM sync_objects WHERE account_id = ? AND object_id = ?)`
-    claimParams = [accountId, mutationId, objectId, objectType, operation, baseRevision, now, accountId, objectId]
-    objSql = `INSERT INTO sync_objects
-      (account_id, object_id, object_type, revision, deleted, deleted_at, payload, created_at, updated_at)
-      SELECT ?, ?, ?, 1, 0, NULL, ?, ?, ?
-      WHERE NOT EXISTS (SELECT 1 FROM sync_objects WHERE account_id = ? AND object_id = ?)`
-    objParams = [accountId, objectId, objectType, payload, now, now, accountId, objectId]
-  } else if (operation === 'update') {
-    // UPDATE: base_revision must equal the current live revision; result = rev+1.
-    claimSql = `INSERT OR IGNORE INTO sync_mutations
-      (account_id, mutation_id, object_id, object_type, operation, base_revision, status, result_revision, applied_at)
-      SELECT account_id, ?, object_id, object_type, ?, ?, 'applied', revision + 1, ?
-      FROM sync_objects
-      WHERE account_id = ? AND object_id = ? AND deleted = 0 AND revision = ?`
-    claimParams = [mutationId, operation, baseRevision, now, accountId, objectId, baseRevision]
-    objSql = `UPDATE sync_objects
-      SET revision = revision + 1, payload = ?, deleted = 0, deleted_at = NULL, updated_at = ?
-      WHERE account_id = ? AND object_id = ? AND deleted = 0 AND revision = ?`
-    objParams = [payload, now, accountId, objectId, baseRevision]
-  } else {
-    // DELETE: base_revision must equal the current live revision; result = rev+1.
-    claimSql = `INSERT OR IGNORE INTO sync_mutations
-      (account_id, mutation_id, object_id, object_type, operation, base_revision, status, result_revision, applied_at)
-      SELECT account_id, ?, object_id, object_type, ?, ?, 'applied', revision + 1, ?
-      FROM sync_objects
-      WHERE account_id = ? AND object_id = ? AND deleted = 0 AND revision = ?`
-    claimParams = [mutationId, operation, baseRevision, now, accountId, objectId, baseRevision]
-    objSql = `UPDATE sync_objects
-      SET revision = revision + 1, deleted = 1, deleted_at = ?, updated_at = ?
-      WHERE account_id = ? AND object_id = ? AND deleted = 0 AND revision = ?`
-    objParams = [now, now, accountId, objectId, baseRevision]
-  }
+  const { claimSql, claimParams, objSql, objParams } = buildMutationSql({
+    accountId, mutationId, objectType, objectId, operation, baseRevision, payload, now,
+  })
 
   const [claimRes, objRes] = await db.batch([
     db.prepare(claimSql).bind(...claimParams),
@@ -424,6 +444,119 @@ export async function applyObjectMutation(db, {
   ).bind(accountId, mutationId).first()
   if (ledger) {
     return { kind: 'replay', resultRevision: ledger.result_revision }
+  }
+  const current = await getObject(db, { accountId, objectType, objectId })
+  return { kind: 'conflict', current }
+}
+
+/**
+ * Apply a batch of client mutations SEQUENTIALLY, each entry in its own atomic
+ * db.batch() (claim + object write) reusing the exact SQL of the single-
+ * mutation path, so the two can never drift. Array order is preserved — the
+ * same order the client drains — so create->update->delete chains on one
+ * object behave exactly as N sequential single pushes.
+ *
+ * Lean path (deliberate, PROVEN by the determinism test below):
+ *   - creates run the ledger replay probe BEFORE the batch write: a create's
+ *     object INSERT is gated only on the object being absent, so it would fire
+ *     even when this mutation was already applied and the row was later purged
+ *     (see applyBatchEntry) — the probe returns the ORIGINAL result_revision
+ *     and leaves the object untouched. For update/delete the probe is
+ *     unnecessary: their claim + object-write revision/object gates cannot
+ *     pass for an already-applied mutation (the revision has moved past the
+ *     gate, or the object row is gone), so the claim INSERT OR IGNORE alone
+ *     detects a committed mutation_id atomically (changes = 0 -> ledger
+ *     re-read -> replay with the ORIGINAL result_revision, object untouched) —
+ *     exactly what a re-sent pushed mutation needs;
+ *   - the post-write ledger re-read is skipped on a won claim: result_revision
+ *     is deterministic (create -> 1, update/delete -> base_revision + 1; the
+ *     claim SELECT records it from the same revision gate the object write
+ *     commits under).
+ *
+ * Per-entry failure isolation: a throwing entry (e.g. a store-level validation
+ * guard) is recorded as { kind: 'error' } and NEVER fails its siblings — the
+ * single endpoint's partial-failure semantics, applied to the batch.
+ *
+ * @param {Object} input
+ * @param {string} input.accountId  FROM THE AUTHENTICATED SESSION ONLY
+ * @param {Array<{mutationId:string, objectType:'link'|'folder', objectId:string, operation:'create'|'update'|'delete', baseRevision:number, payload:string}>} input.mutations
+ * @returns {Promise<Array<{mutationId:string, result:{kind:'applied', resultRevision:number}|{kind:'replay', resultRevision:number}|{kind:'conflict', current:object|null}|{kind:'error'}}>>} one result per entry, input order
+ */
+export async function applyObjectMutationsBatch(db, { accountId, mutations, now = Date.now() } = {}) {
+  requireAccountId(accountId)
+  requireEpochMs(now)
+  if (!Array.isArray(mutations)) throw new TypeError('mutations must be an array')
+
+  const results = []
+  for (const mutation of mutations) {
+    try {
+      const result = await applyBatchEntry(db, { accountId, now, ...mutation })
+      results.push({ mutationId: mutation.mutationId, result })
+    } catch {
+      // Per-entry isolation: this entry failed (validation guard or DB error);
+      // siblings still apply. The caller maps { kind: 'error' } per entry.
+      results.push({ mutationId: mutation.mutationId, result: { kind: 'error' } })
+    }
+  }
+  return results
+}
+
+/** Read the ledger's recorded result_revision for one mutation, or null if never applied. */
+async function ledgerResultRevision(db, accountId, mutationId) {
+  const row = await db.prepare(
+    'SELECT result_revision FROM sync_mutations WHERE account_id = ? AND mutation_id = ?'
+  ).bind(accountId, mutationId).first()
+  return row?.result_revision ?? null
+}
+
+/** One entry of applyObjectMutationsBatch: claim + gated object write in one atomic batch. */
+async function applyBatchEntry(db, { accountId, mutationId, objectType, objectId, operation, baseRevision, payload, now = Date.now() }) {
+  requireNonEmpty(mutationId, 'mutationId')
+  requireObjectType(objectType)
+  requireObjectId(objectId)
+  requireOperation(operation)
+  requireBaseRevision(baseRevision)
+
+  if (operation === 'create' && baseRevision !== 0) {
+    const current = await getObject(db, { accountId, objectType, objectId })
+    return { kind: 'conflict', current }
+  }
+
+  if (operation === 'create') {
+    // A create's object write is an INSERT gated only on the object being
+    // absent, so it would fire even when this mutation was already applied and
+    // the object row is gone (tombstone purged by purgeExpiredTombstones) —
+    // resurrecting the object while the code reports a replay. The ledger must
+    // be consulted BEFORE the batch write: an in-batch NOT EXISTS(ledger) is
+    // unreliable because the claim INSERT (same transaction) would satisfy it.
+    // This mirrors the single-path fast-path replay probe exactly.
+    const priorRevision = await ledgerResultRevision(db, accountId, mutationId)
+    if (priorRevision !== null) {
+      return { kind: 'replay', resultRevision: priorRevision }
+    }
+  }
+
+  const { claimSql, claimParams, objSql, objParams, resultRevision } = buildMutationSql({
+    accountId, mutationId, objectType, objectId, operation, baseRevision, payload, now,
+  })
+  const [claimRes] = await db.batch([
+    db.prepare(claimSql).bind(...claimParams),
+    db.prepare(objSql).bind(...objParams),
+  ])
+  const claimChanges = claimRes?.meta?.changes ?? 0
+
+  if (claimChanges === 1) {
+    // Won the atomic claim AND the object write — committed together.
+    // result_revision is deterministic for every operation type (see above).
+    return { kind: 'applied', resultRevision }
+  }
+
+  // claimChanges === 0: the claim collided — either this mutation_id was
+  // already applied (replay) or the object was not in the expected state
+  // (conflict). Distinguish by checking the ledger.
+  const priorRevision = await ledgerResultRevision(db, accountId, mutationId)
+  if (priorRevision !== null) {
+    return { kind: 'replay', resultRevision: priorRevision }
   }
   const current = await getObject(db, { accountId, objectType, objectId })
   return { kind: 'conflict', current }

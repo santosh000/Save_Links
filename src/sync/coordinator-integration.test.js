@@ -86,7 +86,7 @@ describe('coordinator -> real repository -> notifyDataChanged -> mounted useLink
     // irrelevant here (return unavailable so nothing else churns the store).
     const summary = await syncNow({
       pullFn: async () => ({ kind: 'ok', objects: [SERVER_LINK] }),
-      pushFn: async () => ({ kind: 'unavailable', status: 503, reason: 'x' }),
+      pushFn: async () => [{ kind: 'unavailable', status: 503, reason: 'x' }],
     })
     await settle()
 
@@ -116,7 +116,7 @@ describe('coordinator -> real repository -> notifyDataChanged -> mounted useLink
     }
     const summary = await syncNow({
       pullFn: async () => ({ kind: 'ok', objects: [serverFolder] }),
-      pushFn: async () => ({ kind: 'unavailable', status: 503, reason: 'x' }),
+      pushFn: async () => [{ kind: 'unavailable', status: 503, reason: 'x' }],
     })
     await settle()
 
@@ -150,13 +150,78 @@ describe('outbox coalescing end-to-end (real repository + coordinator, injected 
     await repository.addPendingMutation('update', id, 'link', { id, title: 'v2' }, 'acc-1', 0)
     await repository.addPendingMutation('update', id, 'link', { id, title: 'v3' }, 'acc-1', 0)
 
-    const pushFn = vi.fn(async () => ({ kind: 'accepted', resultRevision: 1 }))
+    const pushFn = vi.fn(async () => [{ kind: 'accepted', resultRevision: 1 }])
     await syncNow({ pushFn, pullFn: async () => ({ kind: 'ok', objects: [] }) })
 
     expect(pushFn).toHaveBeenCalledTimes(1)
-    const sent = JSON.parse(pushFn.mock.calls[0][0].payload)
+    const sent = JSON.parse(pushFn.mock.calls[0][0][0].payload)
     expect(sent.title).toBe('v3')
     expect(await pendingFor(repository, id)).toEqual([])
+  })
+
+  it('a single accepted mutation uses exactly 7 IndexedDB transactions (per-mutation ack path: 3)', async () => {
+    const { syncNow, repository } = await bootAuthenticatedRepo()
+    const id = 'tx-count-accepted'
+
+    await repository.addPendingMutation('create', id, 'link', { id, title: 'v1' }, 'acc-1', 0)
+
+    const calls = []
+    const originalTransaction = IDBDatabase.prototype.transaction
+    IDBDatabase.prototype.transaction = function (...args) {
+      calls.push(args)
+      return originalTransaction.apply(this, args)
+    }
+    let summary
+    try {
+      summary = await syncNow({
+        pushFn: async () => [{ kind: 'accepted', resultRevision: 1 }],
+        pullFn: async () => ({ kind: 'ok', objects: [] }),
+      })
+    } finally {
+      IDBDatabase.prototype.transaction = originalTransaction
+    }
+
+    expect(summary.succeeded).toBe(1)
+    expect(await pendingFor(repository, id)).toEqual([])
+    // 3 pull reads (getAllLinks, getAllFolders, getPendingMutations)
+    // + 1 drain read (getPendingMutations)
+    // + markMutationPushed + updateObjectRevision + markMutationSucceeded (ONE tx each)
+    // = 7. The previous get-then-put mark pattern cost 10 for this same path.
+    expect(calls.length).toBe(7)
+  })
+
+  it('a conflict rebase uses exactly 6 IndexedDB transactions (markPushed + one atomic rebase)', async () => {
+    const { syncNow, repository } = await bootAuthenticatedRepo()
+    const id = 'tx-count-conflict'
+
+    await repository.addPendingMutation('create', id, 'link', { id, title: 'v1' }, 'acc-1', 0)
+
+    const calls = []
+    const originalTransaction = IDBDatabase.prototype.transaction
+    IDBDatabase.prototype.transaction = function (...args) {
+      calls.push(args)
+      return originalTransaction.apply(this, args)
+    }
+    let summary
+    try {
+      summary = await syncNow({
+        pushFn: async () => [{
+          kind: 'conflict',
+          reason: 'stale base',
+          current: { object_id: id, object_type: 'link', revision: 3, deleted: false, deleted_at: null, payload: { id, title: 'server' } },
+        }],
+        pullFn: async () => ({ kind: 'ok', objects: [] }),
+      })
+    } finally {
+      IDBDatabase.prototype.transaction = originalTransaction
+    }
+
+    expect(summary.conflict).toBe(1)
+    const pending = await pendingFor(repository, id)
+    expect(pending.length).toBe(1) // rebased mutation waits for the next cycle
+    // 3 pull reads + 1 drain read + markMutationPushed + rebasePendingMutation = 6
+    // (the previous markMutationPushed get-then-put cost 7 for this path)
+    expect(calls.length).toBe(6)
   })
 
   it('create then delete before any push sends nothing (no obsolete mutation pushed)', async () => {
@@ -166,7 +231,7 @@ describe('outbox coalescing end-to-end (real repository + coordinator, injected 
     await repository.addPendingMutation('create', id, 'link', { id, title: 'v1' }, 'acc-1', 0)
     await repository.addPendingMutation('delete', id, 'link', { id }, 'acc-1', 0)
 
-    const pushFn = vi.fn(async () => ({ kind: 'accepted', resultRevision: 1 }))
+    const pushFn = vi.fn(async () => [{ kind: 'accepted', resultRevision: 1 }])
     const summary = await syncNow({ pushFn, pullFn: async () => ({ kind: 'ok', objects: [] }) })
 
     expect(pushFn).not.toHaveBeenCalled()
@@ -182,13 +247,13 @@ describe('outbox coalescing end-to-end (real repository + coordinator, injected 
     await repository.addPendingMutation('update', id, 'link', { id, title: 'v2' }, 'acc-1', 0)
     expect((await pendingFor(repository, id)).length).toBe(1)
 
-    const pushFn = vi.fn(async () => ({ kind: 'unavailable', status: 503, reason: 'x' }))
+    const pushFn = vi.fn(async () => [{ kind: 'unavailable', status: 503, reason: 'x' }])
     let summary = await syncNow({ pushFn, pullFn: async () => ({ kind: 'ok', objects: [] }) })
     expect(pushFn).toHaveBeenCalledTimes(1)
     expect(summary.unavailable).toBe(1)
     expect((await pendingFor(repository, id)).length).toBe(1) // still pending, retried later
 
-    pushFn.mockImplementation(async () => ({ kind: 'accepted', resultRevision: 1 }))
+    pushFn.mockImplementation(async () => [{ kind: 'accepted', resultRevision: 1 }])
     summary = await syncNow({ pushFn, pullFn: async () => ({ kind: 'ok', objects: [] }) })
     expect(summary.succeeded).toBe(1)
     expect(await pendingFor(repository, id)).toEqual([])
@@ -207,7 +272,7 @@ describe('outbox coalescing end-to-end (real repository + coordinator, injected 
       object_id: id, object_type: 'link', revision: 3, deleted: false, deleted_at: null,
       payload: { id, title: 'server' },
     }
-    const pushFn = vi.fn(async () => ({ kind: 'conflict', reason: 'stale base', current: serverCurrent }))
+    const pushFn = vi.fn(async () => [{ kind: 'conflict', reason: 'stale base', current: serverCurrent }])
     const summary = await syncNow({ pushFn, pullFn: async () => ({ kind: 'ok', objects: [] }) })
 
     expect(summary.conflict).toBe(1)
@@ -232,33 +297,49 @@ describe('outbox coalescing end-to-end (real repository + coordinator, injected 
     const ledger = new Map()
     let firstCreateSent = false
     const parse = (p) => (typeof p === 'string' ? JSON.parse(p) : p)
-    const pushFn = vi.fn(async (m) => {
-      if (ledger.has(m.mutation_id)) return { kind: 'accepted', resultRevision: ledger.get(m.mutation_id) }
-      if (m.operation === 'create') {
-        state.revision = 1
-        state.deleted = false
-        state.payload = parse(m.payload)
-        ledger.set(m.mutation_id, 1)
-        if (!firstCreateSent) {
-          // Server committed, response lost — the client sees only a network error.
-          firstCreateSent = true
-          throw new Error('network: response lost after server commit')
+    const pushFn = vi.fn(async (chunk) => {
+      // Batch contract: process members sequentially in chunk order. The
+      // create is the chunk's only member on cycle 1; cycles 2-3 chunks hold
+      // the (replaying) create next to the fresh mutation.
+      const out = []
+      for (const m of chunk) {
+        if (ledger.has(m.mutation_id)) {
+          out.push({ kind: 'accepted', resultRevision: ledger.get(m.mutation_id) })
+          continue
         }
-        return { kind: 'accepted', resultRevision: 1 }
+        if (m.operation === 'create') {
+          state.revision = 1
+          state.deleted = false
+          state.payload = parse(m.payload)
+          ledger.set(m.mutation_id, 1)
+          if (!firstCreateSent) {
+            // Server committed, response lost — the client sees only a network
+            // error (the whole chunk rejects; here the chunk IS the create).
+            firstCreateSent = true
+            throw new Error('network: response lost after server commit')
+          }
+          out.push({ kind: 'accepted', resultRevision: 1 })
+          continue
+        }
+        if (state.deleted) {
+          out.push({ kind: 'conflict', current: { revision: state.revision, deleted: true, payload: null } })
+          continue
+        }
+        if (m.base_revision !== state.revision) {
+          out.push({ kind: 'conflict', current: { revision: state.revision, deleted: false, payload: state.payload } })
+          continue
+        }
+        state.revision += 1
+        if (m.operation === 'delete') {
+          state.deleted = true
+          state.payload = null
+        } else {
+          state.payload = parse(m.payload)
+        }
+        ledger.set(m.mutation_id, state.revision)
+        out.push({ kind: 'accepted', resultRevision: state.revision })
       }
-      if (state.deleted) return { kind: 'conflict', current: { revision: state.revision, deleted: true, payload: null } }
-      if (m.base_revision !== state.revision) {
-        return { kind: 'conflict', current: { revision: state.revision, deleted: false, payload: state.payload } }
-      }
-      state.revision += 1
-      if (m.operation === 'delete') {
-        state.deleted = true
-        state.payload = null
-      } else {
-        state.payload = parse(m.payload)
-      }
-      ledger.set(m.mutation_id, state.revision)
-      return { kind: 'accepted', resultRevision: state.revision }
+      return out
     })
 
     // cycle 1: the create's request is delivered and committed server-side,
@@ -310,32 +391,44 @@ describe('outbox coalescing end-to-end (real repository + coordinator, injected 
     const ledger = new Map()
     let firstCreateSent = false
     const parse = (p) => (typeof p === 'string' ? JSON.parse(p) : p)
-    const pushFn = vi.fn(async (m) => {
-      if (ledger.has(m.mutation_id)) return { kind: 'accepted', resultRevision: ledger.get(m.mutation_id) }
-      if (m.operation === 'create') {
-        state.revision = 1
-        state.deleted = false
-        state.payload = parse(m.payload)
-        ledger.set(m.mutation_id, 1)
-        if (!firstCreateSent) {
-          firstCreateSent = true
-          throw new Error('network: response lost after server commit')
+    const pushFn = vi.fn(async (chunk) => {
+      const out = []
+      for (const m of chunk) {
+        if (ledger.has(m.mutation_id)) {
+          out.push({ kind: 'accepted', resultRevision: ledger.get(m.mutation_id) })
+          continue
         }
-        return { kind: 'accepted', resultRevision: 1 }
+        if (m.operation === 'create') {
+          state.revision = 1
+          state.deleted = false
+          state.payload = parse(m.payload)
+          ledger.set(m.mutation_id, 1)
+          if (!firstCreateSent) {
+            firstCreateSent = true
+            throw new Error('network: response lost after server commit')
+          }
+          out.push({ kind: 'accepted', resultRevision: 1 })
+          continue
+        }
+        if (state.deleted) {
+          out.push({ kind: 'conflict', current: { revision: state.revision, deleted: true, payload: null } })
+          continue
+        }
+        if (m.base_revision !== state.revision) {
+          out.push({ kind: 'conflict', current: { revision: state.revision, deleted: false, payload: state.payload } })
+          continue
+        }
+        state.revision += 1
+        if (m.operation === 'delete') {
+          state.deleted = true
+          state.payload = null
+        } else {
+          state.payload = parse(m.payload)
+        }
+        ledger.set(m.mutation_id, state.revision)
+        out.push({ kind: 'accepted', resultRevision: state.revision })
       }
-      if (state.deleted) return { kind: 'conflict', current: { revision: state.revision, deleted: true, payload: null } }
-      if (m.base_revision !== state.revision) {
-        return { kind: 'conflict', current: { revision: state.revision, deleted: false, payload: state.payload } }
-      }
-      state.revision += 1
-      if (m.operation === 'delete') {
-        state.deleted = true
-        state.payload = null
-      } else {
-        state.payload = parse(m.payload)
-      }
-      ledger.set(m.mutation_id, state.revision)
-      return { kind: 'accepted', resultRevision: state.revision }
+      return out
     })
 
     // cycle 1: create delivered + committed server-side, response lost.
@@ -390,9 +483,93 @@ describe('outbox coalescing end-to-end (real repository + coordinator, injected 
     // The marker was persisted before the attempt, so the mutation remains
     // protected; a second, healthy sync completes normally.
     expect((await pendingFor(repository, id))[0].pushed).toBe(true)
-    pushFn.mockImplementation(async () => ({ kind: 'accepted', resultRevision: 1 }))
+    pushFn.mockImplementation(async () => [{ kind: 'accepted', resultRevision: 1 }])
     const retry = await syncNow({ pushFn, pullFn: async () => ({ kind: 'ok', objects: [] }) })
     expect(retry.succeeded).toBe(1)
     expect(await pendingFor(repository, id)).toEqual([])
+  })
+
+  it('30 pending mutations drain over exactly 2 realistic requests (25 + 5)', async () => {
+    const { syncNow, repository } = await bootAuthenticatedRepo()
+    for (let i = 0; i < 30; i++) {
+      await repository.addPendingMutation('create', `batch-${i}`, 'link', { id: `batch-${i}`, title: `v${i}` }, 'acc-1', 0)
+    }
+    const pushFn = vi.fn(async (chunk) => chunk.map((m, i) => ({ kind: 'accepted', resultRevision: 1 })))
+    const summary = await syncNow({ pushFn, pullFn: async () => ({ kind: 'ok', objects: [] }) })
+
+    expect(summary.pushed).toBe(30)
+    expect(summary.succeeded).toBe(30)
+    expect(pushFn).toHaveBeenCalledTimes(2)
+    expect(pushFn.mock.calls[0][0]).toHaveLength(25)
+    expect(pushFn.mock.calls[1][0]).toHaveLength(5)
+    for (let i = 0; i < 30; i++) {
+      expect(await pendingFor(repository, `batch-${i}`)).toEqual([])
+    }
+  })
+
+  it('mixed results in one real batch: accepted applies, conflict rebases, unavailable stays pending', async () => {
+    const { syncNow, repository } = await bootAuthenticatedRepo()
+    await repository.addPendingMutation('create', 'mx-1', 'link', { id: 'mx-1', title: 'a' }, 'acc-1', 0)
+    await repository.addPendingMutation('create', 'mx-2', 'link', { id: 'mx-2', title: 'b' }, 'acc-1', 0)
+    await repository.addPendingMutation('create', 'mx-3', 'link', { id: 'mx-3', title: 'c' }, 'acc-1', 0)
+
+    const pushFn = vi.fn(async (chunk) => chunk.map((m) => {
+      if (m.object_id === 'mx-1') return { kind: 'accepted', resultRevision: 1 }
+      if (m.object_id === 'mx-2') return { kind: 'conflict', reason: 'stale base', current: { object_id: 'mx-2', object_type: 'link', revision: 3, deleted: false, deleted_at: null, payload: { id: 'mx-2', title: 'server' } } }
+      return { kind: 'unavailable', status: 503, reason: 'x' }
+    }))
+    const summary = await syncNow({ pushFn, pullFn: async () => ({ kind: 'ok', objects: [] }) })
+    expect(summary.succeeded).toBe(1)
+    expect(summary.conflict).toBe(1)
+    expect(summary.unavailable).toBe(1)
+
+    // mx-2 rebased as update@3; mx-3 still pending (unavailable)
+    const mx2 = await pendingFor(repository, 'mx-2')
+    expect(mx2).toHaveLength(1)
+    expect(mx2[0].operation).toBe('update')
+    expect(mx2[0].base_revision).toBe(3)
+    expect(await pendingFor(repository, 'mx-3')).toHaveLength(1)
+    expect(await pendingFor(repository, 'mx-1')).toEqual([])
+  })
+
+  it('marker failure with the REAL repository: the unprotected member is not sent, its sibling is', async () => {
+    const { syncNow, repository } = await bootAuthenticatedRepo()
+    await repository.addPendingMutation('create', 'mk-1', 'link', { id: 'mk-1', title: 'a' }, 'acc-1', 0)
+    await repository.addPendingMutation('create', 'mk-2', 'link', { id: 'mk-2', title: 'b' }, 'acc-1', 0)
+
+    // Drain order is by mutation_id (primary key), and mutation_id is a random
+    // UUID: we cannot know a priori which member drains first. Read the real
+    // drain order and make the FIRST member's marker fail while the second
+    // succeeds; every assertion below tracks whichever member that turns out
+    // to be, so the test is deterministic under any UUID ordering.
+    const all = await repository.getPendingMutations()
+    const failMutation = all[0]
+    const okMutation = all[1]
+    const originalMark = repository.markMutationPushed
+    const spy = vi.spyOn(repository, 'markMutationPushed').mockImplementation(async (mutationId) => {
+      if (mutationId === failMutation.mutation_id) throw new Error('idb tx failed')
+      return originalMark.call(repository, mutationId)
+    })
+
+    const pushFn = vi.fn(async (chunk) => chunk.map(() => ({ kind: 'accepted', resultRevision: 1 })))
+    let summary
+    try {
+      summary = await syncNow({ pushFn, pullFn: async () => ({ kind: 'ok', objects: [] }) })
+    } finally {
+      spy.mockRestore()
+    }
+
+    expect(summary.unavailable).toBe(1)
+    expect(summary.succeeded).toBe(1)
+    // The unsafe member was never sent; the safe one went out alone.
+    expect(pushFn).toHaveBeenCalledTimes(1)
+    expect(pushFn.mock.calls[0][0]).toHaveLength(1)
+    expect(pushFn.mock.calls[0][0][0].mutation_id).toBe(okMutation.mutation_id)
+    // The sibling was handled normally: accepted => removed from the outbox.
+    expect(await pendingFor(repository, okMutation.object_id)).toEqual([])
+    // The failed one is still pending with pushed=false (not protected, retried).
+    const failedPending = await pendingFor(repository, failMutation.object_id)
+    expect(failedPending).toHaveLength(1)
+    expect(failedPending[0].pushed).toBe(false)
   })
 })
