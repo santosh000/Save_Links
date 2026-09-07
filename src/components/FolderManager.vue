@@ -95,7 +95,7 @@ function handleDelete(id) {
 
     <button type="button" class="nav-item" :class="{ active: activeView === '__favorites' }" @click="emit('select', '__favorites')" aria-label="Show favorites" :aria-current="activeView === '__favorites' ? 'true' : undefined" title="Show favorite links">
       <span class="nav-icon" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 3.6l2.5 5.1 5.6.8-4 4 1 5.6-5.1-2.7-5.1 2.7 1-5.6-4-4 5.6-.8z"/></svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 21C7 16.8 3 13.6 3 9.6 3 7 5 5 7.4 5c1.8 0 3.4 1 4.6 2.6C13.2 6 14.8 5 16.6 5 19 5 21 7 21 9.6c0 4-4 7.2-9 11.4z"/></svg>
       </span>
       <span class="folder-name">Favorites</span>
       <span class="folder-count" :aria-label="`Favorites ${favoriteCount} links`">{{ favoriteCount }}</span>

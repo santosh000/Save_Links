@@ -137,7 +137,7 @@ function platformIcon() {
               @click="emit('toggle-important', link.id)"
               title="Toggle Important"
             >
-              <svg class="pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.6l2.5 5.1 5.6.8-4 4 1 5.6-5.1-2.7-5.1 2.7 1-5.6-4-4 5.6-.8z" /></svg>
+              <svg class="pill-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v4.5"/><path d="M12 15.5v.2"/></svg>
               <span>Important</span>
             </button>
             <button
