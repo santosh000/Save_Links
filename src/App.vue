@@ -31,6 +31,21 @@ const { folders, createFolder, renameFolder, deleteFolder, setFolders, mergeFold
 const { appearance, colorScheme, setAppearance, setColorScheme } = useSettings()
 
 const search = ref('')
+// Debounced copy of the search text, consumed by filteredLinks. `search`
+// stays the immediate input value (drives the :value binding, clear button,
+// empty-state text), while searchQuery trails it by ~150ms so filtering is
+// not recomputed on every single keystroke.
+const searchQuery = ref('')
+let searchTimer = null
+watch(search, (val) => {
+  clearTimeout(searchTimer)
+  if (!val) {
+    // clearing is instant — restore the full result set immediately
+    searchQuery.value = ''
+    return
+  }
+  searchTimer = setTimeout(() => { searchQuery.value = val }, 150)
+})
 const filterCategory = ref('')
 const filterStatus = ref('')
 const filterFolder = ref('')
@@ -103,6 +118,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   authUnsubscribe?.()
   stopSyncPolling()
+  clearTimeout(searchTimer)
 })
 
 // Anonymous → Authenticated sync confirmation
@@ -572,11 +588,18 @@ function handleRenameFolder({ id, name }, done) {
   }
 }
 
+// Cached display-order sort of the FULL collection. A Vue computed caches the
+// result and recomputes only when `links` or `sortBy` actually change — NOT on
+// search keystrokes. `sortLinks` yields a total deterministic order, so every
+// filtered subset below is implicitly in the correct order: filtering a sorted
+// collection is order-identical to sorting the filtered collection.
+const sortedLinks = computed(() => sortLinks(links.value, sortBy.value))
+
 const filteredLinks = computed(() => {
-  const q = search.value.trim().toLowerCase()
+  const q = searchQuery.value.trim().toLowerCase()
   // build folder name map for search
   const folderNameById = new Map(folders.value.map(f=>[f.id, f.name]))
-  const result = links.value.filter(l => {
+  return sortedLinks.value.filter(l => {
     if (filterFolder.value) {
       if (filterFolder.value === '__unfiled') {
         if (l.folderId) return false
@@ -597,9 +620,6 @@ const filteredLinks = computed(() => {
     }
     return true
   })
-  // Display-order only (after filtering/search/folder logic). Returns a new
-  // array and never mutates the stored records.
-  return sortLinks(result, sortBy.value)
 })
 
 const hasLinks = computed(() => links.value.length > 0)
