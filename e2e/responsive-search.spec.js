@@ -5,9 +5,25 @@ import { test, expect } from '@playwright/test'
 // (the #side-col rail / utilities drawer) at any viewport.
 
 async function seedLinks(page) {
+  // Deterministic clean state BEFORE the app boots upright: the app migrates
+  // localStorage into IndexedDB on first boot and never re-reads localStorage
+  // afterwards, so stale IndexedDB rows from a previous run change the list /
+  // compact-bar geometry. Wipe BOTH, then reload so every run starts from the
+  // same empty state (cards-by-default, no links, no pending mutations).
   await page.goto('/')
-  await page.evaluate(() => localStorage.clear())
+  await page.evaluate(async () => {
+    localStorage.clear()
+    const dbs = await indexedDB.databases()
+    await Promise.all(
+      dbs.map((d) => new Promise((resolve) => {
+        const req = indexedDB.deleteDatabase(d.name)
+        req.onsuccess = req.onerror = req.onblocked = () => resolve()
+      })),
+    )
+  })
   await page.reload()
+  await expect(page.locator('article.card')).toHaveCount(0)
+
   for (const [url, title] of [
     ['https://example.com/alpha', 'Alpha Unique'],
     ['https://example.com/beta', 'Beta Unique'],
@@ -17,10 +33,21 @@ async function seedLinks(page) {
     if (!(await urlInput.isVisible().catch(() => false))) {
       await page.getByRole('button', { name: 'Save a link', exact: true }).click()
     }
-    await page.locator('#save-url').fill(url)
+    await urlInput.fill(url)
     await page.locator('#save-title').fill(title)
+
+    // The metadata autoFill (500ms debounce) reflows the form: the meta-hint
+    // row pops in as "Detecting metadata…", then swaps to the domain hint once
+    // the fetch settles — each swap moves the Save button ~20px. The domain
+    // hint only renders AFTER autoFill resolves, so waiting for it pins the
+    // button to a static position before clicking.
+    await expect(page.locator('.meta-hint', { hasText: 'example.com' })).toBeVisible()
+
     await page.getByRole('button', { name: 'Save link' }).click()
-    await page.getByText('Link saved').waitFor({ state: 'visible', timeout: 3000 }).catch(() => {})
+    await page.getByText('Link saved').waitFor({ state: 'visible', timeout: 5000 })
+    // let the collapse transition finish so the next "Save a link" re-expand
+    // starts from a settled form (no clicks on a mid-transition node)
+    await expect(page.locator('#add-form')).toHaveCount(0)
   }
   await expect(page.locator('article.card')).toHaveCount(2)
 }
@@ -79,9 +106,11 @@ for (const vp of VIEWPORTS) {
     // 6. no total/shown counter in the header
     await expect(page.locator('.content-head').getByText(/shown/)).toHaveCount(0)
 
-    // 7. filtered count: hidden on desktop/tablet, right-aligned beside
-    //    "Saved links" on mobile only, driven by the existing filteredLinks
-    if (vp.width < 640) {
+    // 7. filtered count pill: always visible (redesign — it doubles as live
+    //    search/filter feedback), on the same row as the "Saved links" heading
+    //    and immediately after it as a badge. It is NOT pushed to the header's
+    //    far right — the Search control sits to its right at every viewport.
+    {
       await expect(count).toBeVisible()
       await expect(count).toHaveText('2 links') // filteredLinks.length after seeding
       const countBox = await count.boundingBox()
@@ -89,9 +118,12 @@ for (const vp of VIEWPORTS) {
       const headBox = await page.locator('.content-head').boundingBox()
       expect(Math.abs(countBox.y - titleBox0.y)).toBeLessThanOrEqual(4) // same row as the heading
       expect(countBox.x).toBeGreaterThanOrEqual(titleBox0.x + titleBox0.width) // after the heading
-      expect(headBox.x + headBox.width - (countBox.x + countBox.width)).toBeLessThanOrEqual(4) // right-aligned
-    } else {
-      await expect(count).toBeHidden()
+      // a small badge adjacent to the heading — its right edge stays well inside
+      // the header, leaving room for Search to its right (not far-right-aligned)
+      expect(countBox.x - (titleBox0.x + titleBox0.width)).toBeLessThanOrEqual(16)
+      expect(headBox.x + headBox.width - (countBox.x + countBox.width)).toBeGreaterThan(16)
+      expect(countBox.x).toBeGreaterThanOrEqual(0)
+      expect(countBox.x + countBox.width).toBeLessThanOrEqual(vp.width)
     }
 
     // 8. All status sits in the header, grouped with Search, default is "All status"
@@ -101,15 +133,15 @@ for (const vp of VIEWPORTS) {
     await expect(status).toHaveValue('')
     const searchBox = await search.boundingBox()
     const statusBox = await status.boundingBox()
+    const headBox = await page.locator('.content-head').boundingBox()
+    // the redesigned header is a wrapping flex: at every viewport "All status"
+    // wraps onto its own row inside the header group (below the Search row),
+    // never crammed onto Search's row and never leaving the header bounds
+    expect(statusBox.y).toBeGreaterThanOrEqual(searchBox.y + searchBox.height - 1) // below the Search row
+    expect(statusBox.x).toBeGreaterThanOrEqual(headBox.x) // stays inside the header
+    expect(statusBox.x + statusBox.width).toBeLessThanOrEqual(headBox.x + headBox.width)
     if (vp.width < 640) {
-      // stacked: All status on its own row below the full-width Search
-      expect(statusBox.y).toBeGreaterThanOrEqual(searchBox.y + searchBox.height - 1)
-      expect(statusBox.width).toBeGreaterThanOrEqual(150)
-    } else {
-      // same row as Search, immediately to its right (12px gap)
-      const sameRow = statusBox.y < searchBox.y + searchBox.height && searchBox.y < statusBox.y + statusBox.height
-      expect(sameRow).toBe(true)
-      expect(statusBox.x).toBeGreaterThanOrEqual(searchBox.x + searchBox.width)
+      expect(statusBox.width).toBeGreaterThanOrEqual(150) // full-width row on narrow screens
     }
 
     // 9. NOT inside Filters & tools (#side-col rail / utilities drawer)

@@ -26,8 +26,15 @@ async function saveLink(page, url, title) {
   await ensureSaveFormOpen(page)
   await page.locator('#save-url').fill(url)
   await page.locator('#save-title').fill(title)
+  // metadata autoFill reflows the form after the 500ms debounce; the meta-hint
+  // shows the domain only once it settles, so waiting for it pins the button
+  const domain = url.replace(/^https?:\/\//, '').split('/')[0]
+  await expect(page.locator('.meta-hint', { hasText: domain })).toBeVisible()
   await page.getByRole('button', { name: 'Save link' }).click()
-  await expect(page.getByText('Link saved')).toBeVisible({ timeout: 3000 }).catch(() => {})
+  // every submit collapses the form; waiting for the unmount proves the save
+  // ran and gives the next save a settled, freshly re-expanded form
+  await expect(page.locator('#add-form')).toHaveCount(0)
+  await expect(page.getByText('Link saved')).toBeVisible()
 }
 
 // Read the titles of the visible cards in render order.

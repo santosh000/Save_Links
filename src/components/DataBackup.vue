@@ -219,7 +219,8 @@ function handleImportClick() {
 
   <!-- Import Preview Modal -->
   <Teleport to="body">
-    <div v-if="importPreview" class="import-preview-backdrop" @click.self="cancelPreview">
+    <Transition name="modal">
+      <div v-if="importPreview" class="import-preview-backdrop" @click.self="cancelPreview">
       <div class="import-preview-modal" role="dialog" aria-modal="true" aria-labelledby="import-preview-title" @keydown.esc="cancelPreview">
         <h3 id="import-preview-title">Import Backup</h3>
         <p class="import-preview-summary">
@@ -263,14 +264,14 @@ function handleImportClick() {
         </div>
       </div>
     </div>
+    </Transition>
   </Teleport>
 </template>
 
 <style scoped>
 .backup-card {
   background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius);
   padding: 16px;
 }
 .backup-card h4 {
@@ -295,7 +296,7 @@ function handleImportClick() {
 }
 .btn {
   appearance: none;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--card);
   color: var(--text-h);
@@ -310,7 +311,7 @@ function handleImportClick() {
   box-shadow: var(--shadow);
 }
 .error {
-  color: #ef4444;
+  color: var(--error);
   font-size: 12px;
   margin-top: 8px;
 }
@@ -329,7 +330,7 @@ function handleImportClick() {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: var(--shadow);
+  box-shadow: var(--elev-2);
   width: 100%;
   max-width: 460px;
   max-height: calc(100vh - 32px);
@@ -390,7 +391,7 @@ function handleImportClick() {
   cursor: pointer;
   padding: 8px 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--bg);
   transition: all 0.15s;
 }

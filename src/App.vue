@@ -11,8 +11,10 @@ import { repository } from './storage/repository.js'
 import AppDialog from './components/AppDialog.vue'
 import AddLink from './components/AddLink.vue'
 import LinkCard from './components/LinkCard.vue'
+import LinkRow from './components/LinkRow.vue'
 import StatsPanel from './components/StatsPanel.vue'
 import SearchFilter from './components/SearchFilter.vue'
+import { getStorageKey } from './utils/environment.js'
 import About from './components/About.vue'
 import DataBackup from './components/DataBackup.vue'
 import AccountPanel from './components/AccountPanel.vue'
@@ -36,6 +38,39 @@ const filterFolder = ref('')
 // Kept in memory only — persisting it would require widening the settings
 // blob, which is out of scope for this milestone.
 const sortBy = ref(DEFAULT_SORT)
+// Saved Links presentation: 'card' | 'list' | 'compact'. UI-state only —
+// persisted to plain localStorage (NOT the settings blob, NOT synced). Card
+// remains the default and the single source of truth for all views is the
+// filteredLinks computed below.
+const VIEW_MODES = ['card', 'list', 'compact']
+const VIEW_MODE_LABELS = { card: 'Card', list: 'List', compact: 'Compact' }
+function readViewMode() {
+  try {
+    const raw = localStorage.getItem(getStorageKey('viewMode'))
+    if (raw && VIEW_MODES.includes(raw)) return raw
+  } catch { /* storage unavailable (tests/private mode): default is fine */ }
+  return 'card'
+}
+const viewMode = ref(readViewMode())
+function setViewMode(m) {
+  if (!VIEW_MODES.includes(m)) return
+  viewMode.value = m
+  try { localStorage.setItem(getStorageKey('viewMode'), m) } catch { /* non-fatal */ }
+}
+// Sticky-toolbar Add (+): reveals the EXISTING Save-a-link form (single open
+// state lives in AddLink) and focuses its URL field. No duplicate UI/state.
+const addLinkEl = ref(null)
+async function openAddLink() {
+  const exposed = addLinkEl.value
+  // `exposed.open` is the ref unwrapped to a plain boolean by the component
+  // exposed-proxy; assigning writes through to the ref (setting `.value`
+  // would be reading a boolean's property and silently no-op).
+  if (!exposed) return
+  exposed.open = true
+  await nextTick()
+  document.querySelector('.add-card')?.scrollIntoView({ block: 'start' })
+  document.getElementById('save-url')?.focus()
+}
 // ONE source of truth for the responsive drawers: 'folders' | 'filters' | null.
 // The two drawers are mutually exclusive by construction — toggling one open
 // can never leave the other open (a single assignment per interaction).
@@ -568,6 +603,19 @@ const filteredLinks = computed(() => {
 })
 
 const hasLinks = computed(() => links.value.length > 0)
+
+// Empty-state differentiation: the three cases must tell the user WHY the list
+// is empty and what to do next (no links / search no-results / filter no-match).
+const hasSearch = computed(() => search.value.trim().length > 0)
+const hasFilters = computed(() => !!(filterCategory.value || filterStatus.value || filterFolder.value))
+const favoritesOnly = computed(() => filterStatus.value === 'favorite' && !hasSearch.value && !filterCategory.value && !filterFolder.value)
+
+function clearFilters() {
+  search.value = ''
+  filterCategory.value = ''
+  filterStatus.value = ''
+  filterFolder.value = ''
+}
 </script>
 
 <template>
@@ -583,8 +631,14 @@ const hasLinks = computed(() => links.value.length > 0)
         </div>
 <div class="top-actions">
           <span class="pill-count">{{ total }} links</span>
-          <button type="button" class="nav-toggle" :aria-expanded="activeDrawer === 'folders'" aria-controls="nav-col" aria-label="Toggle folders navigation" @click="toggleDrawer('folders')">☰ Folders</button>
-          <button type="button" class="util-toggle" :aria-expanded="activeDrawer === 'filters'" aria-controls="side-col" aria-label="Toggle filters and tools" @click="toggleDrawer('filters')">⚙<span class="util-toggle-name">Filters & tools</span></button>
+          <button type="button" class="nav-toggle" :aria-expanded="activeDrawer === 'folders'" aria-controls="nav-col" aria-label="Toggle folders navigation" @click="toggleDrawer('folders')">
+            <svg class="toggle-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18" /></svg>
+            <span>Folders</span>
+          </button>
+          <button type="button" class="util-toggle" :aria-expanded="activeDrawer === 'filters'" aria-controls="side-col" aria-label="Toggle filters and tools" @click="toggleDrawer('filters')">
+            <svg class="toggle-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h8m4 0h4M4 12h4m4 0h8M4 18h8m4 0h4" /><circle cx="14" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="14" cy="18" r="2"/></svg>
+            <span class="util-toggle-name">Filters & tools</span>
+          </button>
           <button
             type="button"
             class="identity-btn"
@@ -606,8 +660,12 @@ const hasLinks = computed(() => links.value.length > 0)
     </header>
 
     <div class="layout" :class="{ 'nav-open': activeDrawer === 'folders', 'util-open': activeDrawer === 'filters' }">
-      <div v-if="activeDrawer === 'folders'" class="nav-backdrop" @click="activeDrawer = null" aria-hidden="true"></div>
-      <div v-if="activeDrawer === 'filters'" class="util-backdrop" @click="activeDrawer = null" aria-hidden="true"></div>
+      <Transition name="fade">
+        <div v-if="activeDrawer === 'folders'" class="nav-backdrop" @click="activeDrawer = null" aria-hidden="true"></div>
+      </Transition>
+      <Transition name="fade">
+        <div v-if="activeDrawer === 'filters'" class="util-backdrop" @click="activeDrawer = null" aria-hidden="true"></div>
+      </Transition>
 
       <div id="nav-col" class="nav-col">
         <FolderManager :folders="folders" :links="links" :active-view="navView" @create="handleCreateFolder" @rename="handleRenameFolder" @delete="requestDeleteFolder" @select="handleSelectFolder" />
@@ -616,16 +674,48 @@ const hasLinks = computed(() => links.value.length > 0)
       </div>
 
       <div class="main-col">
-        <AddLink :folders="folders" @add="handleAdd" />
+        <AddLink ref="addLinkEl" :folders="folders" @add="handleAdd" />
 
         <div class="content-head">
           <h2>Saved links</h2>
           <span class="head-count">{{ filteredLinks.length }} {{ filteredLinks.length === 1 ? 'link' : 'links' }}</span>
           <div class="search-wrap">
-            <span class="icon" aria-hidden="true">⌕</span>
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
             <label for="filter-search" class="sr-only">Search</label>
             <input id="filter-search" :value="search" @input="search = $event.target.value" placeholder="Search title, URL, domain, tags…" class="search-input" aria-label="Search links" />
-            <button v-if="search" class="clear" @click="search = ''" aria-label="Clear search">✕</button>
+            <button v-if="search" class="clear" @click="search = ''" aria-label="Clear search">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+            </button>
+          </div>
+          <div class="view-switch" role="group" aria-label="View mode">
+            <button
+              v-for="m in VIEW_MODES"
+              :key="m"
+              type="button"
+              class="view-btn"
+              :class="{ active: viewMode === m }"
+              :aria-pressed="String(viewMode === m)"
+              :title="VIEW_MODE_LABELS[m] + ' view'"
+              @click="setViewMode(m)"
+            >
+              <svg class="view-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <g v-if="m === 'card'">
+                  <rect x="3" y="3" width="7.5" height="7.5" rx="1.5" />
+                  <rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5" />
+                  <rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5" />
+                  <rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5" />
+                </g>
+                <g v-else-if="m === 'list'">
+                  <rect x="3" y="5" width="18" height="4" rx="1.5" />
+                  <rect x="3" y="10" width="18" height="4" rx="1.5" />
+                  <rect x="3" y="15" width="18" height="4" rx="1.5" />
+                </g>
+                <g v-else>
+                  <path d="M5 6.5h14M5 12h14M5 17.5h14" />
+                </g>
+              </svg>
+              <span class="view-label">{{ VIEW_MODE_LABELS[m] }}</span>
+            </button>
           </div>
           <label for="filter-status" class="sr-only">Filter by status</label>
           <select id="filter-status" :value="filterStatus" @change="filterStatus = $event.target.value" class="header-status" aria-label="Filter by status">
@@ -636,36 +726,66 @@ const hasLinks = computed(() => links.value.length > 0)
             <option value="favorite">Favorites</option>
             <option value="not-favorite">No favorite</option>
           </select>
+          <button type="button" class="toolbar-add" aria-label="Add link" title="Add link" @click="openAddLink">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
         </div>
 
         <div v-if="!hasLinks" class="empty-state">
-          <div class="empty-icon">📚</div>
+          <div class="empty-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M12 5c-2-1.5-5-2-8-2v14c3 0 6 .5 8 2 2-1.5 5-2 8-2V3c-3 0-6 .5-8 2z"/><path d="M12 5v14"/></svg>
+          </div>
           <h3>No links yet</h3>
           <p>Paste a URL above to save your first bookmark. Metadata is auto-detected and fully editable.</p>
           <div class="example-tags">Try: youtube.com, github.com, instagram.com, amazon.com</div>
         </div>
 
         <div v-else-if="filteredLinks.length === 0" class="empty-state">
-          <h3>No results</h3>
-          <p>Try adjusting search or filters.</p>
-          <button class="btn ghost" @click="search=''; filterCategory=''; filterStatus=''; filterFolder=''">Clear filters</button>
+          <div class="empty-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          </div>
+          <h3>{{ favoritesOnly ? 'No favorites yet' : hasSearch ? 'No results' : 'No matches' }}</h3>
+          <p v-if="favoritesOnly">Star any link to pin it here as a favorite.</p>
+          <p v-else-if="hasSearch">Nothing matches “{{ search.trim() }}” in the current view. Try a different search{{ hasFilters ? ' or loosen your filters' : '' }}.</p>
+          <p v-else>No links match the current filters. Try widening them.</p>
+          <button v-if="favoritesOnly" class="btn ghost" @click="filterStatus = ''">Show all links</button>
+          <button v-else-if="hasSearch" class="btn ghost" @click="clearFilters">Clear search{{ hasFilters ? ' and filters' : '' }}</button>
+          <button v-else class="btn ghost" @click="clearFilters">Clear filters</button>
         </div>
 
-        <div v-else class="grid">
-          <LinkCard
-            v-for="link in filteredLinks"
-            :key="link.id"
-            :link="link"
-            :folders="folders"
-            @toggle-important="toggleImportant"
-            @toggle-must-have="toggleMustHave"
-            @toggle-favorite="toggleFavorite"
-            @set-status="setStatus"
-            @delete="requestDeleteLink"
-            @edit="handleEdit"
-            @set-folder="handleSetFolder"
-          />
-        </div>
+        <template v-else>
+          <div v-if="viewMode === 'card'" class="grid">
+            <LinkCard
+              v-for="link in filteredLinks"
+              :key="link.id"
+              :link="link"
+              :folders="folders"
+              @toggle-important="toggleImportant"
+              @toggle-must-have="toggleMustHave"
+              @toggle-favorite="toggleFavorite"
+              @set-status="setStatus"
+              @delete="requestDeleteLink"
+              @edit="handleEdit"
+              @set-folder="handleSetFolder"
+            />
+          </div>
+          <div v-else class="row-list" :class="{ compact: viewMode === 'compact' }">
+            <LinkRow
+              v-for="link in filteredLinks"
+              :key="link.id"
+              :link="link"
+              :folders="folders"
+              :mode="viewMode"
+              @toggle-important="toggleImportant"
+              @toggle-must-have="toggleMustHave"
+              @toggle-favorite="toggleFavorite"
+              @set-status="setStatus"
+              @delete="requestDeleteLink"
+              @edit="handleEdit"
+              @set-folder="handleSetFolder"
+            />
+          </div>
+        </template>
       </div>
 
       <div id="side-col" class="side-col">
@@ -688,7 +808,9 @@ const hasLinks = computed(() => links.value.length > 0)
       </div>
     </div>
 
-    <div v-if="toast" class="toast" role="status" aria-live="polite">{{ toast }}</div>
+    <Transition name="toast">
+      <div v-if="toast" class="toast" role="status" aria-live="polite">{{ toast }}</div>
+    </Transition>
 
     <AppDialog
       :open="!!dialog"
@@ -725,7 +847,6 @@ const hasLinks = computed(() => links.value.length > 0)
   top: 0;
   z-index: 10;
   background: var(--card);
-  backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border);
 }
 .topbar-inner {
@@ -743,17 +864,17 @@ const hasLinks = computed(() => links.value.length > 0)
   flex-shrink: 0;
   display: block;
 }
-.brand-title { font-weight: 800; color: var(--text-h); line-height: 1; }
+.brand-title { font-weight: 800; color: var(--text-h); line-height: 1; letter-spacing: -0.015em; }
 .brand-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
 .top-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
 .pill-count {
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
+  color: var(--muted);
   background: var(--muted-bg);
   border: 1px solid var(--border);
   padding: 6px 10px;
   border-radius: 999px;
-  color: var(--text-h);
 }
 .layout {
   max-width: 1600px;
@@ -761,7 +882,7 @@ const hasLinks = computed(() => links.value.length > 0)
   margin: 0 auto;
   padding: 20px;
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr) 300px;
+  grid-template-columns: 240px minmax(0, 1fr) 280px;
   gap: 20px;
   flex: 1;
   align-items: start;
@@ -792,10 +913,11 @@ const hasLinks = computed(() => links.value.length > 0)
   color: var(--text-h);
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   padding: 8px 12px;
   cursor: pointer;
 }
+.toggle-icon { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .nav-toggle:hover, .util-toggle:hover { border-color: var(--accent-border); }
 .nav-toggle[aria-expanded="true"], .util-toggle[aria-expanded="true"] { background: var(--accent-bg); border-color: var(--accent-border); color: var(--accent); }
 .account-toggle {
@@ -825,7 +947,7 @@ const hasLinks = computed(() => links.value.length > 0)
   padding: 6px 10px 6px 8px;
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: all 0.15s;
   color: var(--text-h);
@@ -861,9 +983,27 @@ const hasLinks = computed(() => links.value.length > 0)
   position: fixed; inset: 0; z-index: 9;
   background: rgba(15, 23, 42, 0.4);
 }
+.fade-enter-active, .fade-leave-active { transition: opacity .2s ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
 .main-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-.content-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
-.content-head h2 { margin: 0; font-size: 18px; color: var(--text-h); white-space: nowrap; }
+/* Saved Links toolbar: sticky below the topbar so Search / Add / view mode /
+   status stay reachable while scrolling a long library. Opaque band, same
+   tokens as the header; only this control area pins, never the rows. */
+.content-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+  position: sticky;
+  top: 76px; /* below the sticky topbar; matches the nav/side columns */
+  z-index: 8; /* above list rows, below topbar(10) and drawers(30) */
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+}
+.content-head h2 { margin: 0; font-size: 20px; font-weight: 800; color: var(--text-h); white-space: nowrap; letter-spacing: -0.02em; }
 .search-wrap {
   flex: 1 1 200px;
   min-width: 180px;
@@ -872,18 +1012,21 @@ const hasLinks = computed(() => links.value.length > 0)
   gap: 8px;
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  padding: 9px 12px;
 }
-/* filtered count, mobile-only: hidden on desktop/tablet, shown right-aligned
-   beside "Saved links" on the narrow stacked layout */
+/* filtered count — always visible; doubles as live search/filter feedback */
 .head-count {
-  display: none;
-  color: var(--muted);
-  font-size: 13px;
+  background: var(--muted-bg);
+  color: var(--text-h);
+  font-size: 12px;
   font-weight: 700;
+  line-height: 1.4;
+  border-radius: 999px;
+  padding: 2px 8px;
+  white-space: nowrap;
 }
-.icon { color: var(--muted); font-size: 16px; }
+.icon { color: var(--muted); width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; flex-shrink: 0; }
 .search-input {
   flex: 1;
   min-width: 0;
@@ -901,27 +1044,103 @@ const hasLinks = computed(() => links.value.length > 0)
   border-radius: 999px;
   cursor: pointer;
   color: var(--muted);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
 }
+.clear svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.search-wrap:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+.search-wrap { transition: border-color .15s, box-shadow .15s; }
 .header-status {
   flex: 0 1 auto;
-  min-width: 140px;
-  padding: 9px 12px;
-  border-radius: 12px;
+  min-width: 130px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--card);
   color: var(--text-h);
-  font-size: 14px;
+  font-size: 13px;
+  transition: border-color .15s, box-shadow .15s;
 }
+.header-status:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+/* View-mode switcher: quiet segmented control, secondary to the search field */
+.view-switch {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--muted-bg);
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+.view-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 9px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  border-radius: calc(var(--radius-sm) - 3px);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s, color .15s, transform .1s ease;
+}
+.view-btn:hover { color: var(--text-h); }
+.view-btn:active { transform: scale(0.96); }
+.view-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.view-btn.active {
+  background: var(--card);
+  color: var(--accent);
+  box-shadow: var(--elev-1);
+}
+.view-icon { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.view-btn.active .view-icon { stroke: var(--accent); }
+.view-label { white-space: nowrap; }
+/* Sticky-toolbar Add (+): quiet 40px target, reuses the existing form */
+.toolbar-add {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--muted);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: color .15s, background .15s, border-color .15s, transform .1s ease;
+}
+.toolbar-add:hover { color: var(--accent); background: var(--accent-bg); border-color: var(--accent-border); }
+.toolbar-add:active { transform: scale(0.94); }
+.toolbar-add svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
-.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.row-list { display: flex; flex-direction: column; gap: 10px; }
+.row-list.compact { gap: 6px; }
 .empty-state {
   background: var(--card);
   border: 1px dashed var(--border);
-  border-radius: 16px;
+  border-radius: var(--radius);
   padding: 32px 20px;
   text-align: center;
+  animation: rise-in .2s ease;
 }
-.empty-icon { font-size: 28px; margin-bottom: 8px; }
+.empty-icon {
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 10px;
+  color: var(--accent);
+  background: var(--accent-bg);
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+}
+.empty-icon svg { width: 24px; height: 24px; }
 .empty-state h3 { margin: 0 0 6px; color: var(--text-h); }
 .empty-state p { margin: 0 auto; max-width: 520px; font-size: 14px; line-height: 1.5; }
 .example-tags { margin-top: 12px; font-size: 12px; color: var(--muted); }
@@ -930,14 +1149,19 @@ const hasLinks = computed(() => links.value.length > 0)
   bottom: 20px;
   left: 50%;
   transform: translateX(-50%);
-  background: var(--text-h);
-  color: var(--bg);
+  background: var(--accent);
+  color: var(--on-accent);
   padding: 10px 16px;
   border-radius: 999px;
   font-size: 13px;
-  box-shadow: var(--shadow);
+  font-weight: 500;
+  box-shadow: var(--elev-2);
   z-index: 50;
 }
+.toast-enter-active { transition: opacity .18s ease, transform .18s ease; }
+.toast-leave-active { transition: opacity .15s ease, transform .15s ease; }
+.toast-enter-from { opacity: 0; transform: translateX(-50%) translateY(6px); }
+.toast-leave-to { opacity: 0; transform: translateX(-50%) translateY(4px); }
 .footer {
   text-align: center;
   font-size: 12px;
@@ -948,6 +1172,9 @@ const hasLinks = computed(() => links.value.length > 0)
 }
 @media (min-width: 1200px) {
   .nav-backdrop, .util-backdrop { display: none; }
+}
+@media (min-width: 1500px) {
+  .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 @media (max-width: 1199px) {
   .layout { grid-template-columns: 1fr; }
@@ -999,9 +1226,19 @@ const hasLinks = computed(() => links.value.length > 0)
   .pill-count { display: none; }
   .util-toggle-name { display: none; }
   /* narrow screens: Saved links on its own row, then full-width Search,
-     then full-width All status — always grouped under the header */
-  .content-head .search-wrap { flex: 1 1 100%; }
-  .content-head .header-status { flex: 1 1 100%; min-width: 0; }
-  .content-head .head-count { display: inline; margin-left: auto; }
+     then full-width view switcher, then full-width All status — always
+     grouped under the header, never crammed onto one row.
+     The sticky band sheds its box padding/border so the count pill and
+     controls stay flush against the band edge (e2e positional invariants)
+     while Search + Add(+) share ONE compact row. */
+  .content-head { padding: 0; border: none; border-radius: 0; }
+  .content-head .search-wrap { flex: 1 1 0; min-width: 0; }
+  .content-head .toolbar-add { order: 1; }
+  .content-head .view-switch { flex: 1 1 100%; order: 2; }
+  .content-head .view-btn { flex: 1 1 0; justify-content: center; padding: 8px 10px; }
+  .content-head .header-status { flex: 1 1 100%; order: 3; }
+}
+@media (max-width: 480px) {
+  .view-label { display: none; }
 }
 </style>

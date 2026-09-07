@@ -45,7 +45,8 @@ function save() {
 
 <template>
   <Teleport to="body">
-    <div v-if="open" class="lp-backdrop" @click.self="close">
+    <Transition name="modal">
+      <div v-if="open" class="lp-backdrop" @click.self="close">
       <div
         class="lp-panel"
         role="dialog"
@@ -99,6 +100,7 @@ function save() {
         </form>
       </div>
     </div>
+    </Transition>
   </Teleport>
 </template>
 
@@ -120,7 +122,7 @@ function save() {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: var(--shadow);
+  box-shadow: var(--elev-2);
   padding: 26px 28px;
 }
 .lp-head {
@@ -140,7 +142,7 @@ function save() {
   border: none;
   background: transparent;
   color: var(--muted);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   display: grid;
   place-items: center;

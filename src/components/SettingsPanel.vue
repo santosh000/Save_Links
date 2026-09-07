@@ -52,8 +52,7 @@ const schemes = [
 <style scoped>
 .settings-card {
   background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius);
   padding: 16px;
 }
 .settings-card h4 { margin: 0 0 6px; font-size: 13px; color: var(--text-h); }

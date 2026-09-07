@@ -26,10 +26,19 @@ async function saveLink(page, { url, title, folder, category }) {
   await ensureSaveFormOpen(page)
   await page.locator('#save-url').fill(url)
   if (title) await page.locator('#save-title').fill(title)
-  if (category) await page.locator('#save-category').selectOption(category)
   if (folder) await page.getByLabel('Select folder').selectOption({ label: folder })
+  // metadata autoFill reflows the form after the 500ms debounce; the meta-hint
+  // shows the domain only once it settles, so waiting for it pins the button
+  const domain = url.replace(/^https?:\/\//, '').split('/')[0]
+  await expect(page.locator('.meta-hint', { hasText: domain })).toBeVisible()
+  // autoFill re-categorizes during its debounce, which would clobber a category
+  // picked earlier — select after metadata settles so the choice survives
+  if (category) await page.locator('#save-category').selectOption(category)
   await page.getByRole('button', { name: 'Save link' }).click()
-  await expect(page.getByText('Link saved')).toBeVisible({ timeout: 3000 }).catch(() => {})
+  // every submit collapses the form; waiting for the unmount proves the save
+  // ran and gives the next save a settled, freshly re-expanded form
+  await expect(page.locator('#add-form')).toHaveCount(0)
+  await expect(page.getByText('Link saved')).toBeVisible()
 }
 
 async function createFolder(page, name) {

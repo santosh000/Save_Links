@@ -36,7 +36,7 @@ const maxCount = computed(() => {
         <div class="num">{{ mustHaveCount }}</div>
         <div class="label">Must Have</div>
       </div>
-      <div class="stat-card" style="background: var(--muted-bg);">
+      <div class="stat-card">
         <div class="num">{{ favoriteCount }}</div>
         <div class="label">Favorites</div>
       </div>
@@ -63,26 +63,24 @@ const maxCount = computed(() => {
 <style scoped>
 .stats {
   background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius);
   padding: 14px;
 }
 h3 { margin: 0 0 12px; font-size: 14px; color: var(--text-h); }
 .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
 .stat-card {
   background: var(--bg);
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 10px 6px;
   text-align: center;
 }
-.stat-card.accent { background: var(--accent-bg); }
-.stat-card.dark { background: var(--text-h); color: var(--bg); }
-.stat-card.dark .label { color: var(--bg); opacity: .7; }
-.stat-card.dark .num { color: var(--bg); }
-.num { font-size: 17px; font-weight: 800; color: var(--text-h); line-height: 1; }
-.label { font-size: 10px; color: var(--muted); margin-top: 4px; text-transform: uppercase; letter-spacing: .05em; }
+.stat-card.accent { background: var(--accent-bg); border-color: var(--accent-border); }
+.stat-card.dark { background: var(--bg); border-color: var(--border); }
+.num { font-size: 18px; font-weight: 800; color: var(--text-h); line-height: 1; letter-spacing: -0.02em; }
+.label { font-size: 11px; font-weight: 600; color: var(--muted); margin-top: 4px; text-transform: uppercase; letter-spacing: .04em; }
 .section { margin-top: 6px; }
-.section-title { font-size: 11px; font-weight: 700; color: var(--text-h); margin-bottom: 8px; text-transform: uppercase; letter-spacing: .06em; }
+.section-title { font-size: 12px; font-weight: 700; color: var(--text-h); margin-bottom: 8px; }
 .cat-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
 .cat-row { display: grid; grid-template-columns: 80px 1fr 22px; align-items: center; gap: 8px; font-size: 12.5px; }
 .cat-name { color: var(--text-h); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

@@ -12,6 +12,11 @@ const PLATFORM_ICONS = {
   ChromeOS: '💻',
 }
 
+// Intl.DateTimeFormat construction is costly; build both formatters once per
+// page load instead of once per card per render (matters at 500–1000 links).
+const LONG_FMT = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
+const SHORT_FMT = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+
 const props = defineProps({
   link: { type: Object, required: true },
   folders: { type: Array, default: () => [] }
@@ -73,12 +78,12 @@ function savedDateOf() {
 function longDate() {
   const d = savedDateOf()
   if (!d) return ''
-  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(d)
+  return LONG_FMT.format(d)
 }
 function shortDate() {
   const d = savedDateOf()
   if (!d) return ''
-  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(d)
+  return SHORT_FMT.format(d)
 }
 
 function platformName() {
@@ -131,7 +136,10 @@ function platformIcon() {
               aria-label="Toggle Important"
               @click="emit('toggle-important', link.id)"
               title="Toggle Important"
-            >★ Important</button>
+            >
+              <svg class="pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.6l2.5 5.1 5.6.8-4 4 1 5.6-5.1-2.7-5.1 2.7 1-5.6-4-4 5.6-.8z" /></svg>
+              <span>Important</span>
+            </button>
             <button
               class="pill"
               :class="{ active: link.mustHave }"
@@ -139,7 +147,10 @@ function platformIcon() {
               aria-label="Toggle Must Have"
               @click="emit('toggle-must-have', link.id)"
               title="Toggle Must Have"
-            >◆ Must Have</button>
+            >
+              <svg class="pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2 20.8 12 12 20.8 3.2 12z" /></svg>
+              <span>Must Have</span>
+            </button>
             <button
               class="pill"
               :class="{ active: link.favorite }"
@@ -147,7 +158,10 @@ function platformIcon() {
               aria-label="Toggle Favorite"
               @click="emit('toggle-favorite', link.id)"
               title="Toggle Favorite"
-            >{{ link.favorite ? '♥ Favorite' : '☆ Favorite' }}</button>
+            >
+              <svg class="pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21C7 16.8 3 13.6 3 9.6 3 7 5 5 7.4 5c1.8 0 3.4 1 4.6 2.6C13.2 6 14.8 5 16.6 5 19 5 21 7 21 9.6c0 4-4 7.2-9 11.4z" /></svg>
+              <span>Favorite</span>
+            </button>
           </div>
           <div class="right-actions">
             <label :for="'cat-' + link.id" class="sr-only">Category</label>
@@ -159,8 +173,12 @@ function platformIcon() {
               <option value="">Unfiled</option>
               <option v-for="f in folders" :key="f.id" :value="f.id">{{ f.name }}</option>
             </select>
-            <button class="icon-btn" @click="startEdit" aria-label="Edit link" title="Edit">✎</button>
-            <button class="icon-btn delete" @click="emit('delete', link.id)" aria-label="Delete link" title="Delete">✕</button>
+            <button class="icon-btn" @click="startEdit" aria-label="Edit link" title="Edit">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            </button>
+            <button class="icon-btn delete" @click="emit('delete', link.id)" aria-label="Delete link" title="Delete">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+            </button>
           </div>
         </div>
       </template>
@@ -195,13 +213,14 @@ function platformIcon() {
 .card {
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius);
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  transition: box-shadow .15s, transform .15s;
+  transition: box-shadow .15s, border-color .15s;
+  animation: rise-in .22s ease both;
 }
-.card:hover { box-shadow: var(--shadow); transform: translateY(-1px); }
+.card:hover { box-shadow: var(--elev-1); border-color: var(--accent-border); }
 .thumb-wrap { display: block; aspect-ratio: 16/9; overflow: hidden; background: var(--muted-bg); }
 .thumb { width: 100%; height: 100%; object-fit: cover; display: block; }
 .body { padding: 12px 14px 12px; display: flex; flex-direction: column; gap: 6px; }
@@ -284,19 +303,28 @@ function platformIcon() {
 }
 .status-group { display: flex; gap: 6px; flex-wrap: wrap; }
 .pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: 12px;
+  font-weight: 600;
   padding: 6px 10px;
   border-radius: 999px;
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--muted);
   cursor: pointer;
+  transition: color .15s, background .15s, border-color .15s, transform .1s ease;
 }
+.pill:hover { border-color: var(--accent-border); color: var(--text-h); }
+.pill:active { transform: scale(0.96); }
+.pill-icon { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; }
 .pill.active { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.pill.active .pill-icon { fill: currentColor; stroke: currentColor; }
 .cat-select {
   font-size: 12px;
   padding: 6px 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--text-h);
@@ -304,14 +332,19 @@ function platformIcon() {
 .icon-btn {
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--bg);
   cursor: pointer;
   display: grid;
   place-items: center;
+  color: var(--muted);
+  transition: color .15s, background .15s, border-color .15s, transform .1s ease;
 }
-.icon-btn.delete:hover { background: #fee2e2; border-color: #fecaca; color: #dc2626; }
+.icon-btn:hover { color: var(--text-h); border-color: var(--accent-border); }
+.icon-btn:active { transform: scale(0.92); }
+.icon-btn svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.icon-btn.delete:hover { background: var(--error-bg); border-color: var(--border); color: var(--error); }
 .right-actions { display: flex; gap: 6px; align-items: center; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 .edit-form { display: flex; flex-direction: column; gap: 8px; }
@@ -319,12 +352,13 @@ function platformIcon() {
 .edit-input { font-weight: 400; }
 .input {
   padding: 8px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--text-h);
   font-size: 13px;
   outline: none;
+  transition: border-color .15s, box-shadow .15s;
 }
 .input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
 .edit-actions { display: flex; gap: 8px; margin-top: 6px; }
@@ -333,5 +367,8 @@ function platformIcon() {
 @media (max-width: 520px) {
   .js-full { display: none; }
   .js-short { display: inline; }
+}
+@media (max-width: 768px) {
+  .icon-btn { width: 40px; height: 40px; }
 }
 </style>

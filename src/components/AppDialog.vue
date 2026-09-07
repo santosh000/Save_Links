@@ -55,7 +55,8 @@ function onKeydown(e) {
 
 <template>
   <Teleport to="body">
-    <div v-if="open" class="dialog-backdrop" @click.self="emit('close')">
+    <Transition name="modal">
+      <div v-if="open" class="dialog-backdrop" @click.self="emit('close')">
       <div
         ref="panel"
         class="dialog"
@@ -79,6 +80,7 @@ function onKeydown(e) {
         </div>
       </div>
     </div>
+    </Transition>
   </Teleport>
 </template>
 
@@ -96,7 +98,7 @@ function onKeydown(e) {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: var(--shadow);
+  box-shadow: var(--elev-2);
   width: 100%;
   max-width: 420px;
   max-height: calc(100vh - 32px);
@@ -107,8 +109,8 @@ function onKeydown(e) {
 .dialog-message { margin: 0 0 16px; font-size: 13px; line-height: 1.5; color: var(--text); overflow-wrap: anywhere; }
 .dialog-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
 .dialog-actions .btn { min-height: 38px; }
-.dialog-actions .danger { background: #dc2626; color: #fff; border-color: #dc2626; }
-.dialog-actions .danger:hover { background: #b91c1c; border-color: #b91c1c; }
+.dialog-actions .danger { background: var(--error); color: var(--on-error); border-color: var(--error); }
+.dialog-actions .danger:hover { background: var(--error); filter: brightness(0.92); border-color: var(--error); }
 @media (max-width: 480px) {
   .dialog { padding: 16px; }
   .dialog-actions { flex-direction: column; }

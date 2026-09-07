@@ -62,8 +62,15 @@ async function saveLink(page, { url, title }) {
   await ensureSaveFormOpen(page)
   await page.locator('#save-url').fill(url)
   if (title) await page.locator('#save-title').fill(title)
+  // metadata autoFill reflows the form after the 500ms debounce; the meta-hint
+  // shows the domain only once it settles, so waiting for it pins the button
+  const domain = url.replace(/^https?:\/\//, '').split('/')[0]
+  await expect(page.locator('.meta-hint', { hasText: domain })).toBeVisible()
   await page.getByRole('button', { name: 'Save link' }).click()
-  await expect(page.getByText('Link saved')).toBeVisible({ timeout: 3000 }).catch(()=>{})
+  // every submit collapses the form; waiting for the unmount proves the save
+  // ran and gives the next save a settled, freshly re-expanded form
+  await expect(page.locator('#add-form')).toHaveCount(0)
+  await expect(page.getByText('Link saved')).toBeVisible()
 }
 
 test.describe('Folders, Appearance, Color Schemes, Backup v2', () => {
@@ -116,7 +123,11 @@ test.describe('Folders, Appearance, Color Schemes, Backup v2', () => {
     await page.locator('#save-url').fill('https://example.com/work1')
     await page.locator('#save-title').fill('Work link')
     await page.getByLabel('Select folder').selectOption({ label: 'Office' })
+    // metadata autoFill reflows the form after the 500ms debounce; the meta-hint
+    // shows the domain only once it settles, so waiting for it pins the button
+    await expect(page.locator('.meta-hint', { hasText: 'example.com' })).toBeVisible()
     await page.getByRole('button', { name: 'Save link' }).click()
+    await expect(page.locator('#add-form')).toHaveCount(0)
     await expect(page.getByText('Work link')).toBeVisible()
     // folder count should be 1 for Office, Unfiled 0? check UI
     await expect(page.locator('.folder-item', {hasText:'Office'})).toContainText('1')

@@ -115,19 +115,27 @@ function cancelForm() {
 function handlePaste(e) {
   // let v-model handle, autoFill will trigger
 }
+// Expose the existing open state so the sticky-toolbar Add (+) can reveal
+// this form and focus #save-url without duplicating any state or logic.
+defineExpose({ open })
 </script>
 
 <template>
   <section class="add-card">
     <button type="button" class="add-toggle" :aria-expanded="open" aria-controls="add-form" @click="open = !open">
-      <span class="add-toggle-icon" aria-hidden="true">✚</span>
+      <span class="add-toggle-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      </span>
       <span class="add-toggle-label">Save a link</span>
       <span class="add-toggle-hint" aria-hidden="true">Paste any URL — title, domain and preview auto-detect</span>
-      <span class="add-toggle-caret" aria-hidden="true">{{ open ? '▾' : '▸' }}</span>
+      <span class="add-toggle-caret" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" :class="{ flipped: open }"><path d="m6 9 6 6 6-6"/></svg>
+      </span>
     </button>
 
-    <div v-if="open" id="add-form" class="add-body">
-      <h3 class="add-title">Save a link</h3>
+    <Transition name="fade-down">
+      <div v-if="open" id="add-form" class="add-body">
+        <h3 class="add-title">Save a link</h3>
       <form @submit.prevent="onSubmit">
         <div class="row row-3">
           <label class="field grow" for="save-url">
@@ -150,10 +158,13 @@ function handlePaste(e) {
 
         <button type="button" class="more-toggle" :aria-expanded="moreOpen" @click="moreOpen = !moreOpen">
           <span>More options</span>
-          <span class="caret" aria-hidden="true">{{ moreOpen ? '▾' : '▸' }}</span>
+          <span class="caret" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" :class="{ flipped: moreOpen }"><path d="m6 9 6 6 6-6"/></svg>
+          </span>
         </button>
 
-        <div v-if="moreOpen" class="more-body">
+        <Transition name="fade-down">
+          <div v-if="moreOpen" class="more-body">
           <div class="row row-2">
             <label class="field" for="save-desc">
               <span>Description (preview)</span>
@@ -178,6 +189,7 @@ function handlePaste(e) {
             </div>
           </div>
         </div>
+        </Transition>
 
         <label class="field" for="save-folder">
           <span>Folder</span>
@@ -195,6 +207,7 @@ function handlePaste(e) {
         </div>
       </form>
     </div>
+    </Transition>
   </section>
 </template>
 
@@ -202,8 +215,11 @@ function handlePaste(e) {
 .add-card {
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius);
   padding: 10px 14px;
+  /* keep the form clear of the sticky topbar + Saved links toolbar when the
+     toolbar + button scrolls it into view */
+  scroll-margin-top: 76px;
 }
 .add-toggle {
   display: flex;
@@ -219,20 +235,25 @@ function handlePaste(e) {
 }
 .add-toggle:hover .add-toggle-label { color: var(--accent); }
 .add-toggle-icon {
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   border-radius: 999px;
   background: var(--accent-bg);
   border: 1px solid var(--accent-border);
   color: var(--accent);
   display: grid;
   place-items: center;
-  font-size: 14px;
   flex-shrink: 0;
+  transition: background .15s, color .15s, border-color .15s, transform .1s ease;
 }
+.add-toggle-icon svg { width: 14px; height: 14px; }
+.add-toggle:active .add-toggle-icon { transform: scale(0.92); }
+.add-toggle:hover .add-toggle-icon { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .add-toggle-label { font-weight: 700; font-size: 14px; }
 .add-toggle-hint { font-size: 12.5px; color: var(--muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.add-toggle-caret { color: var(--muted); font-size: 12px; }
+.add-toggle-caret { color: var(--muted); display: inline-flex; }
+.add-toggle-caret svg { width: 14px; height: 14px; transition: transform .18s ease; }
+.add-toggle-caret svg.flipped, .caret svg.flipped { transform: rotate(180deg); }
 .add-body { margin-top: 10px; padding-top: 12px; border-top: 1px solid var(--border); }
 .add-title { margin: 0 0 10px; font-size: 15px; color: var(--text-h); }
 .row { display: grid; gap: 10px; margin-bottom: 10px; }
@@ -243,7 +264,7 @@ function handlePaste(e) {
 .field span:first-child { font-size: 12px; font-weight: 600; color: var(--text-h); }
 .input {
   padding: 8px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--text-h);
@@ -251,30 +272,36 @@ function handlePaste(e) {
   outline: none;
   width: 100%;
   box-sizing: border-box;
+  transition: border-color .15s, box-shadow .15s;
 }
 .input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
 textarea.input { resize: vertical; }
 .more-toggle {
-  display: flex;
-  width: 100%;
-  justify-content: space-between;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   text-align: left;
-  background: var(--muted-bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 7px 10px;
-  font-size: 12px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  margin: 0 0 10px -8px;
+  font-size: 12.5px;
   font-weight: 600;
   color: var(--text-h);
   cursor: pointer;
-  margin-bottom: 10px;
+  transition: color .15s, background .15s;
 }
-.more-toggle .caret { color: var(--muted); }
-.more-toggle:hover { border-color: var(--accent-border); }
-.more-toggle[aria-expanded="true"] { background: var(--accent-bg); border-color: var(--accent-border); color: var(--accent); }
-.more-body { border: 1px dashed var(--border); border-radius: 10px; padding: 12px; margin-bottom: 10px; }
+.more-toggle:hover { background: var(--muted-bg); }
+.more-toggle .caret { color: var(--muted); display: inline-flex; }
+.more-toggle .caret svg { width: 13px; height: 13px; transition: transform .18s ease; }
+.more-toggle[aria-expanded="true"] { color: var(--accent); }
+.more-toggle[aria-expanded="true"] .caret { color: var(--accent); }
+.more-body { border: 1px dashed var(--border); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 10px; }
+.fade-down-enter-active, .fade-down-leave-active { transition: opacity .18s ease, transform .18s ease; }
+.fade-down-enter-from, .fade-down-leave-to { opacity: 0; transform: translateY(4px); }
 .meta-hint { font-size: 11px; color: var(--muted); }
-.error { color: #ef4444; font-size: 13px; margin: 0 0 10px; }
+.error { color: var(--error); font-size: 13px; margin: 0 0 10px; }
 .btn.block { width: 100%; margin-top: 2px; }
 .form-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 14px; }
 .checks { display: flex; gap: 14px; align-items: center; padding-top: 9px; flex-wrap: wrap; }

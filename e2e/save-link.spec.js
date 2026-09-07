@@ -28,7 +28,7 @@ async function ensureSaveFormOpen(page, { more = false } = {}) {
   }
 }
 
-async function saveLink(page, { url, title, description, image, tags, category, important, mustHave }) {
+async function saveLink(page, { url, title, description, image, tags, category, important, mustHave, expectToast = true }) {
   const needsMore = description !== undefined || image !== undefined || tags !== undefined || important || mustHave
   await ensureSaveFormOpen(page, { more: needsMore })
   await page.locator('#save-url').fill(url)
@@ -36,12 +36,22 @@ async function saveLink(page, { url, title, description, image, tags, category, 
   if (description !== undefined) await page.locator('#save-desc').fill(description)
   if (image !== undefined) await page.locator('#save-image').fill(image)
   if (tags !== undefined) await page.locator('#save-tags').fill(tags)
-  if (category) await page.locator('#save-category').selectOption(category)
   if (important) await page.getByLabel('Important').check()
   if (mustHave) await page.getByLabel('Must Have').check()
+  // metadata autoFill reflows the form after the 500ms debounce; the meta-hint
+  // shows the domain only once it settles, so waiting for it pins the button
+  const domain = url.replace(/^https?:\/\//, '').split('/')[0]
+  await expect(page.locator('.meta-hint', { hasText: domain })).toBeVisible()
+  // autoFill re-categorizes during its debounce, which would clobber a category
+  // picked earlier — select after metadata settles so the choice survives
+  if (category) await page.locator('#save-category').selectOption(category)
   await page.getByRole('button', { name: 'Save link' }).click()
-  // wait for toast or card
-  await expect(page.getByText('Link saved')).toBeVisible({ timeout: 3000 }).catch(() => {})
+  // every submit collapses the form; waiting for the unmount proves the submit
+  // ran and gives the next save a settled, freshly re-expanded form
+  await expect(page.locator('#add-form')).toHaveCount(0)
+  // assert the toast for normal saves (duplicate submissions open the in-app
+  // dialog instead and are asserted by the caller with expectToast: false)
+  if (expectToast) await expect(page.getByText('Link saved')).toBeVisible()
 }
 
 test.describe('Save Links E2E', () => {
@@ -415,7 +425,7 @@ test.describe('Save Links E2E', () => {
     page.on('dialog', () => { nativeDialog = true })
 
     // tracking-only difference normalizes to the same URL -> duplicate dialog
-    await saveLink(page, { url: 'https://example.com/page?utm_source=google&id=5', title: 'Fresh' })
+    await saveLink(page, { url: 'https://example.com/page?utm_source=google&id=5', title: 'Fresh', expectToast: false })
     const appDialog = page.getByRole('dialog')
     await expect(appDialog).toBeVisible()
     await expect(page.getByRole('heading', { name: 'Link already saved' })).toBeVisible()
@@ -432,14 +442,14 @@ test.describe('Save Links E2E', () => {
     await expect(page.locator('article.card').first()).toContainText('Original')
 
     // Escape behaves like Cancel
-    await saveLink(page, { url: 'https://example.com/page?id=5', title: 'Fresh 2' })
+    await saveLink(page, { url: 'https://example.com/page?id=5', title: 'Fresh 2', expectToast: false })
     await expect(appDialog).toBeVisible()
     await page.keyboard.press('Escape')
     await expect(appDialog).toHaveCount(0)
     await expect(page.locator('article.card')).toHaveCount(1)
 
     // Add another: a second record is saved
-    await saveLink(page, { url: 'https://example.com/page?id=5', title: 'Copy' })
+    await saveLink(page, { url: 'https://example.com/page?id=5', title: 'Copy', expectToast: false })
     await expect(appDialog).toBeVisible()
     await appDialog.getByRole('button', { name: 'Add another' }).click()
     await expect(appDialog).toHaveCount(0)
@@ -449,7 +459,7 @@ test.describe('Save Links E2E', () => {
   test('R. Duplicate link — Replace existing updates the record in place', async ({ page }) => {
     await page.goto('/')
     await saveLink(page, { url: 'https://example.com/page?id=5', title: 'Original Title' })
-    await saveLink(page, { url: 'https://example.com/page?utm_source=google&id=5', title: 'Updated Title' })
+    await saveLink(page, { url: 'https://example.com/page?utm_source=google&id=5', title: 'Updated Title', expectToast: false })
     const appDialog = page.getByRole('dialog')
     await expect(appDialog).toBeVisible()
     await appDialog.getByRole('button', { name: 'Replace existing' }).click()
@@ -475,7 +485,7 @@ test.describe('Save Links E2E', () => {
     await expect(page.locator('article.card')).toHaveCount(1)
 
     // save the same URL again to trigger the duplicate dialog
-    await saveLink(page, { url: 'https://example.com/dup-focus', title: 'Again' })
+    await saveLink(page, { url: 'https://example.com/dup-focus', title: 'Again', expectToast: false })
     const appDialog = page.getByRole('dialog')
     await expect(appDialog).toBeVisible()
     await expect(page.getByRole('heading', { name: 'Link already saved' })).toBeVisible()
@@ -502,7 +512,7 @@ test.describe('Save Links E2E', () => {
     expect(focusedTag).not.toBe('BODY')
 
     // repeat: Escape path
-    await saveLink(page, { url: 'https://example.com/dup-focus', title: 'Again 2' })
+    await saveLink(page, { url: 'https://example.com/dup-focus', title: 'Again 2', expectToast: false })
     await expect(appDialog).toBeVisible()
     await page.keyboard.press('Escape')
     await expect(appDialog).toHaveCount(0)
@@ -522,7 +532,7 @@ test.describe('Save Links E2E', () => {
 
       let nativeDialog = false
       page.on('dialog', () => { nativeDialog = true })
-      await saveLink(page, { url: 'https://example.com/page?utm_source=google&id=5', title: 'Again' })
+      await saveLink(page, { url: 'https://example.com/page?utm_source=google&id=5', title: 'Again', expectToast: false })
       const appDialog = page.getByRole('dialog')
       await expect(appDialog).toBeVisible()
       expect(nativeDialog).toBe(false)

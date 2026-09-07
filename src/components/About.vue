@@ -21,8 +21,7 @@
 <style scoped>
 .about-card {
   background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius);
   padding: 16px;
 }
 .about-card h4 {

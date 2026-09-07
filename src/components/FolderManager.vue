@@ -86,13 +86,17 @@ function handleDelete(id) {
     </div>
 
     <button type="button" class="nav-item" :class="{ active: activeView === 'all' }" @click="emit('select', '__all')" aria-label="All links" :aria-current="activeView === 'all' ? 'true' : undefined" title="Show all links">
-      <span class="nav-icon" aria-hidden="true">📚</span>
+      <span class="nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 3 2 8l10 5 10-5z"/><path d="m2 12 10 5 10-5"/></svg>
+      </span>
       <span class="folder-name">All Links</span>
       <span class="folder-count" :aria-label="`All ${allCount} links`">{{ allCount }}</span>
     </button>
 
     <button type="button" class="nav-item" :class="{ active: activeView === '__favorites' }" @click="emit('select', '__favorites')" aria-label="Show favorites" :aria-current="activeView === '__favorites' ? 'true' : undefined" title="Show favorite links">
-      <span class="nav-icon" aria-hidden="true">⭐</span>
+      <span class="nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 3.6l2.5 5.1 5.6.8-4 4 1 5.6-5.1-2.7-5.1 2.7 1-5.6-4-4 5.6-.8z"/></svg>
+      </span>
       <span class="folder-name">Favorites</span>
       <span class="folder-count" :aria-label="`Favorites ${favoriteCount} links`">{{ favoriteCount }}</span>
     </button>
@@ -123,8 +127,12 @@ function handleDelete(id) {
           <button class="btn ghost sm" @click="cancelEdit" aria-label="Cancel rename">Cancel</button>
         </template>
         <template v-else>
-          <button class="icon-btn" @click="startEdit(f)" :aria-label="`Rename folder ${f.name}`" title="Rename">✎</button>
-          <button class="icon-btn delete" @click="handleDelete(f.id)" :aria-label="`Delete folder ${f.name}`" title="Delete">✕</button>
+          <button class="icon-btn" @click="startEdit(f)" :aria-label="`Rename folder ${f.name}`" title="Rename">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          <button class="icon-btn delete" @click="handleDelete(f.id)" :aria-label="`Delete folder ${f.name}`" title="Delete">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          </button>
         </template>
       </li>
     </ul>
@@ -134,10 +142,10 @@ function handleDelete(id) {
 
 <style scoped>
 .folder-sidebar {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  background: transparent;
+  padding: 0;
 }
 .sidebar-head { margin-bottom: 12px; }
 .sidebar-head h4 { margin:0 0 2px; font-size:13px; color:var(--text-h); }
@@ -147,28 +155,49 @@ function handleDelete(id) {
 .create-row { display:flex; gap:8px; margin-top:10px; align-items: stretch; flex-wrap: wrap; }
 .create-row .btn { align-self: stretch; white-space: nowrap; height: auto; }
 .nav-item {
+  position: relative;
   display:flex; align-items:center; gap:8px; width:100%;
   background:none; border:none;
-  border-radius:8px;
+  border-radius: var(--radius-sm);
   padding:8px 10px;
   cursor:pointer;
   font-size:13px; font-weight:700; color:var(--text-h);
   text-align:left;
+  transition: background .15s, color .15s;
 }
 .nav-item:hover { background: var(--muted-bg); }
 .nav-item + .nav-item { margin-top: 2px; }
+.nav-item::before {
+  content: '';
+  position: absolute;
+  left: -1px;
+  top: 7px;
+  bottom: 7px;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--accent);
+  transform: scaleY(0);
+  transform-origin: center;
+  transition: transform .18s ease;
+}
 .nav-item.active { background: var(--accent-bg); color: var(--accent); }
-.nav-icon { font-size:14px; }
+.nav-item.active::before {
+  transform: scaleY(1);
+}
+.nav-icon { display: inline-flex; flex-shrink: 0; color: var(--muted); }
+.nav-icon svg { width: 15px; height: 15px; }
+.nav-item.active .nav-icon { color: var(--accent); }
 .input {
   flex:1;
   min-width:0;
   padding:8px 10px;
-  border-radius:8px;
+  border-radius: var(--radius-sm);
   border:1px solid var(--border);
   background: var(--bg);
   color: var(--text-h);
   font-size:13px;
   outline:none;
+  transition: border-color .15s, box-shadow .15s;
 }
 .input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
 .btn.sm { padding:6px 10px; font-size:12px; }
@@ -176,7 +205,7 @@ function handleDelete(id) {
 .folder-list { list-style:none; padding:0; margin:12px 0 0; display:flex; flex-direction:column; gap:6px; }
 .folder-item {
   display:flex; align-items:center; gap:6px;
-  border-radius:8px;
+  border-radius: var(--radius-sm);
   padding:6px 8px;
 }
 .folder-item:hover { background: var(--muted-bg); }
@@ -194,10 +223,16 @@ function handleDelete(id) {
 .folder-name { flex:1; font-size:13px; color:var(--text-h); font-weight:600; word-break:break-word; }
 .folder-count { font-size:12px; color:var(--muted); padding:2px 4px; }
 .icon-btn {
-  width:28px; height:28px; border-radius:8px; border:1px solid var(--border); background: var(--card); cursor:pointer; display:grid; place-items:center; font-size:12px;
+  width:28px; height:28px; border-radius: var(--radius-sm); border:1px solid var(--border); background: var(--card); cursor:pointer; display:grid; place-items:center; color: var(--muted);
+  transition: color .15s, border-color .15s, background .15s, transform .1s ease;
 }
-.icon-btn:hover { border-color: var(--accent-border); }
-.icon-btn.delete:hover { background:#fee2e2; border-color:#fecaca; color:#dc2626; }
-.error { color:#ef4444; font-size:12px; margin-top:8px; }
+.icon-btn svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.icon-btn:hover { border-color: var(--accent-border); color: var(--text-h); }
+.icon-btn:active { transform: scale(0.92); }
+.icon-btn.delete:hover { background: var(--error-bg); border-color: var(--border); color: var(--error); }
+.error { color: var(--error); font-size:12px; margin-top:8px; }
 .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+@media (max-width: 768px) {
+  .icon-btn { width: 36px; height: 36px; }
+}
 </style>
