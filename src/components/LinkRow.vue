@@ -159,7 +159,7 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
         </label>
         <label class="edit-field grow2"><span>Description</span><textarea v-model="draftDesc" rows="2" class="input"></textarea></label>
         <label class="edit-field"><span>Image URL</span><input v-model="draftImage" placeholder="https://..." class="input" /></label>
-        <label class="edit-field grow2"><span>Tags (comma separated)</span><input v-model="draftTags" class="input" /></label>
+        <label class="edit-field"><span>Tags (comma separated)</span><input v-model="draftTags" class="input" /></label>
       </div>
       <div class="edit-actions">
         <button class="btn primary sm" @click="saveEdit">Save</button>
@@ -284,7 +284,7 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
 
 /* Inline edit block (same fields as LinkCard) */
 .row-edit { flex: 1 1 100%; display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px dashed var(--border); }
-.edit-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
+.edit-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .grow2 { grid-column: span 2; }
 .edit-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: var(--text-h); min-width: 0; }
 .edit-actions { display: flex; gap: 8px; justify-content: flex-end; }
@@ -319,7 +319,6 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
 .compact .row-select { font-size: 11px; padding: 4px 6px; max-width: 110px; }
 .compact .icon-btn { width: 28px; height: 28px; }
 .compact .icon-btn svg { width: 13px; height: 13px; }
-.compact .edit-grid { grid-template-columns: 1fr 1fr; }
 
 @media (max-width: 768px) {
   .row-toggle, .icon-btn { width: 40px; height: 40px; }
@@ -327,6 +326,7 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
 }
 @media (max-width: 480px) {
   .row-favicon { display: none; }
+  .edit-grid { grid-template-columns: 1fr; }
   .grow2 { grid-column: span 1; }
   /* Mobile List: full-width title/domain line, then ONE action line of
      status toggles + edit/delete. The row-level Category/Folder selects
