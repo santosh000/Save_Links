@@ -182,7 +182,7 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
   transition: box-shadow .15s, border-color .15s;
 }
 .link-row:hover { box-shadow: var(--elev-1); border-color: var(--accent-border); }
-.link-row.editing { align-items: stretch; }
+.link-row.editing { align-items: stretch; border-color: var(--accent-border); }
 .row-main {
   display: flex;
   align-items: center;
@@ -287,7 +287,7 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
 .edit-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
 .grow2 { grid-column: span 2; }
 .edit-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: var(--text-h); min-width: 0; }
-.edit-actions { display: flex; gap: 8px; }
+.edit-actions { display: flex; gap: 8px; justify-content: flex-end; }
 .input {
   padding: 8px 10px;
   border-radius: var(--radius-sm);

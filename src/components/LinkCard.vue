@@ -221,6 +221,9 @@ function platformIcon() {
   animation: rise-in .22s ease both;
 }
 .card:hover { box-shadow: var(--elev-1); border-color: var(--accent-border); }
+/* explicit editing state: accent border while the inline edit form is open
+   (same token as LinkRow's .link-row.editing) */
+.card:has(.edit-form) { border-color: var(--accent-border); }
 .thumb-wrap { display: block; aspect-ratio: 16/9; overflow: hidden; background: var(--muted-bg); }
 .thumb { width: 100%; height: 100%; object-fit: cover; display: block; }
 .body { padding: 12px 14px 12px; display: flex; flex-direction: column; gap: 6px; }
@@ -361,7 +364,7 @@ function platformIcon() {
   transition: border-color .15s, box-shadow .15s;
 }
 .input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
-.edit-actions { display: flex; gap: 8px; margin-top: 6px; }
+.edit-actions { display: flex; gap: 8px; margin-top: 6px; justify-content: flex-end; }
 .btn.sm { padding: 6px 10px; font-size: 13px; }
 
 @media (max-width: 520px) {
