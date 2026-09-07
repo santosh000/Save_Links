@@ -636,6 +636,25 @@ function clearFilters() {
   filterStatus.value = ''
   filterFolder.value = ''
 }
+
+// Active-filter summary chips. Display-only: derived from the same refs the
+// selects/nav bind to, so the summary and the controls can never drift apart.
+// Each chip clears exactly its own constraint; "Clear all" reuses clearFilters.
+// The row lives in the sticky toolbar, so active filters stay visible (and
+// clearable) at every width — the empty state is no longer the only exit.
+const STATUS_OPTION_LABELS = { important: 'Important', 'must-have': 'Must Have', none: 'No status', favorite: 'Favorites', 'not-favorite': 'No favorite' }
+const activeFilterChips = computed(() => {
+  const chips = []
+  const q = search.value.trim()
+  if (q) chips.push({ key: 'search', label: `Search: “${q}”`, clear: () => { search.value = '' } })
+  if (filterStatus.value) chips.push({ key: 'status', label: `Status: ${STATUS_OPTION_LABELS[filterStatus.value] || filterStatus.value}`, clear: () => { filterStatus.value = '' } })
+  if (filterCategory.value) chips.push({ key: 'category', label: `Category: ${filterCategory.value}`, clear: () => { filterCategory.value = '' } })
+  if (filterFolder.value) {
+    const name = filterFolder.value === '__unfiled' ? 'Unfiled' : (folders.value.find(f => f.id === filterFolder.value)?.name || filterFolder.value)
+    chips.push({ key: 'folder', label: `Folder: ${name}`, clear: () => { filterFolder.value = '' } })
+  }
+  return chips
+})
 </script>
 
 <template>
@@ -654,10 +673,12 @@ function clearFilters() {
           <button type="button" class="nav-toggle" :aria-expanded="activeDrawer === 'folders'" aria-controls="nav-col" aria-label="Toggle folders navigation" @click="toggleDrawer('folders')">
             <svg class="toggle-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18" /></svg>
             <span>Folders</span>
+            <span v-if="navView !== 'all'" class="toggle-badge" aria-hidden="true"></span>
           </button>
           <button type="button" class="util-toggle" :aria-expanded="activeDrawer === 'filters'" aria-controls="side-col" aria-label="Toggle filters and tools" @click="toggleDrawer('filters')">
             <svg class="toggle-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h8m4 0h4M4 12h4m4 0h8M4 18h8m4 0h4" /><circle cx="14" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="14" cy="18" r="2"/></svg>
             <span class="util-toggle-name">Filters & tools</span>
+            <span v-if="filterCategory || filterStatus" class="toggle-badge" aria-hidden="true"></span>
           </button>
           <button
             type="button"
@@ -749,6 +770,15 @@ function clearFilters() {
           <button type="button" class="toolbar-add" aria-label="Add link" title="Add link" @click="openAddLink">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
           </button>
+          <div v-if="activeFilterChips.length" class="filter-chips" role="group" aria-label="Active filters">
+            <span v-for="chip in activeFilterChips" :key="chip.key" class="filter-chip">
+              {{ chip.label }}
+              <button type="button" class="chip-clear" :aria-label="'Clear ' + chip.key + ' filter'" title="Remove this filter" @click="chip.clear()">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+              </button>
+            </span>
+            <button v-if="activeFilterChips.length > 1" type="button" class="chip-clear-all" @click="clearFilters">Clear all</button>
+          </div>
         </div>
 
         <div v-if="!hasLinks" class="empty-state">
@@ -1138,6 +1168,70 @@ function clearFilters() {
 .toolbar-add:hover { color: var(--accent); background: var(--accent-bg); border-color: var(--accent-border); }
 .toolbar-add:active { transform: scale(0.94); }
 .toolbar-add svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
+/* Active-filter summary: one chip per applied constraint on its own line in
+   the sticky band. order:99 keeps it last in every toolbar composition (wide
+   and narrow) so the existing row ordering/invariants are untouched. This is
+   the always-visible clear path — search stays clearable via its own ✕ too. */
+.filter-chips {
+  flex: 1 1 100%;
+  order: 99;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 7px;
+  margin-top: 2px;
+  border-top: 1px dashed var(--border);
+}
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-h);
+  background: var(--accent-bg);
+  border: 1px solid var(--accent-border);
+  border-radius: 999px;
+  padding: 3px 4px 3px 10px;
+  white-space: nowrap;
+}
+.chip-clear {
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+.chip-clear:hover { background: var(--accent); color: var(--on-accent); }
+.chip-clear svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.chip-clear-all {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  background: var(--muted-bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 10px;
+  cursor: pointer;
+  transition: color .15s, border-color .15s;
+}
+.chip-clear-all:hover { color: var(--text-h); border-color: var(--accent-border); }
+/* Drawer toggles: accent dot when something is filtered/viewed, so the active
+   state is glanceable below 1200px without opening the drawer. */
+.toggle-badge {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  flex-shrink: 0;
+  margin-left: 2px;
+}
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .row-list { display: flex; flex-direction: column; gap: 10px; }
