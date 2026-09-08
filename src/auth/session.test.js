@@ -65,8 +65,8 @@ describe('session abstraction — login and logout', () => {
     const s = createSession(createMemoryAdapter())
     await s.login()
     // The only surface session.js exposes is auth state — there is no way
-    // for the abstraction (or a logout) to reach links/folders/profile/etc.
-    expect(Object.keys(s).sort()).toEqual(['getState', 'initSession', 'login', 'logout', 'subscribe'])
+    // for the abstraction (or a logout/refresh) to reach links/folders/profile/etc.
+    expect(Object.keys(s).sort()).toEqual(['getState', 'initSession', 'login', 'logout', 'refreshSession', 'subscribe'])
     await s.logout()
     expect(s.getState().status).toBe('anonymous')
   })
@@ -125,6 +125,176 @@ describe('session abstraction — subscriptions', () => {
   })
 })
 
+describe('session abstraction — session refresh', () => {
+  // Deferred-refresh adapter: holds a rotation in flight so a test can resolve
+  // or reject it later and exercise concurrent/stale completions deterministically.
+  function deferredRefreshAdapter() {
+    const base = createMemoryAdapter({ initialUser: ALICE, loginUser: ALICE })
+    const deferred = { resolve: null, reject: null }
+    let refreshCalls = 0
+    return {
+      adapter: {
+        init: () => base.init(),
+        login: () => base.login(),
+        logout: () => base.logout(),
+        refresh: () => {
+          refreshCalls += 1
+          return new Promise((resolve, reject) => {
+            deferred.resolve = resolve
+            deferred.reject = reject
+          })
+        },
+      },
+      deferred,
+      getCalls: () => refreshCalls,
+    }
+  }
+
+  it('successful refresh keeps the authenticated user unchanged', async () => {
+    const s = createSession(createMemoryAdapter({ initialUser: ALICE }))
+    await s.initSession()
+    expect(await s.refreshSession()).toBe(true)
+    expect(s.getState().status).toBe('authenticated')
+    expect(s.getState().user).toEqual(ALICE)
+    expect(s.getState().error).toBeNull()
+  })
+
+  it('refresh 401 (expired/revoked, code SESSION_EXPIRED) settles safely to anonymous', async () => {
+    const s = createSession(createMemoryAdapter({ initialUser: ALICE, expireOnRefresh: true }))
+    await s.initSession()
+    expect(await s.refreshSession()).toBe(false)
+    expect(s.getState()).toEqual({ status: 'anonymous', user: null, error: null })
+  })
+
+  it('refresh infrastructure failure (503/network) keeps the authenticated state', async () => {
+    const s = createSession(createMemoryAdapter({ initialUser: ALICE, failRefresh: true }))
+    await s.initSession()
+    expect(await s.refreshSession()).toBe(false)
+    // Never end a possibly-valid session on a transient failure.
+    expect(s.getState().status).toBe('authenticated')
+    expect(s.getState().user).toEqual(ALICE)
+    expect(s.getState().error).toContain('refresh failed')
+  })
+
+  it('refresh is a no-op when not authenticated', async () => {
+    const s = createSession(createMemoryAdapter())
+    await s.initSession()
+    expect(s.getState().status).toBe('anonymous')
+    expect(await s.refreshSession()).toBe(false)
+    expect(s.getState().status).toBe('anonymous')
+  })
+
+  it('refresh is auth-only: it installs no timers and has no data-touching surface', async () => {
+    const intervalSpy = vi.spyOn(globalThis, 'setInterval')
+    const s = createSession(createMemoryAdapter({ initialUser: ALICE }))
+    await s.initSession()    // boot refresh runs once here
+    await s.refreshSession() // explicit refresh on visibility resume
+    expect(intervalSpy).not.toHaveBeenCalled() // no periodic background refresh
+    intervalSpy.mockRestore()
+    // Expiry transitions the auth state only — local data (IndexedDB links,
+    // folders, etc.) is unreachable from the session abstraction by design:
+    // the surface test above proves refreshSession is the only addition.
+    const s2 = createSession(createMemoryAdapter({ initialUser: ALICE, expireOnRefresh: true }))
+    await s2.initSession()
+    await s2.refreshSession()
+    expect(s2.getState().status).toBe('anonymous')
+  })
+
+  it('boot: initSession triggers exactly one server refresh when it restores a session; none when anonymous', async () => {
+    let refreshCalls = 0
+    const adapter = createMemoryAdapter({ initialUser: ALICE })
+    const wrapped = {
+      init: () => adapter.init(),
+      login: () => adapter.login(),
+      logout: () => adapter.logout(),
+      refresh: () => { refreshCalls += 1; return adapter.refresh() },
+    }
+    const s = createSession(wrapped)
+    await s.initSession()
+    expect(s.getState().status).toBe('authenticated')
+    expect(refreshCalls).toBe(1)
+
+    const anon = createSession(createMemoryAdapter())
+    await anon.initSession()
+    expect(anon.getState().status).toBe('anonymous')
+    expect(refreshCalls).toBe(1) // anonymous boot never refreshes
+  })
+
+  it('boot: a failed refresh must not fail initSession', async () => {
+    const s = createSession(createMemoryAdapter({ initialUser: ALICE, failRefresh: true }))
+    await expect(s.initSession()).resolves.toBeUndefined()
+    expect(s.getState().status).toBe('authenticated')
+    expect(s.getState().error).toContain('refresh failed')
+  })
+
+  it('concurrent refresh calls share ONE rotation (exactly one adapter.refresh())', async () => {
+    const { adapter, deferred, getCalls } = deferredRefreshAdapter()
+    const s = createSession(adapter)
+    await s.login()
+    const first = s.refreshSession()
+    const second = s.refreshSession()
+    expect(getCalls()).toBe(1) // deduped: one request for the same authentication
+    deferred.resolve()
+    await expect(first).resolves.toBe(true)
+    await expect(second).resolves.toBe(true)
+    // Once the shared rotation completes, a later refresh rotates again.
+    const third = s.refreshSession()
+    expect(getCalls()).toBe(2)
+    deferred.resolve()
+    await expect(third).resolves.toBe(true)
+  })
+
+  it('concurrent callers share a failing rotation and settle once to anonymous', async () => {
+    const { adapter, deferred, getCalls } = deferredRefreshAdapter()
+    const s = createSession(adapter)
+    await s.login()
+    const first = s.refreshSession()
+    const second = s.refreshSession()
+    expect(getCalls()).toBe(1)
+    deferred.reject(Object.assign(new Error('session expired'), { code: 'SESSION_EXPIRED' }))
+    await expect(first).resolves.toBe(false)
+    await expect(second).resolves.toBe(false)
+    expect(s.getState()).toEqual({ status: 'anonymous', user: null, error: null })
+  })
+
+  it('a stale SESSION_EXPIRED cannot tear down a NEWER valid authentication', async () => {
+    const { adapter, deferred } = deferredRefreshAdapter()
+    const s = createSession(adapter)
+    await s.login()
+    const stale = s.refreshSession() // rotation for the FIRST authentication
+    await s.logout()
+    await s.login() // newer valid authentication — same account, new session
+    deferred.reject(Object.assign(new Error('session expired'), { code: 'SESSION_EXPIRED' }))
+    await expect(stale).resolves.toBe(false)
+    // The stale 401 must NOT log out the newer authentication.
+    expect(s.getState().status).toBe('authenticated')
+    expect(s.getState().user).toEqual(ALICE)
+    expect(s.getState().error).toBeNull()
+  })
+
+  it('a refresh completing after logout keeps the logged-out state', async () => {
+    const { adapter, deferred } = deferredRefreshAdapter()
+    const s = createSession(adapter)
+    await s.login()
+    const pending = s.refreshSession()
+    await s.logout()
+    deferred.reject(Object.assign(new Error('session expired'), { code: 'SESSION_EXPIRED' }))
+    await expect(pending).resolves.toBe(false)
+    expect(s.getState()).toEqual({ status: 'anonymous', user: null, error: null })
+  })
+
+  it('an infrastructure-failed refresh after logout records no error on the anonymous state', async () => {
+    const { adapter, deferred } = deferredRefreshAdapter()
+    const s = createSession(adapter)
+    await s.login()
+    const pending = s.refreshSession()
+    await s.logout()
+    deferred.reject(new Error('network unavailable'))
+    await expect(pending).resolves.toBe(false)
+    expect(s.getState()).toEqual({ status: 'anonymous', user: null, error: null })
+  })
+})
+
 describe('session abstraction — provider neutrality', () => {
   it('a user object contains only provider-neutral identity fields — no secrets', async () => {
     const s = createSession(createMemoryAdapter())
@@ -156,12 +326,16 @@ describe('session abstraction — provider neutrality', () => {
 })
 
 describe('fake in-memory adapter', () => {
-  it('simulates anonymous, authenticated, login, logout and init failure', async () => {
+  it('simulates anonymous, authenticated, login, logout, init and refresh', async () => {
     const anon = createMemoryAdapter()
     expect(await anon.init()).toBeNull()
     await expect(createMemoryAdapter({ failInit: true }).init()).rejects.toThrow('initialization failed')
     await expect(createMemoryAdapter({ failLogin: true }).login()).rejects.toThrow('login failed')
     await expect(createMemoryAdapter({ failLogout: true }).logout()).rejects.toThrow('logout failed')
+    await expect(createMemoryAdapter({ failRefresh: true }).refresh()).rejects.toThrow('refresh failed')
+    await createMemoryAdapter({ expireOnRefresh: true }).refresh().catch((err) => {
+      expect(err.code).toBe('SESSION_EXPIRED')
+    })
 
     const withUser = createMemoryAdapter({ initialUser: ALICE })
     expect(await withUser.init()).toEqual(ALICE)

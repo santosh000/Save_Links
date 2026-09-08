@@ -56,14 +56,19 @@
 			"database_id": "39997a61-6efe-4628-9054-1c61c173f83f"
 		}
 	],
-	// Phase 3C-1: GitHub OAuth + signed OAuth-state cookie. These are deployed
-	// as Wrangler secrets (`wrangler secret put <NAME>`) for production and
-	// read from the gitignored .dev.vars file locally (see MAINTAINERS.md;
-	// {env}.dev.vars matching is supported). `required` is a deploy guard: a
-	// `wrangler deploy` fails loudly instead of shipping half-configured auth.
+	// Phase 3C-1: GitHub OAuth + signed OAuth-state cookie. Google is the
+	// primary provider and adds GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET (same
+	// flow machinery; the google callback additionally verifies Google's
+	// signed id_token server-side). These are deployed as Wrangler secrets
+	// (`wrangler secret put <NAME>`) for production and read from the
+	// gitignored .dev.vars file locally (see MAINTAINERS.md; {env}.dev.vars
+	// matching is supported). `required` is a deploy guard: a `wrangler deploy`
+	// fails loudly instead of shipping half-configured auth.
 	// https://developers.cloudflare.com/workers/wrangler/configuration/#secrets
 	"secrets": {
 		"required": [
+			"GOOGLE_CLIENT_ID",
+			"GOOGLE_CLIENT_SECRET",
 			"GITHUB_CLIENT_ID",
 			"GITHUB_CLIENT_SECRET",
 			"STATE_HMAC_SECRET"

@@ -343,7 +343,15 @@ export async function syncNow({
             break
           }
           case 'rejected': {
-            // Client error (400/401/403). Not retryable — mark failed.
+            // 401 — the session died mid-push (expired/revoked cookie). This
+            // is retryable, not a client error: leave the mutation pending so
+            // a later authenticated sync retries it (the pushed marker is
+            // preserved and markMutationPushed is idempotent). 400/403 are
+            // genuine client errors and stay non-retryable (marked failed).
+            if (result.status === 401) {
+              summary.unavailable++
+              break
+            }
             await repo.markMutationFailed(mutation.mutation_id)
             summary.failed++
             break

@@ -17,6 +17,7 @@ const h = vi.hoisted(() => {
   let initResolve = null
   const addPendingMutationMock = vi.fn()
   const syncNowMock = vi.fn()
+  const refreshSessionMock = vi.fn(async () => true)
   const anonLinks = []
   const anonFolders = []
   return {
@@ -32,6 +33,7 @@ const h = vi.hoisted(() => {
     getInitResolve: () => initResolve,
     addPendingMutationMock,
     syncNowMock,
+    refreshSessionMock,
     anonLinks,
     anonFolders,
   }
@@ -45,6 +47,7 @@ vi.mock('./auth/session.js', () => ({
     initSession: h.initSession,
     login: h.login,
     logout: h.logout,
+    refreshSession: h.refreshSessionMock,
   },
   initSession: h.initSession,
 }))
@@ -129,6 +132,7 @@ function resetAnonData() {
   h.anonFolders.length = 0
   h.syncNowMock.mockReset()
   h.syncNowMock.mockResolvedValue({ pushed: 0, succeeded: 0, failed: 0, conflict: 0, unavailable: 0, pulled: 0, applied: 0, skippedLocal: 0, skippedStale: 0 })
+  h.refreshSessionMock.mockClear()
   h.addPendingMutationMock.mockClear()
   h.loginResolve = null
   h.initResolve = null
@@ -578,6 +582,70 @@ describe('Visibility resume — immediate sync (Optimization #2)', () => {
     expect(h.syncNowMock).not.toHaveBeenCalled()
 
     intervalSpy.mockRestore()
+    wrapper.unmount()
+  })
+
+  it('hidden → visible while authenticated triggers exactly one session refresh', async () => {
+    const wrapper = await mountAuthenticated()
+    h.refreshSessionMock.mockClear()
+
+    setDocumentVisibility('hidden')
+    setDocumentVisibility('visible')
+    await flush()
+
+    expect(h.refreshSessionMock).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('repeated visible events without a hidden transition do not refresh the session', async () => {
+    const wrapper = await mountAuthenticated()
+    h.refreshSessionMock.mockClear()
+
+    setDocumentVisibility('hidden')
+    setDocumentVisibility('visible')
+    await flush()
+    expect(h.refreshSessionMock).toHaveBeenCalledTimes(1)
+
+    // No hidden transition in between — no resume, no refresh.
+    setDocumentVisibility('visible')
+    setDocumentVisibility('visible')
+    await flush()
+    expect(h.refreshSessionMock).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('hidden → visible while offline does not refresh the session', async () => {
+    const wrapper = await mountAuthenticated()
+    h.refreshSessionMock.mockClear()
+
+    const original = navigator.onLine
+    Object.defineProperty(navigator, 'onLine', { value: false, configurable: true })
+    try {
+      setDocumentVisibility('hidden')
+      setDocumentVisibility('visible')
+      await flush()
+      expect(h.refreshSessionMock).not.toHaveBeenCalled()
+    } finally {
+      Object.defineProperty(navigator, 'onLine', { value: original, configurable: true })
+      wrapper.unmount()
+    }
+  })
+
+  it('hidden → visible while unauthenticated does not refresh the session', async () => {
+    setAuth('anonymous', null)
+    if (h.initResolve) {
+      h.initResolve(null)
+      h.initResolve = null
+    }
+    await flush()
+    const wrapper = mountApp()
+    await flush()
+    h.refreshSessionMock.mockClear()
+
+    setDocumentVisibility('hidden')
+    setDocumentVisibility('visible')
+    await flush()
+    expect(h.refreshSessionMock).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 })

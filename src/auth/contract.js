@@ -73,4 +73,17 @@
  *       session abstraction records the error and keeps the current status
  *       (logout must NEVER touch local data — clearing IndexedDB, links,
  *       folders, profile, settings, migrations or backups is forbidden).
+ *
+ *   refresh(): Promise<void>
+ *     — rotate the authenticated session server-side (POST /api/session/refresh):
+ *       the server revokes the presented session and sets a fresh HttpOnly
+ *       cookie; the client only learns success/failure. Resolves when the
+ *       rotation was accepted (a fresh session cookie is now active). A
+ *       rejection whose err.code === 'SESSION_EXPIRED' means the presented
+ *       session is genuinely gone (401) — the caller settles safely to
+ *       anonymous. Any OTHER rejection is an infrastructure failure
+ *       (503/network) — the caller keeps the current authenticated state,
+ *       never ending a possibly-valid session on a transient failure and
+ *       never fabricating a half-authenticated state. Refresh must NEVER
+ *       touch local data (same boundary as logout).
  */

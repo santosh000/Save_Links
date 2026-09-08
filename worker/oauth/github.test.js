@@ -163,31 +163,25 @@ describe('getIdentity', () => {
     }
   })
 
-  it('diagnostic log emits only non-sensitive metadata, never a token or the response body', async () => {
+  it('never logs anything during identity fetch (temporary diagnostic removed)', async () => {
     const accessToken = 'gho_BEARER_TOKEN_MARKER_XYZ'
     const bodyTokenMarker = 'BODY_SECRET_ACCESS_TOKEN_ABC'
     const fetchImpl = vi.fn(
       async () =>
         new Response(JSON.stringify({ id: 42, login: 'octo', leaked: bodyTokenMarker }), {
           status: 200,
-          headers: { 'Content-Type': 'application/json', 'Content-Length': '1' }, // any presence is fine
+          headers: { 'Content-Type': 'application/json' },
         })
     )
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {})
     try {
       const identity = await getIdentity({ accessToken, fetchImpl })
       expect(identity).toEqual({ subject: '42', login: 'octo' })
-      expect(spy).toHaveBeenCalled()
-      const logged = spy.mock.calls.map((c) => c.join(' ')).join('\n')
-      // non-sensitive metadata is present (proves logging actually ran)
-      expect(logged).toContain('[getIdentity][diagnostic]')
-      expect(logged).toContain('status=200')
-      expect(logged).toContain('ok=true')
-      expect(logged).toContain('url=https://api.github.com/user')
-      // NEVER the token, authorization header, or response body
-      expect(logged).not.toContain(accessToken)
-      expect(logged).not.toContain(bodyTokenMarker)
-      expect(logged).not.toContain('Bearer')
+      // Regression guard: the Phase 3C-1 temporary diagnostic was removed, so
+      // the identity path must never log — not metadata, and therefore never
+      // the token or the response body either.
+      expect(spy).not.toHaveBeenCalled()
+      expect(bodyTokenMarker).toBeTruthy() // marker stayed in the mock, unlogged
     } finally {
       spy.mockRestore()
     }

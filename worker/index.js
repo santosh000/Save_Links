@@ -11,6 +11,9 @@
 //   GET  /auth/github/login  -> start GitHub OAuth (signed state cookie)
 //   GET  /auth/github/callback -> exchange code, identify, resolve account,
 //                                 create session, hand out browser cookie
+//   GET  /auth/google/login  -> start Google OAuth (state cookie + nonce)
+//   GET  /auth/google/callback -> exchange code, VERIFY signed id_token (JWKS),
+//                                 resolve account, create session, cookie
 //   GET  /auth/me            -> current authenticated identity (AuthUser shape)
 //   POST /auth/logout        -> revoke session + clear session cookie(s)
 //   GET  /api/me             -> authenticated API boundary probe (200/401/503/500)
@@ -28,8 +31,10 @@ import { handleOAuthLogin, handleOAuthCallback, handleAuthMe, handleAuthLogout }
 import { handleApiMe, handleApiSessionRefresh, handleApiSyncMutation, handleApiSyncMutations, handleApiSyncObjects } from './api.js'
 
 const AUTH_ROUTES = new Map([
-  ['/auth/github/login', { allow: ['GET'], handler: handleOAuthLogin }],
-  ['/auth/github/callback', { allow: ['GET'], handler: handleOAuthCallback }],
+  ['/auth/github/login', { allow: ['GET'], handler: (req, env) => handleOAuthLogin(req, env, { provider: 'github' }) }],
+  ['/auth/github/callback', { allow: ['GET'], handler: (req, env) => handleOAuthCallback(req, env, { provider: 'github' }) }],
+  ['/auth/google/login', { allow: ['GET'], handler: (req, env) => handleOAuthLogin(req, env, { provider: 'google' }) }],
+  ['/auth/google/callback', { allow: ['GET'], handler: (req, env) => handleOAuthCallback(req, env, { provider: 'google' }) }],
   ['/auth/me', { allow: ['GET'], handler: handleAuthMe }],
   ['/auth/logout', { allow: ['POST'], handler: handleAuthLogout }],
 ])

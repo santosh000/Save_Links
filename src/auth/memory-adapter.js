@@ -20,6 +20,9 @@
  * @param {boolean} [options.failInit]           make init() reject
  * @param {boolean} [options.failLogin]          make login() reject
  * @param {boolean} [options.failLogout]         make logout() reject
+ * @param {boolean} [options.failRefresh]        make refresh() reject (infrastructure failure)
+ * @param {boolean} [options.expireOnRefresh]    make refresh() reject with code 'SESSION_EXPIRED'
+ *                                               (simulates an expired/revoked session)
  * @param {AuthUser} [options.loginUser]         user returned by login()
  */
 export function createMemoryAdapter(options = {}) {
@@ -28,6 +31,8 @@ export function createMemoryAdapter(options = {}) {
     failInit = false,
     failLogin = false,
     failLogout = false,
+    failRefresh = false,
+    expireOnRefresh = false,
     loginUser = { id: 'memory-user', name: 'Memory User', email: null },
   } = options
 
@@ -46,6 +51,15 @@ export function createMemoryAdapter(options = {}) {
     logout() {
       if (failLogout) return Promise.reject(new Error('Memory adapter: logout failed'))
       user = null
+      return Promise.resolve()
+    },
+    refresh() {
+      if (expireOnRefresh) {
+        const err = new Error('Memory adapter: session expired')
+        err.code = 'SESSION_EXPIRED'
+        return Promise.reject(err)
+      }
+      if (failRefresh) return Promise.reject(new Error('Memory adapter: refresh failed'))
       return Promise.resolve()
     },
   }

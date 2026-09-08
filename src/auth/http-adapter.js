@@ -11,9 +11,10 @@
 //     The client never supplies or trusts an account id for authentication.
 //   - No secret (session token, OAuth token, state secret, cookie value) ever
 //     reaches this module or any other application state.
-//   - OAuth is a top-level redirect (/auth/github/login). It cannot hand back a
-//     user in-page: the callback sets the cookie and redirects to /, where the
-//     app boots, init() calls /api/me, and the authenticated account resolves.
+//   - OAuth is a top-level redirect (/auth/google/login | /auth/github/login).
+//     It cannot hand back a user in-page: the callback sets the cookie and
+//     redirects to /, where the app boots, init() calls /api/me, and the
+//     authenticated account resolves.
 //
 // Failure semantics (session.js records these; a boot must never fail local UI):
 //   - 401  -> anonymous (no / expired / revoked session) — normal signed-out result
@@ -24,9 +25,10 @@
 //     init() after the OAuth callback. The UI signs in via accountService,
 //     never by awaiting session.login().
 
-export const AUTH_LOGIN_PATH = '/auth/github/login'
+export const AUTH_LOGIN_PATHS = { google: '/auth/google/login', github: '/auth/github/login' }
 export const AUTH_ME_PATH = '/api/me'
 export const AUTH_LOGOUT_PATH = '/auth/logout'
+export const AUTH_REFRESH_PATH = '/api/session/refresh'
 
 function unavailableFetch() {
   return Promise.reject(new Error('Fetch is not available in this environment'))
@@ -91,13 +93,18 @@ export function createHttpAdapter({
     },
 
     /**
-     * Start GitHub OAuth via a top-level redirect. The supplied promise never
-     * resolves in-page: the page navigates away and the identity is restored by
-     * init() after the callback. Callers must NOT await this to drive session
-     * state — sign in via accountService.signIn(), never session.login().
+     * Start provider OAuth via a top-level redirect to the provider's login
+     * route (Google is the primary provider; GitHub stays supported). The
+     * supplied promise never resolves in-page: the page navigates away and the
+     * identity is restored by init() after the callback. Callers must NOT
+     * await this to drive session state — sign in via
+     * accountService.signIn(provider), never session.login().
+     * @param {'google'|'github'} [provider] default 'google' (primary provider)
      */
-    login() {
-      location.assign(AUTH_LOGIN_PATH)
+    login(provider = 'google') {
+      const path = AUTH_LOGIN_PATHS[provider]
+      if (!path) throw new Error(`Unknown authentication provider: ${provider}`)
+      location.assign(path)
       // Never-settling: an OAuth login does not complete inside a single page
       // load, and setting session to 'authenticated' here would be a false claim.
       return new Promise(() => {})
@@ -109,6 +116,33 @@ export function createHttpAdapter({
       // The Worker returns 200 for valid/expired/revoked/missing sessions; a
       // non-2xx means we cannot confirm revocation — reject so the UI surfaces it.
       if (!res.ok) throw new Error('Sign out failed: unexpected response')
+      return undefined
+    },
+
+    /**
+     * Rotate the authenticated session server-side. The server revokes the
+     * presented session and sets a fresh cookie; the client only learns
+     * success/failure. 401 means the presented session is genuinely
+     * expired/revoked — reject with err.code === 'SESSION_EXPIRED' so the
+     * session abstraction settles to anonymous. Any other non-2xx (or a
+     * network failure) means infrastructure trouble — the caller keeps the
+     * current authenticated state. Never touches local data: cookies are
+     * browser-managed HttpOnly.
+     * @returns {Promise<undefined>}
+     */
+    async refresh() {
+      let res
+      try {
+        res = await post(AUTH_REFRESH_PATH)
+      } catch {
+        throw new Error('Session refresh failed: network unavailable')
+      }
+      if (res.status === 401) {
+        const err = new Error('Session refresh failed: session expired or revoked')
+        err.code = 'SESSION_EXPIRED'
+        throw err
+      }
+      if (!res.ok) throw new Error('Session refresh failed: unexpected response')
       return undefined
     },
   }

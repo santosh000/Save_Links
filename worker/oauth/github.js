@@ -112,27 +112,6 @@ export async function getIdentity({ accessToken, fetchImpl = fetch }) {
     },
   })
 
-  // TEMPORARY DIAGNOSTIC — remove after root-causing the identity-fetch failure.
-  // Logs ONLY non-sensitive metadata. NEVER logs the access_token, Authorization
-  // header, OAuth code, state, cookies, response body, or any credential/secret.
-  let bodyParseSucceeded = false
-  try {
-    await res.clone().json()
-    bodyParseSucceeded = true
-  } catch {
-    bodyParseSucceeded = false
-  }
-  {
-    const logResUrl = new URL(res.url || GITHUB_API_USER_URL)
-    console.log(
-      `[getIdentity][diagnostic] status=${res.status} ok=${res.ok} ` +
-        `content-type=${res.headers.get('content-type')} ` +
-        `content-length=${res.headers.get('content-length')} ` +
-        `url=${logResUrl.origin}${logResUrl.pathname} ` +
-        `body-json-parse=${bodyParseSucceeded}`
-    )
-  }
-
   let data
   try {
     data = await res.json()

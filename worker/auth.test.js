@@ -5,13 +5,21 @@
 // path through every security-negative branch: no secret/token/code ever
 // appearing in a response, no raw token ever entering D1, no session cookie
 // on any failure.
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { handleOAuthLogin, handleOAuthCallback, handleAuthMe, handleAuthLogout } from './auth.js'
-import { createStateCookieValue, OAUTH_STATE_COOKIE, OAUTH_STATE_TTL_MS, pkceCodeChallenge } from './oauth/state.js'
+import { createStateCookieValue, OAUTH_STATE_COOKIE, OAUTH_STATE_TTL_MS, pkceCodeChallenge, verifyStateCookieValue } from './oauth/state.js'
+import { clearJwksCache } from './oauth/google.js'
+import { makeJwkKeyPair, signTestIdToken } from './oauth/idtoken.test-util.js'
 import { createTestDb } from './db/d1-facade.js'
-import { createSession, generateSessionToken, getSessionByToken, revokeSessionByToken, resolveAccountByProvider } from './db/store.js'
+import { createSession, generateSessionToken, getAccountIdByProviderIdentity, getSessionByToken, revokeSessionByToken, resolveAccountByProvider } from './db/store.js'
 
-const SECRETS = { GITHUB_CLIENT_ID: 'Iv1.test-client', GITHUB_CLIENT_SECRET: 'test-client-secret', STATE_HMAC_SECRET: 'test-state-hmac' }
+const SECRETS = {
+  GITHUB_CLIENT_ID: 'Iv1.test-client',
+  GITHUB_CLIENT_SECRET: 'test-client-secret',
+  GOOGLE_CLIENT_ID: '1234567890.apps.googleusercontent.com',
+  GOOGLE_CLIENT_SECRET: 'test-google-client-secret',
+  STATE_HMAC_SECRET: 'test-state-hmac',
+}
 const NOW = 1_700_000_000_000
 // mirrors wrangler.jsonc vars: the allowlist the tests' plain-http dev origin
 // and https preview origin both appear on
@@ -777,5 +785,327 @@ describe('single-use OAuth state (Phase 3C-2)', () => {
     const untouched = await handleOAuthCallback(new Request(CALLBACK_URL), noClearEnv, { now: NOW })
     expect(untouched.status).toBe(400)
     expect(untouched.headers.get('set-cookie')).toBeNull()
+  })
+})
+
+// ---- Google OAuth (primary provider): /auth/google/login + /auth/google/callback -----
+
+const GOOGLE_LOGIN_URL = 'http://localhost:8787/auth/google/login'
+const GOOGLE_CALLBACK_URL = 'http://localhost:8787/auth/google/callback'
+const GOOGLE_NONCE = 'test-google-nonce'
+const GOOGLE_SUB = 'google-user-105'
+
+function googleClaims({ now = NOW, sub = GOOGLE_SUB, nonce = GOOGLE_NONCE, email = 'user@example.com', ...overrides } = {}) {
+  return {
+    iss: 'https://accounts.google.com',
+    aud: SECRETS.GOOGLE_CLIENT_ID,
+    sub,
+    email,
+    exp: Math.floor((now + 3_600_000) / 1000),
+    nbf: Math.floor((now - 60_000) / 1000),
+    nonce,
+    ...overrides,
+  }
+}
+
+/**
+ * Build a mock Google fetch: token endpoint returns a REAL RS256-signed
+ * id_token (minted from `claims`), /certs returns the matching public JWK.
+ * Everything is generated per test; no network, deterministic.
+ */
+async function makeGoogleFetch({ keyPair, claims, kid = 'test-kid', jwksKeys = null } = {}) {
+  const idToken = await signTestIdToken({ claims, privateKey: keyPair.privateKey, kid })
+  const keys = jwksKeys ?? { keys: [{ ...keyPair.publicJwk, kid, use: 'sig' }] }
+  return vi.fn(async (url) => {
+    const u = String(url)
+    if (u.includes('oauth2.googleapis.com/token')) {
+      return jsonResponse({ id_token: idToken })
+    }
+    if (u.includes('googleapis.com/oauth2/v3/certs')) {
+      return jsonResponse(keys)
+    }
+    throw new Error(`unexpected URL: ${url}`)
+  })
+}
+
+async function googleStateCookieValue({ secret = SECRETS.STATE_HMAC_SECRET, now = NOW, provider = 'google', nonce = GOOGLE_NONCE } = {}) {
+  return createStateCookieValue({ secret, now, provider, nonce })
+}
+
+function googleCallbackRequest(cookieValue, { state, code = 'one-time-code', base = GOOGLE_CALLBACK_URL } = {}) {
+  const u = new URL(base)
+  u.searchParams.set('state', state)
+  u.searchParams.set('code', code)
+  return new Request(u, { headers: { cookie: `${OAUTH_STATE_COOKIE}=${encodeURIComponent(cookieValue)}` } })
+}
+
+describe('GET /auth/google/login', () => {
+  it('redirects to Google authorize with S256 PKCE + nonce, and the SAME nonce is bound into the state cookie', async () => {
+    const res = await handleOAuthLogin(new Request(GOOGLE_LOGIN_URL), makeEnv(), { now: NOW, provider: 'google' })
+    expect(res.status).toBe(302)
+    const location = new URL(res.headers.get('location'))
+    expect(location.origin + location.pathname).toBe('https://accounts.google.com/o/oauth2/v2/auth')
+    expect(location.searchParams.get('client_id')).toBe(SECRETS.GOOGLE_CLIENT_ID)
+    expect(location.searchParams.get('redirect_uri')).toBe('http://localhost:8787/auth/google/callback')
+    expect(location.searchParams.get('response_type')).toBe('code')
+    expect(location.searchParams.get('scope')).toBe('openid email profile')
+    expect(location.searchParams.get('code_challenge')).toMatch(/^[A-Za-z0-9_-]{43}$/)
+    expect(location.searchParams.get('code_challenge_method')).toBe('S256')
+    expect(location.searchParams.get('prompt')).toBe('select_account')
+
+    // the nonce on the wire must be the one signed into the oauth_state cookie
+    const urlNonce = location.searchParams.get('nonce')
+    expect(urlNonce).toMatch(/^[A-Za-z0-9_-]{43}$/)
+    const cookie = decodeURIComponent(res.headers.getSetCookie()[0].slice(`${OAUTH_STATE_COOKIE}=`.length, res.headers.getSetCookie()[0].indexOf(';')))
+    const verified = await verifyStateCookieValue(cookie, { secret: SECRETS.STATE_HMAC_SECRET, now: NOW })
+    expect(verified.provider).toBe('google')
+    expect(verified.nonce).toBe(urlNonce)
+  })
+
+  it('503s when the google secrets are missing, leaking nothing', async () => {
+    const res = await handleOAuthLogin(
+      new Request(GOOGLE_LOGIN_URL),
+      makeEnv({ GOOGLE_CLIENT_SECRET: undefined }),
+      { now: NOW, provider: 'google' }
+    )
+    expect(res.status).toBe(503)
+    const body = await res.text()
+    expect(body).not.toContain('test-google-client-secret')
+    expect(body).not.toContain(SECRETS.GOOGLE_CLIENT_ID)
+  })
+})
+
+describe('GET /auth/google/callback', () => {
+  let keyPair
+
+  beforeEach(async () => {
+    clearJwksCache() // per-test key pairs must never bleed through the module cache
+    keyPair = await makeJwkKeyPair()
+  })
+
+  it('verifies the signed id_token, creates the google account + hashed session, and hands the browser the bearer cookie once', async () => {
+    const env = makeEnv()
+    const created = await googleStateCookieValue()
+    const fetchImpl = await makeGoogleFetch({ keyPair, claims: googleClaims() })
+
+    const res = await handleOAuthCallback(
+      googleCallbackRequest(created.value, { state: created.state }),
+      env,
+      { now: NOW, fetchImpl, provider: 'google' }
+    )
+
+    expect(res.status).toBe(302)
+    expect(res.headers.get('location')).toBe('http://localhost:8787/')
+    const sessionCookieName = 'save_links_session_dev'
+    const sessionHeader = res.headers.get('set-cookie')
+    expect(sessionHeader).toContain(`${sessionCookieName}=`)
+    expect(sessionHeader).toContain('HttpOnly')
+    expect(sessionHeader).toContain('SameSite=Lax')
+
+    const sqlite = env.DB._sqlite
+    expect(sqlite.prepare('SELECT count(*) AS n FROM users').get().n).toBe(1)
+    const identity = sqlite.prepare('SELECT * FROM auth_identities').get()
+    expect(identity.provider).toBe('google')
+    expect(identity.provider_subject).toBe(GOOGLE_SUB) // Google's stable sub
+    const sessionRow = sqlite.prepare('SELECT * FROM sessions').get()
+    expect(sessionRow.account_id).toBe(identity.account_id)
+    expect(sessionRow.token_hash).toMatch(/^[0-9a-f]{64}$/)
+    const rawSessionCookie = setCookieValue(res, sessionCookieName)
+    expect(sessionRow.token_hash).not.toContain(rawSessionCookie)
+    // never the id_token, never any google secret
+    expect(await res.text()).toBe('')
+    expect(res.headers.get('location')).not.toContain('id_token')
+    expect(res.headers.get('location')).not.toContain(SECRETS.GOOGLE_CLIENT_SECRET)
+    // the verified identity is the sub — never the email
+    expect(sqlite.prepare('SELECT count(*) AS n FROM auth_identities WHERE provider_subject = ?').get('user@example.com').n).toBe(0)
+  })
+
+  it('a second sign-in with the same google sub resolves to the SAME account', async () => {
+    const env = makeEnv()
+    for (let i = 0; i < 2; i++) {
+      const created = await googleStateCookieValue({ now: NOW + i })
+      const res = await handleOAuthCallback(
+        googleCallbackRequest(created.value, { state: created.state }),
+        env,
+        { now: NOW + i, fetchImpl: await makeGoogleFetch({ keyPair, claims: googleClaims({ now: NOW + i }) }), provider: 'google' }
+      )
+      expect(res.status).toBe(302)
+    }
+    const sqlite = env.DB._sqlite
+    expect(sqlite.prepare('SELECT count(*) AS n FROM users').get().n).toBe(1)
+    expect(sqlite.prepare('SELECT count(*) AS n FROM auth_identities').get().n).toBe(1)
+    expect(sqlite.prepare('SELECT count(*) AS n FROM sessions').get().n).toBe(2)
+  })
+
+  it('a google account and a github account with the same raw subject and the same email are TWO accounts (no auto-linking)', async () => {
+    const env = makeEnv()
+    // google: sub '105', email shared with the github identity
+    const googleCreated = await googleStateCookieValue()
+    const googleRes = await handleOAuthCallback(
+      googleCallbackRequest(googleCreated.value, { state: googleCreated.state }),
+      env,
+      { now: NOW, fetchImpl: await makeGoogleFetch({ keyPair, claims: googleClaims({ sub: '105', email: 'shared@example.com' }) }), provider: 'google' }
+    )
+    expect(googleRes.status).toBe(302)
+
+    // github: numeric id 105 (same raw subject string, same email)
+    const githubCreated = await createStateCookieValue({ secret: SECRETS.STATE_HMAC_SECRET, now: NOW + 1 })
+    const githubRes = await handleOAuthCallback(
+      await happyCallbackRequest(githubCreated.value, { state: githubCreated.state }),
+      env,
+      { now: NOW + 1, fetchImpl: mockGithub({ identity: { id: 105, login: 'octo' } }) }
+    )
+    expect(githubRes.status).toBe(302)
+
+    // identity is provider-scoped: the same raw value under two providers maps
+    // to two DISTINCT accounts — email never merges them
+    const googleAccount = await getAccountIdByProviderIdentity(env.DB, { provider: 'google', providerSubject: '105' })
+    const githubAccount = await getAccountIdByProviderIdentity(env.DB, { provider: 'github', providerSubject: '105' })
+    expect(googleAccount).toBeTruthy()
+    expect(githubAccount).toBeTruthy()
+    expect(googleAccount).not.toBe(githubAccount)
+    const sqlite = env.DB._sqlite
+    expect(sqlite.prepare('SELECT count(*) AS n FROM users').get().n).toBe(2)
+    expect(sqlite.prepare('SELECT count(*) AS n FROM auth_identities').get().n).toBe(2)
+  })
+
+  it('rejects a state cookie issued for the WRONG provider, in both directions', async () => {
+    // 1. a github-era state cookie (no provider claim) presented at google -> 400, untouched
+    const env1 = makeEnv()
+    const githubState = await createStateCookieValue({ secret: SECRETS.STATE_HMAC_SECRET, now: NOW })
+    const fetch1 = await makeGoogleFetch({ keyPair, claims: googleClaims() })
+    const res1 = await handleOAuthCallback(
+      googleCallbackRequest(githubState.value, { state: githubState.state }),
+      env1,
+      { now: NOW, fetchImpl: fetch1, provider: 'google' }
+    )
+    expect(res1.status).toBe(400)
+    expect(res1.headers.get('set-cookie')).toBeNull()
+    expect(fetch1).not.toHaveBeenCalled()
+    expect(env1.DB._sqlite.prepare('SELECT count(*) AS n FROM sessions').get().n).toBe(0)
+
+    // 2. a google state cookie presented at github -> 400, untouched
+    const env2 = makeEnv()
+    const googleState = await googleStateCookieValue()
+    const fetch2 = mockGithub({})
+    const res2 = await handleOAuthCallback(
+      await happyCallbackRequest(googleState.value, { state: googleState.state }),
+      env2,
+      { now: NOW, fetchImpl: fetch2 }
+    )
+    expect(res2.status).toBe(400)
+    expect(fetch2).not.toHaveBeenCalled()
+    expect(env2.DB._sqlite.prepare('SELECT count(*) AS n FROM sessions').get().n).toBe(0)
+  })
+
+  it('rejects a google state cookie that lost its nonce, without consuming anything', async () => {
+    const env = makeEnv()
+    // provider claim present but nonce never minted (cannot happen from the
+    // login handler — google ALWAYS mints one; defense for a forged path)
+    const noNonce = await createStateCookieValue({ secret: SECRETS.STATE_HMAC_SECRET, now: NOW, provider: 'google' })
+    const fetchImpl = await makeGoogleFetch({ keyPair, claims: googleClaims() })
+    const res = await handleOAuthCallback(
+      googleCallbackRequest(noNonce.value, { state: noNonce.state }),
+      env,
+      { now: NOW, fetchImpl, provider: 'google' }
+    )
+    expect(res.status).toBe(400)
+    expect(res.headers.get('set-cookie')).toBeNull()
+    expect(fetchImpl).not.toHaveBeenCalled()
+    expect(env.DB._sqlite.prepare('SELECT count(*) AS n FROM sessions').get().n).toBe(0)
+  })
+
+  it('rejects invalid state the same way as github: tampered and expired, no session, no cookie cleared', async () => {
+    const env = makeEnv()
+    const created = await googleStateCookieValue()
+    const cases = [
+      { label: 'tampered cookie', req: googleCallbackRequest('AAAA.AAAA', { state: 'x' }), now: NOW },
+      {
+        label: 'expired cookie',
+        req: googleCallbackRequest(created.value, { state: created.state }),
+        now: NOW + OAUTH_STATE_TTL_MS,
+      },
+    ]
+    for (const c of cases) {
+      const res = await handleOAuthCallback(c.req, env, { now: c.now, fetchImpl: mockGithub({}), provider: 'google' })
+      expect(res.status, c.label).toBe(400)
+      expect(res.headers.get('set-cookie'), c.label).toBeNull()
+    }
+    expect(env.DB._sqlite.prepare('SELECT count(*) AS n FROM sessions').get().n).toBe(0)
+    expect(env.DB._sqlite.prepare('SELECT count(*) AS n FROM users').get().n).toBe(0)
+  })
+
+  it('a google state replay after a successful sign-in is rejected without any fetch or new session', async () => {
+    const env = makeEnv()
+    const created = await googleStateCookieValue()
+    const first = await handleOAuthCallback(
+      googleCallbackRequest(created.value, { state: created.state }),
+      env,
+      { now: NOW, fetchImpl: await makeGoogleFetch({ keyPair, claims: googleClaims() }), provider: 'google' }
+    )
+    expect(first.status).toBe(302)
+
+    const replayFetch = await makeGoogleFetch({ keyPair, claims: googleClaims() })
+    const replay = await handleOAuthCallback(
+      googleCallbackRequest(created.value, { state: created.state }),
+      env,
+      { now: NOW, fetchImpl: replayFetch, provider: 'google' }
+    )
+    expect(replay.status).toBe(400)
+    expect(replayFetch).not.toHaveBeenCalled()
+    expect(env.DB._sqlite.prepare('SELECT count(*) AS n FROM sessions').get().n).toBe(1)
+  })
+
+  it('an invalid id_token (nonce mismatch) fails as 502, clears the consumed state, issues NO session', async () => {
+    const env = makeEnv()
+    const created = await googleStateCookieValue()
+    const fetchImpl = await makeGoogleFetch({ keyPair, claims: googleClaims({ nonce: 'wrong-nonce' }) })
+    const res = await handleOAuthCallback(
+      googleCallbackRequest(created.value, { state: created.state }),
+      env,
+      { now: NOW, fetchImpl, provider: 'google' }
+    )
+    expect(res.status).toBe(502)
+    const cookies = res.headers.getSetCookie()
+    expect(cookies.some((c) => c.startsWith(`${OAUTH_STATE_COOKIE}=`) && c.includes('Max-Age=0'))).toBe(true)
+    expect(cookies.some((c) => c.includes('save_links_session_dev='))).toBe(false)
+    const body = await res.text()
+    expect(body).not.toContain('wrong-nonce')
+    expect(body).not.toContain(SECRETS.GOOGLE_CLIENT_SECRET)
+    expect(env.DB._sqlite.prepare('SELECT count(*) AS n FROM sessions').get().n).toBe(0)
+  })
+
+  it('revokes a pre-existing session on google auth (rotation), never reusing it', async () => {
+    const env = makeEnv()
+    const { account_id: accountId } = await resolveAccountByProvider(env.DB, {
+      provider: 'google',
+      providerSubject: GOOGLE_SUB,
+      now: NOW,
+    })
+    const previous = await createSession(env.DB, { accountId, now: NOW })
+    const created = await googleStateCookieValue()
+
+    const base = new URL(GOOGLE_CALLBACK_URL)
+    base.searchParams.set('state', created.state)
+    base.searchParams.set('code', 'c')
+    const req = new Request(base, {
+      headers: {
+        cookie: `${OAUTH_STATE_COOKIE}=${encodeURIComponent(created.value)}; save_links_session_dev=${encodeURIComponent(previous.token)}`,
+      },
+    })
+    const res = await handleOAuthCallback(
+      req,
+      env,
+      { now: NOW, fetchImpl: await makeGoogleFetch({ keyPair, claims: googleClaims() }), provider: 'google' }
+    )
+
+    expect(res.status).toBe(302)
+    const rawCookie = setCookieValue(res, 'save_links_session_dev')
+    expect(rawCookie).not.toBe(previous.token)
+    const sqlite = env.DB._sqlite
+    const prevRow = sqlite.prepare('SELECT revoked_at FROM sessions WHERE token_hash = ?').get(previous.tokenHash)
+    expect(prevRow.revoked_at).not.toBeNull()
+    expect(sqlite.prepare('SELECT count(*) AS n FROM sessions').get().n).toBe(2)
+    expect(sqlite.prepare('SELECT count(*) AS n FROM users').get().n).toBe(1)
   })
 })

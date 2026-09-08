@@ -3,7 +3,9 @@
 // State binding: the login handler generates an unguessable `state` plus a
 // PKCE `code_verifier`, and stores both in a single short-lived, HttpOnly,
 // SameSite=Lax cookie, HMAC-SHA256-signed by a Worker-side secret. The cookie
-// value is `payload.signature` where payload = base64url(JSON {s, v, exp}).
+// value is `payload.signature` where payload = base64url(JSON {s, v, exp, p?, n?})
+// — `p` binds the state to one provider and `n` is Google's OIDC nonce (see
+// createStateCookieValue).
 //
 // On callback the Worker verifies the signature (constant-time via
 // crypto.subtle.verify), checks the expiry, and requires the `state` query
@@ -24,13 +26,13 @@
 
 const PAYLOAD_SEPARATOR = '.'
 
-function bytesToBase64Url(bytes) {
+export function bytesToBase64Url(bytes) {
   let bin = ''
   for (const b of bytes) bin += String.fromCharCode(b)
   return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
-function base64UrlToBytes(value) {
+export function base64UrlToBytes(value) {
   let bin = atob(value.replace(/-/g, '+').replace(/_/g, '/'))
   const bytes = new Uint8Array(bin.length)
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
@@ -39,6 +41,11 @@ function base64UrlToBytes(value) {
 
 function randomBytesBase64Url(n) {
   return bytesToBase64Url(crypto.getRandomValues(new Uint8Array(n)))
+}
+
+/** 256-bit random nonce, sent to Google and echoed back in the signed id_token. */
+export function generateOAuthNonce() {
+  return randomBytesBase64Url(32)
 }
 
 function encodeText(text) {
@@ -76,22 +83,36 @@ export const OAUTH_STATE_COOKIE = 'oauth_state'
 
 /**
  * Generate a fresh signed state cookie value.
+ * Optional `provider` and `nonce` record WHICH provider the state was issued
+ * for (`p`) and the OIDC nonce bound to this sign-in (`n`). The provider claim
+ * lets a callback prove the state belongs to its own flow (a google state can
+ * never authorize a github callback or vice versa); the nonce lets the google
+ * path bind the id_token to exactly this sign-in. GitHub keeps working with
+ * provider-less cookies (legacy callers that created them before `p` existed).
  * @returns {Promise<{value: string, state: string, codeVerifier: string, expiresAt: number}>}
  */
-export async function createStateCookieValue({ secret, now = Date.now(), ttlMs = OAUTH_STATE_TTL_MS } = {}) {
+export async function createStateCookieValue({ secret, now = Date.now(), ttlMs = OAUTH_STATE_TTL_MS, provider, nonce } = {}) {
   if (typeof secret !== 'string' || secret.length === 0) throw new TypeError('secret must be a non-empty string')
   if (!Number.isInteger(ttlMs) || ttlMs <= 0) throw new TypeError('ttlMs must be a positive integer')
   const state = randomBytesBase64Url(16) // 128-bit unguessable
   const codeVerifier = randomBytesBase64Url(32) // 256-bit PKCE verifier
   const expiresAt = now + ttlMs
-  const payload = bytesToBase64Url(encodeText(JSON.stringify({ s: state, v: codeVerifier, exp: expiresAt })))
+  const payload = bytesToBase64Url(
+    encodeText(JSON.stringify({
+      s: state,
+      v: codeVerifier,
+      exp: expiresAt,
+      ...(typeof provider === 'string' && provider.length > 0 ? { p: provider } : {}),
+      ...(typeof nonce === 'string' && nonce.length > 0 ? { n: nonce } : {}),
+    }))
+  )
   const signature = await hmacSign(secret, payload)
   return { value: `${payload}${PAYLOAD_SEPARATOR}${signature}`, state, codeVerifier, expiresAt }
 }
 
 /**
  * Verify a state cookie value: format, signature (constant-time), expiry.
- * @returns {Promise<{state: string, codeVerifier: string, expiresAt: number}|null>}
+ * @returns {Promise<{state: string, codeVerifier: string, expiresAt: number, provider: string|null, nonce: string|null}|null>}
  */
 export async function verifyStateCookieValue(value, { secret, now = Date.now() } = {}) {
   if (typeof value !== 'string' || typeof secret !== 'string' || secret.length === 0 || !Number.isInteger(now)) {
@@ -111,7 +132,13 @@ export async function verifyStateCookieValue(value, { secret, now = Date.now() }
   }
   if (typeof data?.s !== 'string' || typeof data?.v !== 'string' || !Number.isInteger(data.exp)) return null
   if (data.exp <= now) return null
-  return { state: data.s, codeVerifier: data.v, expiresAt: data.exp }
+  return {
+    state: data.s,
+    codeVerifier: data.v,
+    expiresAt: data.exp,
+    provider: typeof data.p === 'string' && data.p.length > 0 ? data.p : null,
+    nonce: typeof data.n === 'string' && data.n.length > 0 ? data.n : null,
+  }
 }
 
 /** PKCE S256 challenge: base64url(SHA-256(codeVerifier)) — always 43 chars, no padding. */

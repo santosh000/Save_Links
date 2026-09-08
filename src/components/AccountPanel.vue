@@ -1,20 +1,20 @@
 <script setup>
-// Account / authentication area (Phase A — GitHub OAuth).
+// Account / authentication area (Phase A — provider OAuth).
 //
 // A single centered account experience rendered as a modal over the main
 // workspace (NOT the narrow side-tools column). Two states:
-//   signed out  → a single "Sign in with GitHub" action that starts the OAuth
-//                 redirect; the account identity is restored on the following
-//                 boot via GET /api/me (see http-adapter.js).
+//   signed out  → "Continue with Google" (primary) or "Continue with GitHub";
+//                 both start the provider OAuth redirect; the account identity
+//                 is restored on the following boot via GET /api/me (see
+//                 http-adapter.js).
 //   signed in   → server-derived account identity (id only, per /api/me) and a
 //                 real sign-out (POST /auth/logout) that revokes the session.
 //
-// The previous username/password register / forgot-* flows are gone — Phase A
-// is GitHub-OAuth-only (no credential backend exists in the Worker), isolated
-// to this change. Sync stays disabled throughout Phase A: there is no
-// misleading "Synced/Connected" claim. The local Profile always stays
-// independent of the online account: sign-in/out never touches local profile,
-// links, folders, settings or backups.
+// The previous username/password register / forgot-* flows are gone — the
+// account layer is provider-OAuth-only (no credential backend exists in the
+// Worker), isolated to this change. The local Profile always stays independent
+// of the online account: sign-in/out never touches local profile, links,
+// folders, settings or backups.
 import { ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { session } from '../auth/session.js'
 import { accountService } from '../auth/accountService.js'
@@ -73,11 +73,12 @@ onMounted(() => {
 })
 onBeforeUnmount(() => unsubscribe?.())
 
-/** Start GitHub OAuth (top-level redirect). The authenticated account is
- * restored on the next boot by initSession() -> GET /api/me. */
-function handleSignIn() {
+/** Start the selected provider's OAuth (top-level redirect). The
+ * authenticated account is restored on the next boot by initSession() ->
+ * GET /api/me. */
+function handleSignIn(provider) {
   resetStatus()
-  accountService.signIn()
+  accountService.signIn(provider)
 }
 
 async function handleSignOut() {
@@ -135,19 +136,23 @@ async function handleSignOut() {
             <dl class="acct-detail">
               <div class="acct-row"><dt>Account ID</dt><dd>{{ user?.id }}</dd></div>
             </dl>
-            <p class="muted small">Sync is not enabled yet. Sign-in only links this browser session to your GitHub account.</p>
+            <p class="muted small">Sync is not enabled yet. Sign-in only links this browser session to your online account.</p>
             <div class="acct-actions">
               <button type="button" class="btn danger" :disabled="submitting" @click="handleSignOut">Sign out</button>
             </div>
           </template>
 
-          <!-- SIGNED OUT : sign in with GitHub -->
+          <!-- SIGNED OUT : sign in with Google (primary) or GitHub -->
           <template v-else>
-            <p class="muted small">Sign in with GitHub to connect this browser session to an online account. Your local profile, links and folders stay on this device.</p>
+            <p class="muted small">Sign in with Google or GitHub to connect this browser session to an online account. Your local profile, links and folders stay on this device.</p>
             <div class="signed-out-actions">
-              <button type="button" class="btn primary block" @click="handleSignIn">
+              <button type="button" class="btn primary block" @click="handleSignIn('google')">
+                <span class="provider-badge google-badge" aria-hidden="true">G</span>
+                Continue with Google
+              </button>
+              <button type="button" class="btn block" @click="handleSignIn('github')">
                 <svg class="github-mark" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
-                Sign in with GitHub
+                Continue with GitHub
               </button>
             </div>
             <p class="switch-line muted small">Or continue using your local profile only.</p>
@@ -264,6 +269,20 @@ async function handleSignOut() {
 .signed-out-actions { display: flex; gap: 8px; margin: 16px 0; flex-wrap: wrap; }
 .signed-out-actions .btn { flex: 1; min-width: 120px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
 .github-mark { width: 16px; height: 16px; flex-shrink: 0; }
+.provider-badge { flex-shrink: 0; }
+.google-badge {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: #fff;
+  color: #4285f4;
+  border: 1px solid #dadce0;
+  display: inline-grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
 
 @media (max-width: 520px) {
   .account-panel { padding: 20px; }

@@ -339,14 +339,84 @@ describe('syncNow', () => {
     expect(repo.calls.markFailed).toEqual(['mut-001'])
   })
 
-  it('rejected (400/401/403): marks failed, not retryable', async () => {
+  it('rejected (400): marks failed, not retryable', async () => {
     const m = makeMutation()
     const repo = makeRepo([m])
-    const pushFn = mockBatchPush([{ kind: 'rejected', status: 401, reason: 'unauthenticated' }])
+    const pushFn = mockBatchPush([{ kind: 'rejected', status: 400, reason: 'malformed_mutation' }])
     const result = await syncNow({ pushFn, repo })
     expect(result).toEqual({ ...BASE_SUMMARY, pushed: 1, succeeded: 0, failed: 1, conflict: 0, unavailable: 0 })
     expect(repo.calls.markFailed).toEqual(['mut-001'])
     expect(repo.calls.rebased).toEqual([])
+  })
+
+  it('rejected (401): auth/session failure leaves mutation pending, not failed', async () => {
+    const m = makeMutation()
+    const repo = makeRepo([m])
+    const pushFn = mockBatchPush([{ kind: 'rejected', status: 401, reason: 'unauthenticated' }])
+    const result = await syncNow({ pushFn, repo })
+    expect(result).toEqual({ ...BASE_SUMMARY, pushed: 1, succeeded: 0, failed: 0, conflict: 0, unavailable: 1 })
+    expect(repo.calls.markFailed).toEqual([])
+    expect(repo.calls.markSucceeded).toEqual([])
+    expect(repo.calls.rebased).toEqual([])
+  })
+
+  it('rejected (403): marks failed, not retryable', async () => {
+    const m = makeMutation()
+    const repo = makeRepo([m])
+    const pushFn = mockBatchPush([{ kind: 'rejected', status: 403, reason: 'forbidden' }])
+    const result = await syncNow({ pushFn, repo })
+    expect(result).toEqual({ ...BASE_SUMMARY, pushed: 1, succeeded: 0, failed: 1, conflict: 0, unavailable: 0 })
+    expect(repo.calls.markFailed).toEqual(['mut-001'])
+  })
+
+  it('401-rejected mutation is retried (same mutation_id) on the next syncNow() call', async () => {
+    // Claim flow regression: the session dies mid-push (401). The create stays
+    // pending and a later authenticated sync retries it instead of losing it.
+    const m = makeMutation({ mutation_id: 'claim-1', object_id: 'obj-1' })
+    const repo = makeRepo([m])
+    const pushFn = mockBatchPush([
+      { kind: 'rejected', status: 401, reason: 'unauthenticated' },
+      { kind: 'accepted', resultRevision: 1 },
+    ])
+    const first = await syncNow({ pushFn, repo })
+    expect(first.unavailable).toBe(1)
+    expect(first.failed).toBe(0)
+    expect(repo.calls.markFailed).toEqual([])
+    expect(repo.pending[0].status).toBe('pending')
+
+    const second = await syncNow({ pushFn, repo })
+    expect(second.succeeded).toBe(1)
+    expect(second.failed).toBe(0)
+    expect(pushFn).toHaveBeenCalledTimes(2)
+    expect(pushFn.mock.calls[0][0][0].mutation_id).toBe('claim-1')
+    expect(pushFn.mock.calls[1][0][0].mutation_id).toBe('claim-1')
+    expect(repo.calls.markSucceeded).toEqual(['claim-1'])
+  })
+
+  it('account B sync cannot drain account A\'s 401-retried pending mutation', async () => {
+    const { session: realSession } = await import('../auth/session.js')
+    const original = realSession.getState
+    const repo = makeRepo([makeMutation({ mutation_id: 'acc-a-claim', account_id: 'acc-a' })])
+    const pushFn = mockBatchPush([{ kind: 'rejected', status: 401, reason: 'unauthenticated' }])
+    realSession.getState = () => ({ status: 'authenticated', user: { id: 'acc-a' } })
+    try {
+      // A's claim hits a 401 and stays pending (pushed marker set, not failed).
+      await syncNow({ pushFn, repo })
+      expect(repo.pending[0].status).toBe('pending')
+      expect(pushFn).toHaveBeenCalledTimes(1)
+
+      // Account B authenticates: its sync must NOT send or touch A's mutation.
+      realSession.getState = () => ({ status: 'authenticated', user: { id: 'acc-b' } })
+      const result = await syncNow({ pushFn, repo })
+      expect(result).toEqual(BASE_SUMMARY)
+      expect(pushFn).toHaveBeenCalledTimes(1) // B sent nothing
+      expect(repo.pending[0].status).toBe('pending')
+      expect(repo.pending[0].account_id).toBe('acc-a')
+      expect(repo.calls.markSucceeded).toEqual([])
+      expect(repo.calls.markFailed).toEqual([])
+    } finally {
+      realSession.getState = original
+    }
   })
 
   it('unavailable (500/503): leaves pending, does not mark anything', async () => {
@@ -519,7 +589,22 @@ describe('syncNow', () => {
     expect(pushFn.mock.calls[0][0].map(x => x.mutation_id)).toEqual(['fine-1', 'fine-2'])
   })
 
-  it('chunk 1 fully accepted, chunk 2 rejected -> succeeded 25, failed 5', async () => {
+  it('chunk 1 fully accepted, chunk 2 rejected (400) -> succeeded 25, failed 5', async () => {
+    const repo = makeRepo(Array.from({ length: 30 }, (_, i) =>
+      makeMutation({ mutation_id: `m-${i}` })))
+    const results = [
+      ...Array.from({ length: 25 }, () => ({ kind: 'accepted', resultRevision: 1 })),
+      ...Array.from({ length: 5 }, () => ({ kind: 'rejected', status: 400, reason: 'malformed_mutation' })),
+    ]
+    const pushFn = mockBatchPush(results)
+    const result = await syncNow({ pushFn, repo })
+    expect(result.succeeded).toBe(25)
+    expect(result.failed).toBe(5)
+    expect(repo.calls.markSucceeded).toHaveLength(25)
+    expect(repo.calls.markFailed).toEqual(['m-25', 'm-26', 'm-27', 'm-28', 'm-29'])
+  })
+
+  it('chunk 2 all 401 -> succeeded 25, unavailable 5, none marked failed (retryable)', async () => {
     const repo = makeRepo(Array.from({ length: 30 }, (_, i) =>
       makeMutation({ mutation_id: `m-${i}` })))
     const results = [
@@ -529,9 +614,10 @@ describe('syncNow', () => {
     const pushFn = mockBatchPush(results)
     const result = await syncNow({ pushFn, repo })
     expect(result.succeeded).toBe(25)
-    expect(result.failed).toBe(5)
+    expect(result.failed).toBe(0)
+    expect(result.unavailable).toBe(5)
     expect(repo.calls.markSucceeded).toHaveLength(25)
-    expect(repo.calls.markFailed).toEqual(['m-25', 'm-26', 'm-27', 'm-28', 'm-29'])
+    expect(repo.calls.markFailed).toEqual([])
   })
 
   it('network failure on a chunk: whole chunk left pending, counted unavailable', async () => {

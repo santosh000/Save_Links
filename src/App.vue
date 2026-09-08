@@ -326,6 +326,10 @@ function onVisibilityChange() {
     wasTabHidden = false
     startSyncPolling()
     if (resumingFromHidden && isAuthenticatedAndOnline()) {
+      // Rotate the session on resume (approved trigger #2): extend the server
+      // session expiry instead of discovering the expiry via a later sync 401.
+      // Fire-and-forget — refreshSession() never rejects and never fails sync.
+      session.refreshSession()
       backgroundSync()
     }
   } else {

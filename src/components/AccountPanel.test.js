@@ -1,9 +1,10 @@
 // UI tests for the account/authentication area (AccountPanel.vue, Phase A —
-// GitHub OAuth). Mounts the component (teleports to body) and mocks the session
-// abstraction and accountService, so the OAuth identity + sign-out UX is tested
-// without a real backend, IndexedDB, or network. The previous username/password
-// register/forgot-* UI was removed in Phase A (OAuth-only boundary), so those
-// tests are replaced below with equal-or-better OAuth coverage.
+// provider OAuth: Google primary + GitHub). Mounts the component (teleports to
+// body) and mocks the session abstraction and accountService, so the OAuth
+// identity + sign-out UX is tested without a real backend, IndexedDB, or
+// network. The previous username/password register/forgot-* UI was removed in
+// Phase A (OAuth-only boundary), so those tests are replaced below with
+// equal-or-better OAuth coverage.
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import AccountPanel from './AccountPanel.vue'
@@ -62,7 +63,8 @@ describe('AccountPanel — open/close', () => {
   it('renders the account area when open', async () => {
     await open()
     expect(document.querySelector('[role="dialog"]')).not.toBeNull()
-    expect(document.body.textContent).toContain('Sign in with GitHub')
+    expect(document.body.textContent).toContain('Continue with Google')
+    expect(document.body.textContent).toContain('Continue with GitHub')
     close()
   })
 
@@ -74,13 +76,14 @@ describe('AccountPanel — open/close', () => {
   })
 })
 
-describe('AccountPanel — signed out (GitHub OAuth)', () => {
-  it('shows the signed-out state with a single GitHub sign-in action', async () => {
+describe('AccountPanel — signed out (provider OAuth)', () => {
+  it('shows the signed-out state with Google (primary) and GitHub sign-in actions', async () => {
     await open()
     const t = document.body.textContent
     expect(t).toContain('Online account')
     expect(t).toContain('Not signed in')
-    expect(t).toContain('Sign in with GitHub')
+    expect(t).toContain('Continue with Google')
+    expect(t).toContain('Continue with GitHub')
     expect(t).toContain('Local profile')
     expect(t).toContain('Or continue using your local profile only')
     close()
@@ -97,17 +100,27 @@ describe('AccountPanel — signed out (GitHub OAuth)', () => {
     close()
   })
 
-  it('the Sign in with GitHub button starts the OAuth redirect via accountService', async () => {
+  it('the Continue with Google button starts the Google OAuth redirect via accountService', async () => {
     await open()
     h.signIn.mockReturnValue(undefined)
-    ;[...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Sign in with GitHub').click()
+    ;[...document.querySelectorAll('button')].find((b) => b.textContent.includes('Continue with Google')).click()
+    expect(h.signIn).toHaveBeenCalledWith('google')
+    expect(h.signIn).toHaveBeenCalledTimes(1)
+    close()
+  })
+
+  it('the Continue with GitHub button starts the GitHub OAuth redirect instead', async () => {
+    await open()
+    ;[...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Continue with GitHub').click()
+    expect(h.signIn).toHaveBeenCalledWith('github')
     expect(h.signIn).toHaveBeenCalledTimes(1)
     close()
   })
 
   it('does not call signOut or mutate session when signing in', async () => {
     await open()
-    ;[...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Sign in with GitHub').click()
+    ;[...document.querySelectorAll('button')].find((b) => b.textContent.includes('Continue with Google')).click()
+    expect(h.signIn).toHaveBeenCalledTimes(1)
     expect(h.signOut).not.toHaveBeenCalled()
     close()
   })

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { accountService } from './accountService.js'
-import { AUTH_LOGIN_PATH } from './http-adapter.js'
+import { AUTH_LOGIN_PATHS } from './http-adapter.js'
 
 // vi.hoisted shares the mock's state between the hoisted vi.mock factory and
 // the test body. (Plain module-scope `const x = vi.fn()` captured by a hoisted
@@ -26,12 +26,22 @@ beforeEach(() => {
   })
 })
 
-describe('accountService — GitHub OAuth online-account boundary', () => {
-  it('signIn starts the GitHub OAuth flow with a top-level redirect', () => {
+describe('accountService — provider OAuth online-account boundary', () => {
+  it('signIn defaults to Google — a top-level redirect to /auth/google/login', () => {
     // signIn() is synchronous navigation; the authenticated account is restored
     // on the next boot by initSession() -> /api/me, so no in-page promise result.
     expect(accountService.signIn()).toBeUndefined()
-    expect(assignedUrl).toBe(AUTH_LOGIN_PATH)
+    expect(assignedUrl).toBe(AUTH_LOGIN_PATHS.google)
+  })
+
+  it('signIn("github") starts the GitHub OAuth flow instead', () => {
+    expect(accountService.signIn('github')).toBeUndefined()
+    expect(assignedUrl).toBe(AUTH_LOGIN_PATHS.github)
+  })
+
+  it('refuses an unknown provider without navigating anywhere', () => {
+    expect(() => accountService.signIn('email')).toThrow()
+    expect(assignedUrl).toBeNull()
   })
 
   it('does not claim an in-page authenticated state or touch local data on sign-in', () => {
@@ -39,7 +49,7 @@ describe('accountService — GitHub OAuth online-account boundary', () => {
     // Only a redirect occurred — accountService never mutates session state or
     // storage, and no credential is submitted. The redirect target is OAuth,
     // not a username/password endpoint.
-    expect(assignedUrl).toBe(AUTH_LOGIN_PATH)
+    expect(assignedUrl).toBe(AUTH_LOGIN_PATHS.google)
     expect(h.logout).not.toHaveBeenCalled()
   })
 

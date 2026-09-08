@@ -19,8 +19,17 @@ export function createSession(adapter) {
   const state = { status: 'unknown', user: null, error: null }
   const listeners = new Set()
   let initPromise = null
+  // Authentication-epoch guard: bumped on every status transition (unknown →
+  // authenticated, authenticated → anonymous, …). A refresh that started for
+  // an OLDER epoch must never tear down or annotate a NEWER authentication.
+  let authVersion = 0
+  // In-flight rotation dedupe: concurrent refreshSession() callers (boot +
+  // visibility resume, several tabs, …) share ONE adapter.refresh() request.
+  let refreshInFlight = null
+  let refreshInFlightVersion = null
 
   function setState(patch) {
+    if (patch.status && patch.status !== state.status) authVersion += 1
     Object.assign(state, patch)
     const snapshot = { ...state }
     for (const listener of listeners) listener(snapshot)
@@ -49,6 +58,11 @@ export function createSession(adapter) {
         .then((user) => {
           if (user && typeof user === 'object') {
             setState({ status: 'authenticated', user, error: null })
+            // Boot-triggered session rotation (approved trigger #1): refresh
+            // the freshly-restored session so the server extends the session
+            // expiry. Fire-and-forget — refreshSession() never rejects and a
+            // failed rotation must never fail the boot.
+            refreshSession()
           } else {
             setState({ status: 'anonymous', user: null, error: null })
           }
@@ -63,6 +77,71 @@ export function createSession(adapter) {
         })
     }
     return initPromise
+  }
+
+  /**
+   * Rotate the authenticated session server-side (approved triggers: after
+   * successful boot init; on visibility resume). Policy:
+   *  - authenticated → adapter.refresh(); on success the user is unchanged
+   *    (rotation only replaces the server cookie, never the identity).
+   *  - refresh fails with error code 'SESSION_EXPIRED' (adapter saw 401) →
+   *    settle safely to anonymous INSTEAD: a genuinely expired/revoked session
+   *    must not keep pretending to be authenticated. Only when the state is
+   *    still the exact authentication this rotation started for — a stale
+   *    result must never log out a NEWER, valid authentication (logout then
+   *    re-login, or a different user, during the request bumps authVersion).
+   *  - refresh fails for infrastructure reasons (network/503) → keep the
+   *    current authenticated state — never end a possibly-valid session on a
+   *    transient failure — and record the error (also only for the same
+   *    authentication).
+   *  - concurrent calls while a rotation is in flight for the SAME
+   *    authentication share that single request (exactly one
+   *    adapter.refresh()); a rotation started for a newer authentication is
+   *    never shared with an older in-flight one.
+   *  - not authenticated → no-op (never rotates an anonymous state).
+   * Never rejects. Never touches local data — auth-only, exactly like logout.
+   * @returns {Promise<boolean>} true when the rotation succeeded
+   */
+  async function refreshSession() {
+    if (typeof adapter.refresh !== 'function') return false
+    if (state.status !== 'authenticated' || !state.user) return false
+
+    // In-flight dedupe for the SAME authentication: return the shared rotation.
+    if (refreshInFlight && refreshInFlightVersion === authVersion) return refreshInFlight
+
+    const versionAtStart = authVersion
+    const userAtStart = state.user
+    const promise = (async () => {
+      try {
+        await adapter.refresh()
+        return true
+      } catch (err) {
+        if (err && err.code === 'SESSION_EXPIRED') {
+          // Stale-result protection: the session is only ended when the state
+          // is still the exact authentication we started with. Any logout /
+          // re-login / different-user transition during the request bumped
+          // authVersion — a stale 401 must never destroy a newer valid session.
+          if (state.status === 'authenticated' && state.user === userAtStart && authVersion === versionAtStart) {
+            setState({ status: 'anonymous', user: null, error: null })
+          }
+          return false
+        }
+        // Infrastructure failure: keep the authenticated state; annotate the
+        // error only on the same authentication (never on a newer one).
+        if (state.status === 'authenticated' && state.user === userAtStart && authVersion === versionAtStart) {
+          setState({ error: messageOf(err) })
+        }
+        return false
+      } finally {
+        if (refreshInFlight === promise) {
+          refreshInFlight = null
+          refreshInFlightVersion = null
+        }
+      }
+    })()
+    refreshInFlight = promise
+    refreshInFlightVersion = versionAtStart
+    return refreshInFlight
   }
 
   /** Establish an authenticated session. Rejects on authentication failure. */
@@ -95,14 +174,15 @@ export function createSession(adapter) {
     }
   }
 
-  return { getState, subscribe, initSession, login, logout }
+  return { getState, subscribe, initSession, login, logout, refreshSession }
 }
 
 // Application singleton. Phase A: the real HTTP adapter talks to the existing
 // Cloudflare Worker OAuth + session endpoints. init() restores the
 // authenticated account via GET /api/me on boot (persistent session across
 // reloads); logout() revokes it via POST /auth/logout. Sign-in is a top-level
-// GitHub OAuth redirect initiated by accountService.signIn() — the identity is
+// provider OAuth redirect (Google primary, GitHub supported) initiated by
+// accountService.signIn(provider) — the identity is
 // restored by initSession() after the callback, then state becomes
 // authenticated. session.login() is not the UI sign-in path for OAuth (see
 // http-adapter.login()).

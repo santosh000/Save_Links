@@ -37,6 +37,20 @@ describe('worker routing', () => {
     expect(env.ASSETS.fetch).not.toHaveBeenCalled()
   })
 
+  it('routes GET /auth/google/login to the Worker (503 without secrets = route reached)', async () => {
+    const env = makeEnv()
+    const res = await worker.fetch(new Request('http://localhost:8787/auth/google/login'), env)
+    expect(res.status).toBe(503)
+    expect(env.ASSETS.fetch).not.toHaveBeenCalled()
+  })
+
+  it('routes GET /auth/google/callback to the Worker (503 without secrets = route reached)', async () => {
+    const env = makeEnv()
+    const res = await worker.fetch(new Request('http://localhost:8787/auth/google/callback'), env)
+    expect(res.status).toBe(503)
+    expect(env.ASSETS.fetch).not.toHaveBeenCalled()
+  })
+
   it('rejects non-GET on /auth/* with 405 and Allow: GET', async () => {
     const env = makeEnv()
     for (const method of ['POST', 'PUT', 'DELETE']) {

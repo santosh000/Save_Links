@@ -1,8 +1,9 @@
 // Save_Links — Worker OAuth routes (Phase 3C-1 technical spike + 3C-2
-// session-cookie hardening, rotation, session validation and logout).
+// session-cookie hardening, rotation, session validation and logout; Google
+// provider added alongside GitHub).
 //
-// Flow:
-//   browser -> /auth/github/login -> GitHub -> /auth/github/callback
+// Flow (identical for every provider):
+//   browser -> /auth/<provider>/login -> <provider> -> /auth/<provider>/callback
 //            -> token exchange (discarded after identity) -> identity
 //            -> account resolve/create (D1, atomic)
 //            -> create NEW random server-side session (rotation)
@@ -14,10 +15,11 @@
 //                        AuthUser-shaped identity (401 when unauthenticated)
 //   POST /auth/logout -> revoke the presented session + clear the cookie(s)
 //
-// The GitHub access token is held only inside this file's call stack and is
-// never persisted, logged, or placed in any response. OAuth `state` + PKCE
-// verifier live in a SIGNED, expiring, HttpOnly cookie (worker/oauth/state.js) —
-// a DIFFERENT security object from the authenticated session cookie below.
+// The provider access/id token is held only inside this file's call stack and
+// is never persisted, logged, or placed in any response. OAuth `state` + PKCE
+// verifier (+ provider claim + Google nonce) live in a SIGNED, expiring,
+// HttpOnly cookie (worker/oauth/state.js) — a DIFFERENT security object from
+// the authenticated session cookie below.
 //
 // Session cookie (Phase 3C-2): production uses a `__Host-`-prefixed,
 // Secure, Path=/, host-only (no Domain), HttpOnly, SameSite=Lax cookie that
@@ -33,11 +35,17 @@ import {
   OAuthError,
 } from './oauth/github.js'
 import {
+  buildAuthorizationUrl as buildGoogleAuthorizationUrl,
+  exchangeCodeForToken as exchangeGoogleCodeForToken,
+  verifyGoogleIdToken,
+} from './oauth/google.js'
+import {
   OAUTH_STATE_COOKIE,
   OAUTH_STATE_TTL_MS,
   createStateCookieValue,
   verifyStateCookieValue,
   pkceCodeChallenge,
+  generateOAuthNonce,
 } from './oauth/state.js'
 import {
   DEFAULT_SESSION_TTL_MS,
@@ -50,8 +58,42 @@ import {
   resolveAccountByProvider,
 } from './db/store.js'
 
-const GITHUB_PROVIDER = 'github'
 export const SESSION_TTL_SECONDS = Math.floor(DEFAULT_SESSION_TTL_MS / 1000)
+
+/**
+ * Provider descriptors — the ONLY per-provider differences the shared OAuth
+ * pipeline cares about. GitHub and Google both flow through handleOAuthLogin /
+ * handleOAuthCallback: the state cookie, PKCE, single-use claim, account
+ * resolution, session rotation and cookie machinery are provider-agnostic and
+ * implemented ONCE (never two copies of the security-critical parts).
+ *
+ * - github: identity = second API call; subject = GitHub's numeric id.
+ * - google: identity = the VERIFIED signed id_token; subject = Google's `sub`.
+ */
+const PROVIDERS = {
+  github: {
+    name: 'GitHub',
+    needsNonce: false,
+    buildAuthorizeUrl: ({ clientId, redirectUri, state, codeChallenge }) =>
+      buildAuthorizationUrl({ clientId, redirectUri, state, codeChallenge }),
+    exchange: ({ clientId, clientSecret, code, redirectUri, codeVerifier, fetchImpl }) =>
+      exchangeCodeForToken({ clientId, clientSecret, code, redirectUri, codeVerifier, fetchImpl }),
+    identify: async ({ exchangeResult, fetchImpl }) => {
+      const identity = await getIdentity({ accessToken: exchangeResult.accessToken, fetchImpl })
+      return { subject: identity.subject }
+    },
+  },
+  google: {
+    name: 'Google',
+    needsNonce: true,
+    buildAuthorizeUrl: ({ clientId, redirectUri, state, codeChallenge, nonce }) =>
+      buildGoogleAuthorizationUrl({ clientId, redirectUri, state, codeChallenge, nonce }),
+    exchange: ({ clientId, clientSecret, code, redirectUri, codeVerifier, fetchImpl }) =>
+      exchangeGoogleCodeForToken({ clientId, clientSecret, code, redirectUri, codeVerifier, fetchImpl }),
+    identify: async ({ exchangeResult, clientId, nonce, fetchImpl, now }) =>
+      verifyGoogleIdToken({ idToken: exchangeResult.idToken, clientId, nonce, fetchImpl, now }),
+  },
+}
 
 function responseHeaders(extra = {}) {
   return {
@@ -196,11 +238,18 @@ function deleteCookieHeader(name, { secure }) {
   return parts.join('; ')
 }
 
-/** All three secrets must be present for any OAuth route (fail loud, no half-flow). */
-function oauthConfig(env) {
-  const { GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, STATE_HMAC_SECRET } = env
-  if (!GITHUB_CLIENT_ID || !GITHUB_CLIENT_SECRET || !STATE_HMAC_SECRET) return null
-  return { clientId: GITHUB_CLIENT_ID, clientSecret: GITHUB_CLIENT_SECRET, stateSecret: STATE_HMAC_SECRET }
+/**
+ * Per-provider config from the environment. Secret names are per-provider
+ * (GITHUB_CLIENT_ID/…, GOOGLE_CLIENT_ID/…); STATE_HMAC_SECRET is shared. All
+ * three must be present or the provider is unconfigured (fail loud, no
+ * half-flow). Only config names are referenced here — never values.
+ */
+function providerConfig(env, provider) {
+  const vars = provider === 'google'
+    ? { clientId: env.GOOGLE_CLIENT_ID, clientSecret: env.GOOGLE_CLIENT_SECRET }
+    : { clientId: env.GITHUB_CLIENT_ID, clientSecret: env.GITHUB_CLIENT_SECRET }
+  if (!vars.clientId || !vars.clientSecret || !env.STATE_HMAC_SECRET) return null
+  return { clientId: vars.clientId, clientSecret: vars.clientSecret, stateSecret: env.STATE_HMAC_SECRET }
 }
 
 // ---- Redirect-origin allowlist (Phase 3C-2 Chunk 3) --------------------------
@@ -242,14 +291,16 @@ export function resolveApprovedOrigin(request, env) {
   return { origin: requestOrigin }
 }
 
-// ---- GET /auth/github/login -------------------------------------------------
+// ---- GET /auth/<provider>/login ----------------------------------------------
 
-export async function handleOAuthLogin(request, env, { now = Date.now() } = {}) {
-  const config = oauthConfig(env)
-  if (!config) return errorResponse(503, 'GitHub sign-in is not configured on this deployment.')
+export async function handleOAuthLogin(request, env, { now = Date.now(), provider = 'github' } = {}) {
+  const spec = PROVIDERS[provider]
+  const config = spec ? providerConfig(env, provider) : null
+  if (!spec) return errorResponse(404, 'Unknown authentication provider.')
+  if (!config) return errorResponse(503, `${spec.name} sign-in is not configured on this deployment.`)
 
   const origin = resolveApprovedOrigin(request, env)
-  if (origin.status === 503) return errorResponse(503, 'GitHub sign-in is not configured on this deployment.')
+  if (origin.status === 503) return errorResponse(503, `${spec.name} sign-in is not configured on this deployment.`)
   if (origin.status === 400) return errorResponse(400, 'Sign-in is not allowed from this address.')
 
   // Opportunistic housekeeping: expired single-use state tombstones are swept
@@ -257,10 +308,18 @@ export async function handleOAuthLogin(request, env, { now = Date.now() } = {}) 
   // attempts. Login does not require the DB — this sweep is best-effort.
   if (env.DB) await deleteExpiredOAuthStates(env.DB, { now }).catch(() => {})
 
-  const { value, state, codeVerifier } = await createStateCookieValue({ secret: config.stateSecret, now })
+  // Google binds its signed id_token back to this sign-in via a nonce; GitHub
+  // has no token claim to bind, so no nonce is minted.
+  const nonce = spec.needsNonce ? generateOAuthNonce() : null
+  const { value, state, codeVerifier } = await createStateCookieValue({
+    secret: config.stateSecret,
+    now,
+    provider,
+    nonce: nonce ?? undefined,
+  })
   const codeChallenge = await pkceCodeChallenge(codeVerifier)
-  const redirectUri = `${origin.origin}/auth/github/callback`
-  const authorizeUrl = buildAuthorizationUrl({ clientId: config.clientId, redirectUri, state, codeChallenge })
+  const redirectUri = `${origin.origin}/auth/${provider}/callback`
+  const authorizeUrl = spec.buildAuthorizeUrl({ clientId: config.clientId, redirectUri, state, codeChallenge, nonce: nonce ?? undefined })
 
   const secure = new URL(origin.origin).protocol === 'https:'
   const cookie = setCookieHeader(OAUTH_STATE_COOKIE, value, {
@@ -270,19 +329,21 @@ export async function handleOAuthLogin(request, env, { now = Date.now() } = {}) 
   return redirectResponse(authorizeUrl, [cookie])
 }
 
-// ---- GET /auth/github/callback ----------------------------------------------
+// ---- GET /auth/<provider>/callback -------------------------------------------
 
-export async function handleOAuthCallback(request, env, { now = Date.now(), fetchImpl = fetch } = {}) {
-  const config = oauthConfig(env)
-  if (!config) return errorResponse(503, 'GitHub sign-in is not configured on this deployment.')
+export async function handleOAuthCallback(request, env, { now = Date.now(), fetchImpl = fetch, provider = 'github' } = {}) {
+  const spec = PROVIDERS[provider]
+  const config = spec ? providerConfig(env, provider) : null
+  if (!spec) return errorResponse(404, 'Unknown authentication provider.')
+  if (!config) return errorResponse(503, `${spec.name} sign-in is not configured on this deployment.`)
   if (!env.DB) return errorResponse(503, 'The account store is not configured on this deployment.')
 
   const origin = resolveApprovedOrigin(request, env)
-  if (origin.status === 503) return errorResponse(503, 'GitHub sign-in is not configured on this deployment.')
+  if (origin.status === 503) return errorResponse(503, `${spec.name} sign-in is not configured on this deployment.`)
   if (origin.status === 400) return errorResponse(400, 'Sign-in is not allowed from this address.')
 
   const url = new URL(request.url)
-  const redirectUri = `${origin.origin}/auth/github/callback`
+  const redirectUri = `${origin.origin}/auth/${provider}/callback`
   const secure = url.protocol === 'https:'
   // The oauth_state cookie is cleared once the callback has ACCEPTED and
   // consumed the state — success or any failure after that point. It is NOT
@@ -291,14 +352,30 @@ export async function handleOAuthCallback(request, env, { now = Date.now(), fetc
   const clearStateCookie = () => [deleteCookieHeader(OAUTH_STATE_COOKIE, { secure })]
   const consumedStateFailure = (status, message) => errorResponse(status, message, clearStateCookie())
 
-  // 1. CSRF/state validation (cookie signature + expiry + query match)
+  // 1. CSRF/state validation (cookie signature + expiry + query match) AND
+  //    provider binding: the state cookie must have been issued for THIS
+  //    provider. Legacy github-era cookies carry no provider claim and still
+  //    pass on the github path; anything carrying a DIFFERENT provider claim
+  //    is rejected here, and the google path requires the explicit 'google'
+  //    claim (no legacy google cookie exists). Not consumed on failure.
   const verified = await verifyStateCookieValue(readCookie(request, OAUTH_STATE_COOKIE), {
     secret: config.stateSecret,
     now,
   })
   const callbackState = url.searchParams.get('state')
-  if (!verified || typeof callbackState !== 'string' || callbackState !== verified.state) {
-    // Unverified/expired/tampered: NOT consumed, cookie NOT cleared.
+  if (
+    !verified ||
+    typeof callbackState !== 'string' ||
+    callbackState !== verified.state ||
+    (verified.provider && verified.provider !== provider) ||
+    (provider === 'google' && verified.provider !== 'google')
+  ) {
+    // Unverified/expired/tampered/provider-swapped: NOT consumed, cookie NOT cleared.
+    return errorResponse(400, 'The sign-in attempt was invalid or expired. Please try again.')
+  }
+  if (spec.needsNonce && typeof verified.nonce !== 'string') {
+    // Google: without the nonce minted at login the id_token cannot be bound
+    // to this sign-in — reject before consuming anything.
     return errorResponse(400, 'The sign-in attempt was invalid or expired. Please try again.')
   }
 
@@ -321,36 +398,39 @@ export async function handleOAuthCallback(request, env, { now = Date.now(), fetc
 
   // 2. Provider-reported failure (e.g. user clicked "Cancel") — state consumed.
   if (url.searchParams.get('error')) {
-    return consumedStateFailure(400, 'GitHub did not complete the authorization. Please try again.')
+    return consumedStateFailure(400, `${spec.name} did not complete the authorization. Please try again.`)
   }
 
   // 3. Authorization code presence — state consumed.
   const code = url.searchParams.get('code')
   if (typeof code !== 'string' || code.length === 0) {
-    return consumedStateFailure(400, 'GitHub did not provide an authorization code. Please try again.')
+    return consumedStateFailure(400, `${spec.name} did not provide an authorization code. Please try again.`)
   }
 
   try {
     // 4. Exchange the code server-side; token lives only in this scope.
-    const { accessToken } = await exchangeCodeForToken({
+    const exchangeResult = await spec.exchange({
       clientId: config.clientId,
       clientSecret: config.clientSecret,
       code,
       redirectUri,
-      // PKCE: the authorize request used S256, so GitHub requires the matching
-      // verifier here (recovered from the signed oauth_state cookie above).
+      // PKCE: the authorize request used S256, so the provider requires the
+      // matching verifier here (recovered from the signed oauth_state cookie).
       codeVerifier: verified.codeVerifier,
       fetchImpl,
     })
 
-    // 5. Identity straight from GitHub's API (never from the browser).
-    const identity = await getIdentity({ accessToken, fetchImpl })
-    // accessToken is deliberately out of scope now: nothing below can log it.
-    // `code` is also deliberately unusable past this point (single-use).
+    // 5. Identity, verified server-side by the provider module (never from
+    //    the browser). GitHub: numeric id from /user. Google: the signed
+    //    id_token verified against Google JWKS; subject = `sub`.
+    const identity = await spec.identify({ exchangeResult, clientId: config.clientId, nonce: verified.nonce, fetchImpl, now })
+    // The exchange result is deliberately out of scope now: nothing below can
+    // log the token. `code` is also deliberately unusable past this point.
 
-    // 6. Map the stable provider subject to an application account (atomic).
+    // 6. Map the stable provider subject to an application account (atomic,
+    //    one provider subject → exactly one account; never email-matched).
     const { account_id: accountId } = await resolveAccountByProvider(env.DB, {
-      provider: GITHUB_PROVIDER,
+      provider,
       providerSubject: identity.subject,
       now,
     })

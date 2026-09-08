@@ -2,12 +2,12 @@
   <section class="about-card">
     <h4>About Save Links</h4>
     <p>Save Links is a local-first bookmark manager for saving, organizing, and accessing links offline, with optional cloud synchronization across browsers.</p>
-    <p class="about-sub">Local use requires no account. GitHub sign-in currently enables cloud synchronization.</p>
-    <p class="about-sub">Google and email login are planned for a future release.</p>
+    <p class="about-sub">Local use requires no account. Google or GitHub sign-in enables optional cloud synchronization.</p>
+    <p class="about-sub">Email login is planned for a future release.</p>
     <ul>
       <li>Your links are saved on your device first.</li>
       <li>You don't need an account to use Save Links.</li>
-      <li>GitHub sign-in enables optional cloud synchronization.</li>
+      <li>Google or GitHub sign-in enables optional cloud synchronization.</li>
       <li>Your local profile and account are separate.</li>
       <li>Your data stays on your device unless you choose to sync it.</li>
       <li>Cloud sync is not a backup — use export for backups.</li>

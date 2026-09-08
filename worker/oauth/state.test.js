@@ -39,14 +39,22 @@ describe('createStateCookieValue', () => {
 })
 
 describe('verifyStateCookieValue', () => {
-  it('round-trips to the exact state and verifier', async () => {
+  it('round-trips to the exact state and verifier (provider/nonce null for legacy github-era cookies)', async () => {
     const created = await createStateCookieValue({ secret: SECRET, now: NOW })
     const verified = await verifyStateCookieValue(created.value, { secret: SECRET, now: NOW })
     expect(verified).toEqual({
       state: created.state,
       codeVerifier: created.codeVerifier,
       expiresAt: created.expiresAt,
+      provider: null,
+      nonce: null,
     })
+  })
+
+  it('round-trips a google-state cookie into its provider + nonce', async () => {
+    const created = await createStateCookieValue({ secret: SECRET, now: NOW, provider: 'google', nonce: 'the-nonce' })
+    const verified = await verifyStateCookieValue(created.value, { secret: SECRET, now: NOW })
+    expect(verified).toMatchObject({ state: created.state, provider: 'google', nonce: 'the-nonce' })
   })
 
   it('rejects a tampered payload (signature mismatch, constant-time path)', async () => {

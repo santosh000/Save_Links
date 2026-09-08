@@ -183,6 +183,22 @@ describe('resolveAccountByProvider (Phase 3C-1 OAuth mapping)', () => {
     await expect(resolveAccountByProvider(db, { provider: 'github', providerSubject: '', now: NOW })).rejects.toThrow()
     await expect(resolveAccountByProvider(db, { provider: '', providerSubject: 'x', now: NOW })).rejects.toThrow()
   })
+
+  it('same raw subject under google and github resolves to DIFFERENT accounts (no email/id auto-link)', async () => {
+    const google = await resolveAccountByProvider(db, { provider: 'google', providerSubject: '105', now: NOW })
+    const github = await resolveAccountByProvider(db, { provider: 'github', providerSubject: '105', now: NOW })
+    expect(google.account_id).toBeTruthy()
+    expect(github.account_id).toBeTruthy()
+    expect(google.account_id).not.toBe(github.account_id)
+  })
+
+  it('one account can deliberately hold BOTH a google and a github identity', async () => {
+    const db2 = createTestDb()
+    const google = await resolveAccountByProvider(db2, { provider: 'google', providerSubject: '105', now: NOW })
+    await addProviderIdentity(db2, { accountId: google.account_id, provider: 'github', providerSubject: '105', now: NOW })
+    expect(await getAccountIdByProviderIdentity(db2, { provider: 'google', providerSubject: '105' })).toMatchObject({ account_id: google.account_id })
+    expect(await getAccountIdByProviderIdentity(db2, { provider: 'github', providerSubject: '105' })).toMatchObject({ account_id: google.account_id })
+  })
 })
 
 describe('session persistence', () => {
