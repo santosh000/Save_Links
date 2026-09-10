@@ -166,6 +166,19 @@ async function handleAnonymousSyncChoice(choice) {
       )
     }
 
+    // The queued mutations carry the account identity, but the reactive
+    // arrays are the UI's source of truth (and the watch persists them into
+    // IndexedDB). Mark the converted records owned NOW: otherwise they keep
+    // counting as anonymous — the prompt resurfaces after a refresh, the
+    // persisted store loses the account attribution, and later edits claim a
+    // stale anonymous record. Revisions stay local until the server
+    // acknowledges them (the coordinator assigns them), but ownership must
+    // not wait.
+    const mergedLinkIds = new Set(anonLinks.map(l => l.id))
+    const mergedFolderIds = new Set(anonFolders.map(f => f.id))
+    links.value = links.value.map(l => (mergedLinkIds.has(l.id) ? { ...l, account_id: accountId } : l))
+    folders.value = folders.value.map(f => (mergedFolderIds.has(f.id) ? { ...f, account_id: accountId } : f))
+
     // Perform sync to push the new mutations and WAIT for them to complete
     const { syncNowWithMutations } = await import('./composables/useSync.js')
     await syncNowWithMutations()
@@ -199,6 +212,12 @@ async function handleAnonymousSyncChoice(choice) {
           plainFolder.revision
         ).catch(err => console.warn('Failed to queue mutation:', err))
       }
+      // Mark the same records kept-local in the reactive arrays so the
+      // anonymous counts drop immediately and the watch persists the marker.
+      const keptLinkIds = new Set(anonLinks.map(l => l.id))
+      const keptFolderIds = new Set(anonFolders.map(f => f.id))
+      links.value = links.value.map(l => (keptLinkIds.has(l.id) ? { ...l, account_id: accountId, kept_local: true } : l))
+      folders.value = folders.value.map(f => (keptFolderIds.has(f.id) ? { ...f, account_id: accountId, kept_local: true } : f))
     }
     showToast('Local data kept on this device')
   }
@@ -259,9 +278,24 @@ watch(() => authState.value.status, (newStatus, oldStatus) => {
     initialSyncTriggered = false
     // Defer to next tick so session state is fully settled
     nextTick(() => checkAndPromptAnonymousSync())
+    // Ensure the 30-second cross-browser sync poll is running. The onMounted
+    // check may have missed this if initSession() had not resolved yet.
+    // nextTick-deferred: the immediate watch fires during setup, before the
+    // polling state (syncPollingInterval) declared later is initialized.
+    nextTick(() => startSyncPolling())
   } else if (isNowAuthenticated && !initialSyncTriggered) {
-    // Session restored (already authenticated on mount)
-    nextTick(() => triggerAuthenticatedSync())
+    // Session restored (already authenticated on mount): the anonymous-data
+    // check must run here too. Without it, the Sync & Merge / Keep Local
+    // prompt could never appear for unmerged local data until the next login
+    // transition — restoring an already-authenticated session only synced.
+    // When there is no anonymous data the check falls through to the one
+    // initial authenticated sync (its own else branch), so nothing is lost.
+    nextTick(() => checkAndPromptAnonymousSync())
+    // Ensure the 30-second cross-browser sync poll is running. The onMounted
+    // check may have missed this if initSession() had not resolved yet.
+    // nextTick-deferred: the immediate watch fires during setup, before the
+    // polling state (syncPollingInterval) declared later is initialized.
+    nextTick(() => startSyncPolling())
   }
 }, { immediate: true })
 
@@ -539,15 +573,19 @@ function handleEdit(id, patch) {
   showToast('Link updated')
 }
 
-function handleImportBackup(payload) {
+async function handleImportBackup(payload) {
   // payload: { data: { links, folders }, strategy: 'skip'|'replace' }
   // Import ONLY the bookmark and folder data. The Local Profile and the
   // device-local appearance/color-scheme preferences are NOT overwritten.
   const { data, strategy = 'skip' } = payload
   const { links, folders } = pickImportSlices(data)
 
-  const linkResult = mergeLinks(links, strategy)
-  const folderResult = mergeFolders(folders, strategy)
+  // mergeLinks/mergeFolders are async now: an authenticated import queues the
+  // outbox mutations (create for new, update on the store-acknowledged base for
+  // replaced) and fires one syncNow before resolving, so an imported backup
+  // syncs exactly like a manually saved link instead of staying local-only.
+  const linkResult = await mergeLinks(links, strategy)
+  const folderResult = await mergeFolders(folders, strategy)
 
   const parts = []
   if (linkResult.newCount) parts.push(`${linkResult.newCount} link${linkResult.newCount > 1 ? 's' : ''} added`)

@@ -26,6 +26,8 @@ test-results/
 # {env}.dev.vars matching is supported for preview environments.
 .dev.vars
 .dev.vars.*
+# Local deployment secrets (never committed)
+deploy-secrets.txt
 
 # Editor directories and files
 .vscode/*

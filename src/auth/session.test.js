@@ -66,7 +66,7 @@ describe('session abstraction — login and logout', () => {
     await s.login()
     // The only surface session.js exposes is auth state — there is no way
     // for the abstraction (or a logout/refresh) to reach links/folders/profile/etc.
-    expect(Object.keys(s).sort()).toEqual(['getState', 'initSession', 'login', 'logout', 'refreshSession', 'subscribe'])
+    expect(Object.keys(s).sort()).toEqual(['getState', 'initSession', 'login', 'logout', 'refreshSession', 'subscribe', 'waitForRotation'])
     await s.logout()
     expect(s.getState().status).toBe('anonymous')
   })
@@ -193,7 +193,8 @@ describe('session abstraction — session refresh', () => {
     intervalSpy.mockRestore()
     // Expiry transitions the auth state only — local data (IndexedDB links,
     // folders, etc.) is unreachable from the session abstraction by design:
-    // the surface test above proves refreshSession is the only addition.
+    // the surface test above proves refreshSession and waitForRotation are the
+    // only additions.
     const s2 = createSession(createMemoryAdapter({ initialUser: ALICE, expireOnRefresh: true }))
     await s2.initSession()
     await s2.refreshSession()
@@ -242,6 +243,35 @@ describe('session abstraction — session refresh', () => {
     expect(getCalls()).toBe(2)
     deferred.resolve()
     await expect(third).resolves.toBe(true)
+  })
+
+  it('waitForRotation: resolves immediately (true) when no rotation is in flight, without starting one', async () => {
+    const s = createSession(createMemoryAdapter({ initialUser: ALICE }))
+    await s.initSession() // boot rotation settled
+    await expect(s.waitForRotation()).resolves.toBe(true)
+  })
+
+  it('waitForRotation: returns the in-flight rotation so a concurrent sync waits for it, without starting a second one', async () => {
+    const { adapter, deferred, getCalls } = deferredRefreshAdapter()
+    const s = createSession(adapter)
+    await s.login()
+    s.refreshSession() // rotation in flight (revoke-then-create)
+    const waited = s.waitForRotation()
+    expect(getCalls()).toBe(1) // waitForRotation never starts its own rotation
+    deferred.resolve()
+    await expect(waited).resolves.toBe(true)
+  })
+
+  it('waitForRotation: a rotation started for an older authentication is ignored', async () => {
+    const { adapter, deferred } = deferredRefreshAdapter()
+    const s = createSession(adapter)
+    await s.login()
+    const stale = s.refreshSession() // rotation for the FIRST authentication
+    await s.logout()
+    await s.login() // newer authentication bumps authVersion — the stale rotation is irrelevant
+    await expect(s.waitForRotation()).resolves.toBe(true)
+    deferred.resolve()
+    await expect(stale).resolves.toBe(true)
   })
 
   it('concurrent callers share a failing rotation and settle once to anonymous', async () => {

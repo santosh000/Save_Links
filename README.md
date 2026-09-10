@@ -31,7 +31,7 @@ Save_Links is hosted on Cloudflare Pages. The stable version is available at sav
 
 Save_Links is a bookmark manager that lives in your browser. Your links stay on your device in IndexedDB. The app works offline and local use never requires an account or cloud connectivity.
 
-Cloud synchronization is available for authenticated users. Users can sign in with GitHub to synchronize supported links and folders across browsers.
+Cloud synchronization is available for authenticated users. Users can sign in with Google or GitHub to synchronize supported links and folders across browsers.
 
 Save_Links is a Progressive Web App, so once you have opened it online it also works offline: links can still be added, edited, and deleted without a connection. Data saved by very old versions of the app is migrated automatically on first launch, so nothing is lost.
 
@@ -50,7 +50,7 @@ Save_Links is a Progressive Web App, so once you have opened it online it also w
 - **Installable app** — Save_Links can be installed on your device like a native app
 - **Responsive layouts** — clean desktop, tablet, and mobile layouts; on smaller screens the folders and filters/tools panels open one at a time
 - **Saves instantly** — every change is written immediately to your browser's storage, so a page reload always shows the latest state
-- **GitHub authentication** — sign in with GitHub to enable optional cloud synchronization
+- **Google or GitHub authentication** — sign in to enable optional cloud synchronization
 - **Cross-browser synchronization** — synchronized links and folders appear across all authenticated browsers
 
 ## Local-first
@@ -59,7 +59,7 @@ Save_Links is local-first. Your links stay on your device in IndexedDB. The app 
 
 ## Cloud synchronization
 
-Cloud synchronization is optional. Users can sign in with GitHub to synchronize supported links and folders across browsers.
+Cloud synchronization is optional. Users can sign in with Google or GitHub to synchronize supported links and folders across browsers.
 
 - Create, update, and delete operations are synchronized across authenticated browsers.
 - Local links can be merged after login using **Sync & Merge**.
@@ -76,9 +76,9 @@ When you sign in with existing local data, Save_Links prompts you to choose how 
 
 ## Authentication
 
-Currently, Save_Links supports **GitHub sign-in** to enable optional cloud synchronization.
+Currently, Save_Links supports **Google (primary) and GitHub sign-in** to enable optional cloud synchronization.
 
-**Google and email login are planned for a future release.**
+**Email login is not yet supported.**
 
 ## Privacy
 
@@ -94,6 +94,7 @@ Currently, Save_Links supports **GitHub sign-in** to enable optional cloud synch
 
 The repository includes a Cloudflare Worker authentication boundary:
 
+- **Google OAuth** — `/auth/google/login`, `/auth/google/callback`
 - **GitHub OAuth** — `/auth/github/login`, `/auth/github/callback`
 - **Session management** — `/api/me`, `/auth/logout`
 - **API boundary** — `/api/me` (read), `POST /api/session/refresh` (rotate session)
@@ -190,7 +191,7 @@ The dev server is available at `http://localhost:5173` by default.
 
 Save_Links is built with **Vue 3** and **Vite**, stores data in the browser's **IndexedDB**, and uses a **service worker and PWA manifest** for installation and offline support. Unit tests use **Vitest**, and end-to-end tests use **Playwright**.
 
-Optional worker-side authentication uses **Cloudflare Workers**, **D1 (SQLite)**, and **GitHub OAuth**.
+Optional worker-side authentication uses **Cloudflare Workers**, **D1 (SQLite)**, and **OAuth (Google primary, GitHub)**.
 
 ## Development with OpenCode
 
@@ -214,6 +215,7 @@ Changes are validated with automated unit, end-to-end, and build checks.
 - [x] Offline use, installation, and safe migration of older data
 - [x] Responsive desktop, tablet, and mobile layouts
 - [x] GitHub OAuth authentication (Worker-side)
+- [x] Google OAuth authentication (Worker-side)
 - [x] Session management with rotation
 - [x] Authenticated API boundary (`/api/me`, `POST /api/session/refresh`)
 - [x] Cloud bookmark synchronization (create, update, delete)
@@ -232,7 +234,6 @@ Planned (local improvements):
 
 Later (enhancements):
 
-- [ ] Google sign-in
 - [ ] Email/password sign-in
 - [ ] Improved metadata coverage and a way to refresh it
 - [ ] Link health checking

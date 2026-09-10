@@ -395,6 +395,31 @@ describe('App — anonymous → authenticated sync flow', () => {
       expect(h.syncNowMock).not.toHaveBeenCalled()
       wrapper.unmount()
     })
+
+    it('prompts Sync & Merge for unmerged local data on session restore (regression for bug A)', async () => {
+      // Restore with anonymous local data and NO login transition: the prompt
+      // must still appear. Previously the restore path only ever triggered the
+      // initial sync, so unmerged data could not be merged without refreshing
+      // into a login transition or re-signing-in.
+      h.anonLinks.length = 0
+      h.anonLinks.push({ id: 'link-1', account_id: null })
+
+      setAuth('authenticated', { id: 'acc-1', name: 'Test' })
+      if (h.initResolve) {
+        h.initResolve({ id: 'acc-1', name: 'Test' })
+        h.initResolve = null
+      }
+      await flush()
+
+      const wrapper = mountApp()
+      await flush()
+
+      const dialog = wrapper.findComponent({ name: 'AppDialog' })
+      expect(dialog.props('open')).toBe(true)
+      expect(dialog.props('title')).toBe('Sync your local data?')
+      expect(dialog.props('message')).toContain('1 link')
+      wrapper.unmount()
+    })
   })
 
   describe('Logout → Login transition', () => {
@@ -462,6 +487,17 @@ describe('Visibility resume — immediate sync (Optimization #2)', () => {
     Object.defineProperty(document, 'visibilityState', { value: state, configurable: true })
     document.dispatchEvent(new Event('visibilitychange'))
   }
+
+  beforeEach(async () => {
+    resetAnonData()
+    h.auth.status = 'anonymous'
+    h.auth.user = null
+    if (h.initResolve) {
+      h.initResolve(null)
+      h.initResolve = null
+    }
+    await flush()
+  })
 
   async function mountAuthenticated() {
     setAuth('authenticated', { id: 'acc-1', name: 'Test' })
@@ -646,6 +682,108 @@ describe('Visibility resume — immediate sync (Optimization #2)', () => {
     setDocumentVisibility('visible')
     await flush()
     expect(h.refreshSessionMock).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+})
+
+describe('Async session restore — polling starts when authentication completes after mount', () => {
+  function setDocumentVisibility(state) {
+    Object.defineProperty(document, 'visibilityState', { value: state, configurable: true })
+    document.dispatchEvent(new Event('visibilitychange'))
+  }
+
+  beforeEach(async () => {
+    resetAnonData()
+    // Session restore is still in flight: status is 'unknown' at mount time —
+    // the exact condition that previously prevented startSyncPolling() from
+    // ever running (no visibilitychange fires on an already-visible tab).
+    h.auth.status = 'unknown'
+    h.auth.user = null
+    if (h.initResolve) {
+      h.initResolve(null)
+      h.initResolve = null
+    }
+    await flush()
+  })
+
+  afterEach(() => {
+    setDocumentVisibility('visible')
+  })
+
+  it('mounts with unknown state, then starts the 30000ms poll once auth completes', async () => {
+    const intervalSpy = vi.spyOn(globalThis, 'setInterval')
+    const pollCalls = () => intervalSpy.mock.calls.filter(c => c[1] === 30000)
+
+    // Mount while the session restore is still in flight — status 'unknown'
+    const wrapper = mountApp()
+    await flush()
+    expect(pollCalls().length).toBe(0) // no poll before auth completes
+
+    // Session restore completes (no login transition): status → authenticated
+    setAuth('authenticated', { id: 'acc-1', name: 'Test' })
+    await flush()
+
+    expect(pollCalls().length).toBe(1) // exactly one 30s poll interval
+    expect(h.syncNowMock).toHaveBeenCalled() // initial authenticated sync still runs
+
+    intervalSpy.mockRestore()
+    wrapper.unmount()
+  })
+
+  it('does not create a second interval when polling was already started at mount', async () => {
+    // Pre-seed as already authenticated so onMounted starts polling
+    setAuth('authenticated', { id: 'acc-1', name: 'Test' })
+    await flush()
+
+    const intervalSpy = vi.spyOn(globalThis, 'setInterval')
+    const pollCalls = () => intervalSpy.mock.calls.filter(c => c[1] === 30000)
+    const wrapper = mountApp()
+    await flush()
+    expect(pollCalls().length).toBe(1)
+
+    // A later logout → login re-assert must not create a duplicate interval
+    setAuth('anonymous', null)
+    await flush()
+    setAuth('authenticated', { id: 'acc-1', name: 'Test' })
+    await flush()
+    expect(pollCalls().length).toBe(1)
+
+    intervalSpy.mockRestore()
+    wrapper.unmount()
+  })
+
+  it('keeps visibility stop/restart behavior intact after post-mount auth', async () => {
+    const intervalSpy = vi.spyOn(globalThis, 'setInterval')
+    const pollCalls = () => intervalSpy.mock.calls.filter(c => c[1] === 30000)
+    const wrapper = mountApp()
+    await flush()
+    expect(pollCalls().length).toBe(0)
+
+    setAuth('authenticated', { id: 'acc-1', name: 'Test' })
+    await flush()
+    expect(pollCalls().length).toBe(1)
+    // The initial authenticated sync must be complete before clearing, so the
+    // visibility-resume assertion below counts only the resume sync.
+    expect(h.syncNowMock).toHaveBeenCalledTimes(1)
+
+    h.syncNowMock.mockClear()
+    h.refreshSessionMock.mockClear()
+    // Clearing the spy isolates the hidden → visible cycle: the restart must
+    // create exactly one fresh interval (the old one was cleared on hidden).
+    intervalSpy.mockClear()
+
+    setDocumentVisibility('hidden')
+    await flush()
+    setDocumentVisibility('visible')
+    await flush()
+
+    // Hidden → visible still triggers exactly one immediate sync + rotation,
+    // and restarting polling creates exactly one interval (no duplicates).
+    expect(h.syncNowMock).toHaveBeenCalledTimes(1)
+    expect(h.refreshSessionMock).toHaveBeenCalledTimes(1)
+    expect(pollCalls().length).toBe(1)
+
+    intervalSpy.mockRestore()
     wrapper.unmount()
   })
 })

@@ -11,12 +11,14 @@ import { pullObjects } from '../sync/protocol.js'
 import * as coordinatorModule from '../sync/coordinator.js'
 
 const coordinatorSyncNow = vi.fn()
-vi.mock('../sync/coordinator.js', () => ({
+vi.mock('../sync/coordinator.js', async (importOriginal) => ({
+  ...(await importOriginal()),
   syncNow: (...args) => coordinatorSyncNow(...args),
 }))
 
 // Mock session
 let sessionState = { status: 'unauthenticated', user: null, error: null }
+let waitForRotationImpl = () => Promise.resolve(true)
 vi.mock('../auth/session.js', () => ({
   session: {
     getState: () => sessionState,
@@ -24,6 +26,8 @@ vi.mock('../auth/session.js', () => ({
     initSession: vi.fn(),
     login: vi.fn(),
     logout: vi.fn(),
+    refreshSession: vi.fn(),
+    waitForRotation: () => waitForRotationImpl(),
   },
   initSession: vi.fn(),
 }))
@@ -34,6 +38,7 @@ describe('Browser C Sync & Merge — complete merge flow regression', () => {
   beforeEach(() => {
     coordinatorSyncNow.mockReset()
     sessionState = { status: 'authenticated', user: { id: 'test-account' }, error: null }
+    waitForRotationImpl = () => Promise.resolve(true)
   })
 
   it('anonymous link → login → Sync & Merge → mutation created and pushed → server accepts → mutation marked succeeded', async () => {
@@ -570,5 +575,122 @@ function toRawLike(obj) {
     const mutation = pending.find(m => m.mutation_id === mutationId)
     expect(mutation).toBeDefined()
     expect(mutation.payload.tags).toEqual(['tag1', 'tag2'])
+  })
+})
+
+describe('Browser C Sync & Merge — post-merge local/remote consistency (regression for bug C)', () => {
+  beforeEach(() => {
+    coordinatorSyncNow.mockReset()
+    sessionState = { status: 'authenticated', user: { id: 'test-account' }, error: null }
+    waitForRotationImpl = () => Promise.resolve(true)
+  })
+
+  async function seedLink(id, revision, accountId) {
+    await repository.upsertLink({
+      id,
+      title: `Link ${id}`,
+      url: `https://example.com/${id}`,
+      normalizedUrl: `https://example.com/${id}`,
+      domain: 'example.com',
+      category: 'Other',
+      tags: [],
+      createdAt: new Date().toISOString(),
+      revision,
+      account_id: accountId,
+    })
+  }
+
+  it('removing one link claims the store-acknowledged revision, not the stale in-memory one', async () => {
+    // Post-merge divergence: IndexedDB holds the server-acknowledged record
+    // (revision 1, owned) while the reactive ref still carries the pre-merge
+    // copy (revision 0, anonymous) — updateObjectRevision never round-trips
+    // into the ref, so every subsequent CRUD used to 409 against the server's
+    // revision, forcing a conflict → rebase cycle per edit/delete.
+    const { useLinks } = await import('../composables/useLinks.js')
+    const { setLinks, removeLink } = useLinks()
+    setLinks([{ id: 'link-1', title: 'L', url: 'https://example.com/1', normalizedUrl: 'https://example.com/1', domain: 'example.com', category: 'Other', tags: [], revision: 0, account_id: null }])
+    await new Promise(r => setTimeout(r, 0)) // let the watch persist the ref
+    await seedLink('link-1', 1, 'test-account') // authoritative store diverges
+
+    await removeLink('link-1')
+
+    const pending = await repository.getPendingMutations()
+    const deleteMut = pending.find(m => m.object_id === 'link-1' && m.operation === 'delete')
+    expect(deleteMut).toBeDefined()
+    // Base comes from the store (1), NOT the stale ref (0): the server
+    // accepts on the first attempt instead of 409-conflicting and forcing an
+    // extra rebase cycle.
+    expect(deleteMut.base_revision).toBe(1)
+    // Deleting one link removes exactly that link from the queue's perspective
+    // — the only delete mutation queued is for link-1, no other object's
+    // delete is invented. (Leftover mutations from the file's earlier
+    // describes still live in the shared repo, so scoping to deletes keeps the
+    // guarantee precise.)
+    const pendingDeletes = pending.filter(m => m.status === 'pending' && m.operation === 'delete')
+    expect(pendingDeletes.every(m => m.object_id === 'link-1')).toBe(true)
+  })
+
+  it('updating a merged link keeps the store-owned identity in the payload and revision', async () => {
+    const { useLinks } = await import('../composables/useLinks.js')
+    const { setLinks, updateLink } = useLinks()
+    setLinks([{ id: 'link-2', title: 'Old', url: 'https://example.com/2', normalizedUrl: 'https://example.com/2', domain: 'example.com', category: 'Other', tags: [], revision: 0, account_id: null }])
+    await new Promise(r => setTimeout(r, 0))
+    await seedLink('link-2', 1, 'test-account')
+
+    await updateLink('link-2', { title: 'New' })
+
+    const pending = await repository.getPendingMutations()
+    const updateMut = pending.find(m => m.object_id === 'link-2' && m.operation === 'update')
+    expect(updateMut).toBeDefined()
+    expect(updateMut.base_revision).toBe(1)
+    // The payload must carry the OWNED identity (account_id), not the stale
+    // anonymous one — sending account_id: null used to strip the account
+    // attribution from the server record and re-flag the link as anonymous.
+    expect(updateMut.payload.account_id).toBe('test-account')
+    expect(updateMut.payload.revision).toBe(1)
+    // The user's edit still wins in the payload.
+    expect(updateMut.payload.title).toBe('New')
+  })
+
+  it('replaceLink queues exactly one update on the store-acknowledged base, not a second stale one', async () => {
+    // replaceLink used to queue a SECOND update from the reactive ref after
+    // updateLink already queued the store-based one: a stale base_revision
+    // (re-409 + rebase churn — bug C's symptom) and a reactive payload
+    // (DataCloneError -> the awaited addPendingMutation rejected and unhandled).
+    // It must leave exactly the single mutation updateLink queues.
+    const { useLinks } = await import('../composables/useLinks.js')
+    const { setLinks, replaceLink } = useLinks()
+    setLinks([{ id: 'link-r', title: 'Old', url: 'https://example.com/r', normalizedUrl: 'https://example.com/r', domain: 'example.com', category: 'Other', tags: [], revision: 0, account_id: null }])
+    await new Promise(r => setTimeout(r, 0))
+    await seedLink('link-r', 1, 'test-account')
+
+    await replaceLink('link-r', { originalUrl: 'https://example.com/r', url: 'https://example.com/r', title: 'Replaced', tags: ['t'] })
+
+    const pending = await repository.getPendingMutations()
+    const updateMuts = pending.filter(m => m.object_id === 'link-r' && m.operation === 'update' && m.status === 'pending')
+    expect(updateMuts.length).toBe(1)
+    expect(updateMuts[0].base_revision).toBe(1)
+    expect(updateMuts[0].payload.account_id).toBe('test-account')
+    expect(updateMuts[0].payload.revision).toBe(1)
+    expect(updateMuts[0].payload.title).toBe('Replaced')
+  })
+
+  it('an empty remote snapshot never replaces or clears local data', async () => {
+    // The server account is empty (fresh account): the reconcile must apply
+    // nothing and leave every local record intact — never wipe the local set.
+    // Start from a clean links store so earlier describes' records cannot leak
+    // into the assertion.
+    await repository.setAllLinks([])
+    await repository.setAllFolders([])
+    await seedLink('keep-1', 1, 'test-account')
+    await seedLink('keep-2', 1, 'test-account')
+
+    const { pullAndReconcile } = await import('../sync/coordinator.js')
+    const summary = await pullAndReconcile({ pullFn: () => Promise.resolve({ kind: 'ok', objects: [] }) })
+
+    expect(summary.pulled).toBe(0)
+    expect(summary.applied).toBe(0)
+    const local = await repository.getAllLinks()
+    expect(local.map(l => l.id).sort()).toEqual(['keep-1', 'keep-2'])
   })
 })

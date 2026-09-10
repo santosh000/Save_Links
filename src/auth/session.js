@@ -144,6 +144,20 @@ export function createSession(adapter) {
     return refreshInFlight
   }
 
+  /**
+   * Resolve when any in-flight rotation for the CURRENT authentication has
+   * settled. Never starts a rotation — callers that must not rotate (e.g. the
+   * 30s sync poll) proceed immediately. Sync runs await this before pulling:
+   * a server rotation is revoke-then-create, so a sync request dispatched at
+   * the same time presents the just-revoked cookie and 401s the pull.
+   * @returns {Promise<boolean>} the rotation's outcome, or true when no
+   *   rotation is in flight
+   */
+  function waitForRotation() {
+    if (refreshInFlight && refreshInFlightVersion === authVersion) return refreshInFlight
+    return Promise.resolve(true)
+  }
+
   /** Establish an authenticated session. Rejects on authentication failure. */
   async function login() {
     setState({ status: 'authenticating', user: null, error: null })
@@ -174,7 +188,7 @@ export function createSession(adapter) {
     }
   }
 
-  return { getState, subscribe, initSession, login, logout, refreshSession }
+  return { getState, subscribe, initSession, login, logout, refreshSession, waitForRotation }
 }
 
 // Application singleton. Phase A: the real HTTP adapter talks to the existing

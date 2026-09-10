@@ -73,6 +73,18 @@ export async function rebaseConflict(mutation, serverCurrent, repo) {
     return
   }
 
+  // B2. Any NON-delete write against a deleted object can never land: the
+  //     server gates every claim on deleted = 0 (worker/db/store.js), so an
+  //     UPDATE — or a CREATE converted to UPDATE — rebased against a tombstone
+  //     would 409 forever (each retry conflicts again; the re-drain treats the
+  //     fresh rebase as new work). Fail it like the no-valid-base case (A):
+  //     the next pull applies the authoritative tombstone and settles the
+  //     local copy, so the sync converges instead of livelocking.
+  if (serverCurrent.deleted) {
+    await repo.markMutationFailed(mutation.mutation_id)
+    return
+  }
+
   // C/D/E — Create a rebased mutation. Determine the operation:
   let operation = mutation.operation
   if (mutation.operation === 'create' && serverCurrent.revision > 0) {

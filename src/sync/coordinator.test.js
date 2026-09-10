@@ -236,6 +236,34 @@ describe('rebaseConflict', () => {
     expect(repo.calls.rebased).toEqual([])
     expect(repo.calls.markFailed).toEqual([])
   })
+
+  it('UPDATE conflict against a deleted object: marks failed, no rebase (livelock guard)', async () => {
+    // The server gates every write claim on deleted = 0, so an UPDATE rebased
+    // against a tombstone can never land: each retry 409s again and the
+    // re-drain treats the fresh rebase as new work — an unbounded
+    // pull -> 409 -> rebase cycle. It must fail like the no-valid-base case;
+    // the next pull applies the authoritative tombstone instead.
+    const m = makeMutation({ operation: 'update', base_revision: 2, payload: { id: 'obj-1', title: 'stale edit' } })
+    const repo = makeRepo([m])
+    const serverCurrent = { revision: 5, deleted: true, deleted_at: 123, payload: null, object_id: 'obj-1', object_type: 'link' }
+    await rebaseConflict(m, serverCurrent, repo)
+    expect(repo.calls.markFailed).toEqual(['mut-001'])
+    expect(repo.calls.rebased).toEqual([])
+    expect(repo.calls.markSucceeded).toEqual([])
+  })
+
+  it('CREATE conflict against a deleted object: marks failed, no rebase (livelock guard)', async () => {
+    // A create that collides with a tombstone would convert to an update in
+    // the generic path — which can never land against a deleted object. Fail
+    // it directly instead of rebasing into the update-on-tombstone livelock.
+    const m = makeMutation({ operation: 'create', base_revision: 0, payload: { id: 'obj-1', title: 'X' } })
+    const repo = makeRepo([m])
+    const serverCurrent = { revision: 3, deleted: true, deleted_at: 9, payload: null, object_id: 'obj-1', object_type: 'link' }
+    await rebaseConflict(m, serverCurrent, repo)
+    expect(repo.calls.markFailed).toEqual(['mut-001'])
+    expect(repo.calls.rebased).toEqual([])
+    expect(repo.calls.markSucceeded).toEqual([])
+  })
 })
 
 // ---- syncNow integration tests ----------------------------------------------

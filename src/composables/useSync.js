@@ -10,6 +10,16 @@
 // prevents mutations queued during an in-flight sync from being
 // permanently missed.
 //
+// The re-drain must only fire for GENUINELY NEW work, though: a mutation the
+// sync tried to push and left pending (401-rejected, unavailable, or a
+// pull-rejected 401) must NOT trigger an immediate re-sync — retrying it in a
+// tight loop while it can never progress produces an endless GET /api/sync/objects
+// + POST /api/sync/mutations cycle that only a page refresh breaks. New work is
+// identified as a pending mutation that was NOT in the pre-sync snapshot and
+// has NOT been handed to the network yet (pushed !== true). Everything else
+// waits for the next natural trigger (poll tick, visibility resume, next user
+// action, next rotation), so a failed sync always reaches idle.
+//
 // To handle the Sync & Merge race properly, callers that need to wait for
 // their specific mutations should use syncNowWithMutations() which tracks
 // mutations queued during the call.
@@ -47,20 +57,43 @@ export async function syncNow(options) {
 
   pendingSyncCount++
   inflight = (async () => {
+    // Pending mutations that already exist when this run starts. Only work
+    // queued AFTER this snapshot (and never handed to the network) may
+    // re-trigger a drain — see the header comment on the loop guard.
+    let preSyncIds = new Set()
     try {
+      // Sequence every sync behind any in-flight session rotation: server
+      // rotation is revoke-then-create, so a pull dispatched at the same time
+      // presents the just-revoked cookie and 401s (/api/sync/objects →
+      // unauthenticated). waitForRotation never starts a rotation and never
+      // rejects — with no rotation in flight the pull proceeds immediately.
+      await session.waitForRotation()
+      const accountId = session.getState().user?.id
+      const before = await repository.getPendingMutations()
+      preSyncIds = new Set(
+        before
+          .filter(m => m.account_id === accountId && m.status === 'pending')
+          .map(m => m.mutation_id)
+      )
       return await coordinatorSyncNow(options)
     } finally {
       inflight = null
       pendingSyncCount--
-      // After the sync completes, check if new mutations were queued
-      // during the sync. If so, run another sync to drain them.
-      // This handles the race where mutations are queued during an in-flight sync.
+      // After the sync completes, check if NEW mutations were queued during
+      // the sync. If so, run another sync to drain them. This handles the race
+      // where mutations are queued during an in-flight sync — without spinning:
+      // a mutation the sync already tried and left pending (rejected 401,
+      // unavailable, pull-rejected) is not new work and does not re-trigger.
       const accountId = session.getState().user?.id
       if (accountId && pendingSyncCount === 0) {
         const mutations = await repository.getPendingMutations()
-        const hasPending = mutations.some(m => m.account_id === accountId && m.status === 'pending')
-        if (hasPending) {
-          // New mutations were queued during the sync - run another sync
+        const hasNewWork = mutations.some(m =>
+          m.account_id === accountId &&
+          m.status === 'pending' &&
+          m.pushed !== true &&
+          !preSyncIds.has(m.mutation_id)
+        )
+        if (hasNewWork) {
           await syncNow(options)
         }
       }

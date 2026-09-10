@@ -230,4 +230,169 @@ describe('useFolders', () => {
       scopeB.stop()
     })
   })
+
+  describe('reload reconciliation is account-scoped (foreign pending mutations)', () => {
+    // Isolated imports: a notifying reload also fires listeners any earlier
+    // unscoped mount left behind, so rebuild the modules per test (same pattern
+    // as the unsubscribe test above).
+    async function isolatedSetup() {
+      vi.resetModules()
+      const [{ useFolders }, { repository: repo }, { notifyDataChanged }, { session, initSession }] = await Promise.all([
+        import('./useFolders.js'),
+        import('../storage/repository.js'),
+        import('../storage/dataChanges.js'),
+        import('../auth/session.js'),
+      ])
+      vi.stubGlobal('fetch', vi.fn(async (url) => {
+        if (url === '/api/me') {
+          return new Response(JSON.stringify({ authenticated: true, accountId: 'acc-current' }), { status: 200 })
+        }
+        if (url === '/auth/logout') return new Response(null, { status: 200 })
+        return new Response(null, { status: 404 })
+      }))
+      await initSession()
+      return { useFolders, repo, notifyDataChanged, session }
+    }
+
+    const currentFolder = (id) => ({
+      id, name: `${id} name`, revision: 3, account_id: 'acc-current',
+      createdAt: '2026-01-01T00:00:00.000Z', kept_local: false,
+    })
+
+    it.each(['delete', 'create', 'update'])(
+      'a foreign-account pending %s for the same object id cannot remove or alter the current-account folder',
+      async (operation) => {
+        const { useFolders, repo, notifyDataChanged, session } = await isolatedSetup()
+        const { folders } = useFolders()
+        // current-account folder in ref AND store (as a server pull leaves it)
+        folders.value = [currentFolder('shared')]
+        await flush()
+        // foreign-account pending mutation targeting the same object id
+        await repo.addPendingMutation(operation, 'shared', 'folder', { id: 'shared' }, 'acc-foreign', operation === 'create' ? 0 : 3)
+        notifyDataChanged()
+        await flush()
+        // the folder survives untouched — the foreign mutation is ignored
+        expect(folders.value.length).toBe(1)
+        expect(folders.value[0]).toMatchObject({ id: 'shared', revision: 3, name: 'shared name' })
+        const stored = await repo.getAllFolders()
+        expect(stored.map((f) => f.id)).toEqual(['shared'])
+        await session.logout()
+        vi.unstubAllGlobals()
+      },
+    )
+  })
+
+  describe('backup import syncs via the outbox (Bug 2 fix)', () => {
+    async function isolatedSetup() {
+      vi.resetModules()
+      const [{ useFolders }, { repository: repo }, { session, initSession }] = await Promise.all([
+        import('./useFolders.js'),
+        import('../storage/repository.js'),
+        import('../auth/session.js'),
+      ])
+      const fetchStub = vi.fn(async (url, opts) => {
+        if (url === '/api/me') {
+          return new Response(JSON.stringify({ authenticated: true, accountId: 'acc-current' }), { status: 200 })
+        }
+        if (url === '/auth/logout') return new Response(null, { status: 200 })
+        // pull succeeds as a no-op (syncNow pulls BEFORE pushing and bails if
+        // the pull is unavailable); the mutations POST stays unavailable so the
+        // queued create is still pending when asserted
+        if (String(url).includes('/api/sync/objects')) {
+          return new Response(JSON.stringify({ objects: [] }), { status: 200 })
+        }
+        if (String(url).includes('/api/sync/mutations')) {
+          return new Response(JSON.stringify({ error: 'unavailable', accepted: false, results: [] }), { status: 404 })
+        }
+        return new Response(null, { status: 404 })
+      })
+      vi.stubGlobal('fetch', fetchStub)
+      await initSession()
+      return { useFolders, repo, session, fetchStub }
+    }
+
+    const importedFolder = (id, name) => ({
+      id, name, createdAt: '2026-01-01T00:00:00.000Z', revision: 0, account_id: null, kept_local: false,
+    })
+
+    it('B: importing a new folder assigns a fresh id, queues exactly one account-scoped create at base 0 and fires the auto-sync', async () => {
+      const { useFolders, repo, session, fetchStub } = await isolatedSetup()
+      const { folders, mergeFolders } = useFolders()
+      const res = await mergeFolders([importedFolder('imp-f1', 'Imported Folder')], 'skip')
+      await flush()
+
+      // one new folder, but NOT the backup's native id — genuinely new folder
+      // imports get a fresh identity (Bug 15)
+      expect(res.newCount).toBe(1)
+      expect(folders.value).toHaveLength(1)
+      const freshId = folders.value[0].id
+      expect(freshId).toBeTruthy()
+      expect(freshId).not.toBe('imp-f1')
+      expect(folders.value[0].name).toBe('Imported Folder')
+
+      const stored = await repo.getAllFolders()
+      expect(stored.map((f) => f.id)).toEqual([freshId])
+      expect(stored[0].account_id).toBe('acc-current')
+      expect(stored[0].revision).toBe(0)
+
+      const pending = await repo.getPendingMutations()
+      expect(pending).toHaveLength(1)
+      expect(pending[0]).toMatchObject({
+        object_id: freshId,
+        operation: 'create',
+        object_type: 'folder',
+        account_id: 'acc-current',
+        base_revision: 0,
+      })
+      expect(pending[0].payload).toMatchObject({ revision: 0, account_id: 'acc-current' })
+      expect(fetchStub.mock.calls.some(([u, o]) => o?.method === 'POST' && String(u).includes('/api/sync/mutations'))).toBe(true)
+      await session.logout()
+      vi.unstubAllGlobals()
+    })
+
+    it('C: replacing a duplicate folder queues one update claimed on the store-acknowledged revision, preserving ownership', async () => {
+      const { useFolders, repo, session } = await isolatedSetup()
+      const { folders, mergeFolders } = useFolders()
+      const seed = { id: 'existing-f1', name: 'Local Folder', createdAt: '2026-01-01T00:00:00.000Z', revision: 0, account_id: 'acc-current', kept_local: false }
+      folders.value = [seed]
+      await flush()
+      await repo.upsertFolder({ ...seed, revision: 4, account_id: 'acc-current', kept_local: false })
+      await flush()
+
+      const res = await mergeFolders([{ id: 'existing-f1', name: 'Backup Folder' }], 'replace')
+      await flush()
+
+      expect(res.replacedCount).toBe(1)
+      expect(folders.value).toHaveLength(1)
+      expect(folders.value[0].name).toBe('Backup Folder')
+
+      const pending = await repo.getPendingMutations()
+      expect(pending).toHaveLength(1)
+      expect(pending[0]).toMatchObject({
+        object_id: 'existing-f1',
+        operation: 'update',
+        object_type: 'folder',
+        account_id: 'acc-current',
+        base_revision: 4,
+      })
+      await session.logout()
+      vi.unstubAllGlobals()
+    })
+
+    it('E: anonymous folder imports stay local-only — no outbox mutation, no auto-sync', async () => {
+      vi.resetModules()
+      const [{ useFolders }, { repository: repo }] = await Promise.all([
+        import('./useFolders.js'),
+        import('../storage/repository.js'),
+      ])
+      const { folders, mergeFolders } = useFolders()
+
+      const res = await mergeFolders([importedFolder('anon-f1', 'Anon')], 'skip')
+      await flush()
+
+      expect(res.newCount).toBe(1)
+      expect(folders.value).toHaveLength(1)
+      expect(await repo.getPendingMutations()).toHaveLength(0)
+    })
+  })
 })

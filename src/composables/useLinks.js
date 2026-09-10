@@ -81,6 +81,60 @@ function buildLinkSpec(payload, normalized) {
   }
 }
 
+// Queue outbox mutations for records added/replaced by a backup import, then
+// fire ONE syncNow once every mutation is queued (never one sync per record).
+// Follows the exact claim rules already established by addLink/updateLink:
+//   - new records   -> create, base_revision 0, owned by the current account
+//   - replaced      -> update, base claimed from the store-acknowledged record
+//                      (a stale in-memory base would 409 + rebase churn), store
+//                      ownership/kept_local preserved
+//   - payloads      -> JSON round-trip deep-unwrap (reactive tags arrays are
+//                      proxies that IndexedDB's structured clone rejects)
+//   - anonymous     -> no account, no outbox: imports stay local-only (same as
+//                      the pre-Bug-2 behavior)
+async function queueImportedMutations(newRecords, replacedRecords, objectType) {
+  const accountId = session.getState().user?.id
+  if (!accountId) return
+  for (const record of newRecords) {
+    // Brand the record itself before the deep watch persists it — addLink does
+    // the same, so the store copy (and every later push/pull compare) sees the
+    // imported record as owned, never as anonymous again.
+    record.revision = 0
+    record.account_id = accountId
+    // New objects claim at base 0; the server owns the record from its ACK on.
+    await repository.addPendingMutation(
+      'create',
+      record.id,
+      objectType,
+      JSON.parse(JSON.stringify({ ...record, revision: 0, account_id: accountId })),
+      accountId,
+      0
+    ).catch(err => console.warn('Failed to queue import mutation:', err))
+  }
+  if (replacedRecords.length) {
+    const storeRecords = objectType === 'link' ? await repository.getAllLinks() : await repository.getAllFolders()
+    for (const record of replacedRecords) {
+      const storeCopy = storeRecords.find(r => r.id === record.id)
+      const baseRevision = storeCopy ? storeCopy.revision : record.revision
+      const payload = JSON.parse(JSON.stringify(storeCopy
+        ? { ...record, revision: baseRevision, account_id: storeCopy.account_id, kept_local: storeCopy.kept_local }
+        : record))
+      await repository.addPendingMutation(
+        'update',
+        record.id,
+        objectType,
+        payload,
+        accountId,
+        baseRevision
+      ).catch(err => console.warn('Failed to queue import mutation:', err))
+    }
+  }
+  if (newRecords.length || replacedRecords.length) {
+    // Automatic push for authenticated users — same fire-and-forget as addLink.
+    syncNow().catch(err => console.warn('Auto-sync failed:', err))
+  }
+}
+
 export function useLinks() {
   // Initial state comes from the boot snapshot (filled by boot() in main.js
   // BEFORE Vue mounts from migrated IndexedDB data) — the app never starts
@@ -97,7 +151,45 @@ export function useLinks() {
   const unsubscribeDataChanged = onDataChanged(async () => {
     try {
       isReloadingFromRemote = true
-      links.value = await repository.getAllLinks()
+      // Reload reconciliation (see src/sync/link-arrival.test.js): the store
+      // snapshot alone can race a local save/delete landing while this async
+      // read is in flight — its persistence write is swallowed by the watch
+      // guard below, so the record survives in this ref and the mutation
+      // queue but never reaches a store read taken before it. Preserve
+      // ref-only records that have a pending create/update but are absent
+      // from the snapshot, and drop snapshot records that have a pending
+      // delete — never clobber a just-saved link, never resurrect a locally
+      // deleted one. Pending mutations are read twice because a delete
+      // queued during the snapshot read can commit after the first read.
+      const snapshot = await repository.getAllLinks()
+      const pending1 = await repository.getPendingMutations()
+      const pending2 = await repository.getPendingMutations()
+      const accountId = session.getState().user?.id
+      const keptKeys = new Set()
+      const deletedKeys = new Set()
+      for (const m of [...pending1, ...pending2]) {
+        if (m.object_type !== 'link') continue
+        // Account-scoping: the outbox can hold leftover pending mutations from
+        // a previous account on this browser. Only the CURRENT account's
+        // mutations may protect (create/update) or drop (delete) records here;
+        // a foreign mutation with a colliding object id must never alter this
+        // account's reconciliation. (Anonymous: no account — legacy behavior.)
+        if (accountId && m.account_id !== accountId) continue
+        const key = `link:${m.object_id}`
+        if (m.operation === 'delete') deletedKeys.add(key)
+        else keptKeys.add(key)
+      }
+      const keptLocal = links.value.filter(
+        (l) => keptKeys.has(`link:${l.id}`) && !snapshot.some((s) => s.id === l.id)
+      )
+      const fresh = snapshot.filter((s) => !deletedKeys.has(`link:${s.id}`))
+      const merged = keptLocal.length ? [...keptLocal, ...fresh] : fresh
+      links.value = merged
+      // Persist explicitly: the watch is suppressed while this flag is up, so
+      // a merged (kept/dropped) set would otherwise never reach storage.
+      if (keptLocal.length || merged.length !== snapshot.length) {
+        await repository.setAllLinks(merged)
+      }
     } catch (err) {
       console.warn('reload links from storage failed', err)
     } finally {
@@ -184,7 +276,13 @@ export function useLinks() {
     const normalized = normalizeUrl(rawInput)
     try { new URL(normalized) } catch { throw new Error('Invalid URL') }
     const spec = buildLinkSpec(payload, normalized)
-    updateLink(id, {
+    // updateLink() is the single queue path: it claims the store-acknowledged
+    // revision and the store's owned identity and deep-unwraps the payload
+    // (see updateLink). Previously replaceLink ALSO queued a second update from
+    // the reactive ref — a stale base_revision (re-409 + rebase churn) and a
+    // reactive payload (DataCloneError -> unhandled rejection) — re-introducing
+    // the exact post-merge divergence bug C guarded against. One mutation only.
+    await updateLink(id, {
       originalUrl: spec.originalUrl,
       normalizedUrl: spec.normalizedUrl,
       url: spec.url,
@@ -197,18 +295,6 @@ export function useLinks() {
     const updated = links.value.find(l => l.id === id) || null
     if (updated) {
       enrichMetadata(updated.id, normalized, payload)
-      // Create pending mutation for sync (if authenticated)
-      const accountId = session.getState().user?.id
-      if (accountId) {
-        await repository.addPendingMutation(
-          'update',
-          updated.id,
-          'link',
-          updated,
-          accountId,
-          updated.revision
-        )
-      }
     }
     return updated
   }
@@ -271,13 +357,29 @@ export function useLinks() {
     // Create pending mutation for sync (if authenticated)
     const accountId = session.getState().user?.id
     if (accountId) {
+      // The reactive copy can lag the authoritative store: a merge or a
+      // push-accepted response updates revisions/ownership in IndexedDB only,
+      // never back into this ref. Claim the mutation on the store-acknowledged
+      // revision (a stale in-memory base forces a 409 conflict + rebase every
+      // time) and carry the store's owned identity (account_id/kept_local), so
+      // an update never strips the account attribution from the payload.
+      const storeCopy = (await repository.getAllLinks()).find(l => l.id === merged.id)
+      const baseRevision = storeCopy ? storeCopy.revision : merged.revision
+      // Deep-unwrap before queueing: a shallow spread of the reactive record
+      // keeps nested arrays (tags) as reactive proxies, which IndexedDB's
+      // structured clone rejects with a DataCloneError — the mutation would
+      // silently never be queued. JSON round-trip mirrors the Keep Local path
+      // in App.vue.
+      const payload = JSON.parse(JSON.stringify(storeCopy
+        ? { ...merged, revision: baseRevision, account_id: storeCopy.account_id, kept_local: storeCopy.kept_local }
+        : merged))
       await repository.addPendingMutation(
         'update',
         merged.id,
         'link',
-        merged,
+        payload,
         accountId,
-        merged.revision
+        baseRevision
       ).catch(err => console.warn('Failed to queue mutation:', err))
       // Automatic push for authenticated users
       syncNow().catch(err => console.warn('Auto-sync failed:', err))
@@ -318,13 +420,20 @@ export function useLinks() {
     if (link) {
       const accountId = session.getState().user?.id
       if (accountId) {
+        // Base the delete claim on the store-acknowledged revision, not the
+        // reactive copy: after a merge the ref still shows the pre-merge
+        // revision while IndexedDB holds the server-acknowledged one. A stale
+        // base turns every post-merge delete into a 409 conflict + rebase
+        // cycle — an extra sync round that feeds the re-drain loop.
+        const storeCopy = (await repository.getAllLinks()).find(l => l.id === id)
+        const baseRevision = storeCopy ? storeCopy.revision : link.revision
         await repository.addPendingMutation(
           'delete',
           id,
           'link',
           { id },
           accountId,
-          link.revision
+          baseRevision
         ).catch(err => console.warn('Failed to queue mutation:', err))
         // Automatic push for authenticated users
         syncNow().catch(err => console.warn('Auto-sync failed:', err))
@@ -340,7 +449,10 @@ export function useLinks() {
   // Merge imported links with existing links using the given strategy
   // strategy: 'skip' (default) - keep existing, ignore imported duplicates
   // strategy: 'replace' - replace existing duplicates with imported versions (preserving id/createdAt/user fields)
-  function mergeLinks(importedLinks, strategy = 'skip') {
+  // Async because an authenticated import also queues the outbox mutations for
+  // the added/replaced records (and fires ONE syncNow) before resolving; the
+  // returned counts object is unchanged.
+  async function mergeLinks(importedLinks, strategy = 'skip') {
     const existing = links.value
     const existingByUrl = new Map()
     for (const l of existing) {
@@ -348,6 +460,7 @@ export function useLinks() {
     }
 
     const newLinks = []
+    const replacedLinks = []
     const merged = [...existing]
 
     for (const imported of importedLinks) {
@@ -369,16 +482,23 @@ export function useLinks() {
               account_id: existingLink.account_id,
             }
             merged[idx] = { ...imported, ...preserved }
+            replacedLinks.push(merged[idx])
           }
         }
       } else {
-        const newLink = { ...imported, id: imported.id || generateId() }
+        // Genuinely-new imported record: assign a FRESH id — never reuse the
+        // backup's native id (Bug 15). A backup id can already exist on the
+        // server as a tombstone; a create at that id is correctly rejected and
+        // the next pull then deletes the imported record. With a fresh id the
+        // create can always land and sync to every device.
+        const newLink = { ...imported, id: generateId() }
         merged.push(newLink)
         newLinks.push(newLink)
       }
     }
 
     links.value = merged
+    await queueImportedMutations(newLinks, replacedLinks, 'link')
     return { newCount: newLinks.length, replacedCount: strategy === 'replace' ? (importedLinks.length - newLinks.length) : 0 }
   }
 
