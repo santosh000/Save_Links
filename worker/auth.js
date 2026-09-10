@@ -1,6 +1,5 @@
-// Save_Links — Worker OAuth routes (Phase 3C-1 technical spike + 3C-2
-// session-cookie hardening, rotation, session validation and logout; Google
-// provider added alongside GitHub).
+// Save_Links — Worker OAuth routes: login/callback for Google + GitHub, plus
+// session-cookie hardening, rotation, session validation and logout.
 //
 // Flow (identical for every provider):
 //   browser -> /auth/<provider>/login -> <provider> -> /auth/<provider>/callback

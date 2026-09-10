@@ -49,7 +49,7 @@ HttpOnly session cookie (production: __Host- prefix)
 | `/api/me` | GET | Session cookie | API probe — `{authenticated: true, accountId}` or 401 |
 | `/api/session/refresh` | POST | Session cookie + Origin | Rotate session — revoke old, issue fresh cookie |
 
-Routing: `assets.run_worker_first: ["/auth/*"]` in `wrangler.jsonc` ensures navigation requests reach the Worker. Unknown `/api/*` routes return 404 (not SPA fallback).
+Routing: `assets.run_worker_first: ["/auth/*", "/api/*"]` in `wrangler.jsonc` ensures navigation requests reach the Worker. Unknown `/api/*` routes return 404 (not SPA fallback).
 
 ## Security Boundaries
 
@@ -64,6 +64,4 @@ Routing: `assets.run_worker_first: ["/auth/*"]` in `wrangler.jsonc` ensures navi
 
 ## Cloud Data
 
-> **Cloud application-data synchronization is not implemented yet.**
-
-No cloud bookmark storage, no conflict resolution, no automatic sync, no cross-device synchronization. The D1 database currently stores only authentication-related data (accounts, provider identities, sessions, OAuth state tombstones).
+Cloud sync is implemented (v2.2.0): authenticated `/api/sync/*` endpoints on the Worker, backed by D1 objects + tombstone tables. The browser keeps its own IndexedDB store; cloud failure never blocks local boot or operation.

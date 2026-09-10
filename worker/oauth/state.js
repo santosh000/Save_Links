@@ -1,4 +1,4 @@
-// Save_Links — OAuth CSRF state + PKCE (Phase 3C-1 spike).
+// Save_Links — OAuth CSRF state + PKCE.
 //
 // State binding: the login handler generates an unguessable `state` plus a
 // PKCE `code_verifier`, and stores both in a single short-lived, HttpOnly,
@@ -15,7 +15,7 @@
 // never leaves the HttpOnly cookie.
 //
 // This is the mechanism Cloudflare's own docs pattern uses (HMAC-signed
-// OAuth state in a cookie). Phase 3C-2 adds ONE server-side piece: the
+// OAuth state in a cookie). A server-side claim makes a state single-use: the
 // callback claims the state in the D1 `oauth_states` table
 // (store.claimOAuthState) so a state is single-use (RFC 6749 §4.1.2). A
 // cookie-only check is stateless and therefore replayable — verification is a

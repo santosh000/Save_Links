@@ -1,16 +1,15 @@
 {
-	// Phase 3A: Cloudflare Workers + static-assets boundary.
+	// Save_Links production deployment — Cloudflare Worker serving the built SPA
+	// from dist/ plus the /auth/* and /api/* boundaries (see run_worker_first).
 	//
-	// Assets-first routing (run_worker_first is NOT set — the default):
-	// requests that match a file in dist/ (Vue/PWA shell, hashed assets, /sw.js,
-	// manifest, icons) are served directly by the static-assets layer WITHOUT
-	// invoking the Worker script — free and unlimited on the Free tier per
+	// Assets-first routing: requests that match a file in dist/ (Vue/PWA shell,
+	// hashed assets, /sw.js, manifest, icons) are served directly by the
+	// static-assets layer WITHOUT invoking the Worker script — free and
+	// unlimited on the Free tier per
 	// https://developers.cloudflare.com/workers/static-assets/billing-and-limitations/.
 	// Non-asset navigation requests get the SPA fallback below. The Worker
-	// script (worker/index.js) therefore only runs for non-navigation requests
-	// that match no asset — with no server routes yet, that is effectively never.
-	// Future authentication (Phase 3C) will add /auth/* and /api/* handlers and,
-	// if needed, selective run_worker_first patterns.
+	// script (worker/index.js) runs only for the /auth/* and /api/* patterns
+	// listed in run_worker_first and for requests that match no asset.
 	"$schema": "./node_modules/wrangler/config-schema.json",
 	"name": "save-links",
 	"main": "./worker/index.js",
@@ -24,7 +23,7 @@
 		// index.html (200), while real files (/sw.js, manifest, /assets/*) are
 		// never shadowed. https://developers.cloudflare.com/workers/static-assets/routing/single-page-application/
 		"not_found_handling": "single-page-application",
-		// Phase 3C-1: the compatibility_date above enables
+		// The compatibility_date above enables
 		// assets_navigation_prefers_asset_serving — navigation requests normally
 		// NEVER invoke the Worker script, so /auth/* would be swallowed by the
 		// SPA fallback. This glob routes /auth/* and /api/* to the Worker first;
@@ -43,12 +42,11 @@
 			"/api/*"
 		]
 	},
-	// Phase 3B: application accounts + server-side sessions (worker/db/store.js).
-	// Local development / local migrations use only database_name (the
-	// database_id below is a zero-UUID PLACEHOLDER that makes any real
-	// `wrangler deploy` fail until the production database exists and its real
-	// id is set here — an intentional guard; see MAINTAINERS.md). No production
-	// D1 database exists or may be created by this repository yet.
+	// Application accounts + server-side sessions + sync state
+	// (worker/db/store.js). Local development / local migrations use only
+	// database_name (the local Miniflare D1); database_id below is the
+	// PRODUCTION D1 database (save-links-db), already deployed and migrated
+	// (see MAINTAINERS.md).
 	"d1_databases": [
 		{
 			"binding": "DB",
@@ -56,11 +54,10 @@
 			"database_id": "39997a61-6efe-4628-9054-1c61c173f83f"
 		}
 	],
-	// Phase 3C-1: GitHub OAuth + signed OAuth-state cookie. Google is the
-	// primary provider and adds GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET (same
-	// flow machinery; the google callback additionally verifies Google's
-	// signed id_token server-side). These are deployed as Wrangler secrets
-	// (`wrangler secret put <NAME>`) for production and read from the
+	// OAuth sign-in (worker/oauth/*): Google is the primary provider, GitHub
+	// also supported; the Google callback additionally verifies Google's
+	// signed id_token server-side. All secrets are deployed as Wrangler
+	// secrets (`wrangler secret put <NAME>`) for production and read from the
 	// gitignored .dev.vars file locally (see MAINTAINERS.md; {env}.dev.vars
 	// matching is supported). `required` is a deploy guard: a `wrangler deploy`
 	// fails loudly instead of shipping half-configured auth.
@@ -74,7 +71,7 @@
 			"STATE_HMAC_SECRET"
 		]
 	},
-	// Phase 3C-2 Chunk 3: redirect-origin allowlist (worker/auth.js
+	// Redirect-origin allowlist (worker/auth.js
 	// resolveApprovedOrigin). Comma-separated origins; every /auth/* redirect
 	// destination derives only from this list — never from request headers.
 	// Non-secret configuration, so it ships as plaintext `vars`, NOT a secret

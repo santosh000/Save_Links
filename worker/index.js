@@ -1,11 +1,11 @@
-// Save_Links Worker — Phase 3A static-asset boundary + Phase 3C OAuth spike +
-// Phase 3C-2 session validation and logout.
+// Save_Links Worker — static-assets boundary + authentication + API + sync.
 //
 // Routing (wrangler.jsonc): assets-first by default (free, unlimited asset
 // serving; this script is not invoked for asset matches or SPA fallbacks —
 // compatibility_date >= 2025-04-01 makes navigation requests prefer assets).
-// The `assets.run_worker_first = ["/auth/*"]` pattern routes ONLY /auth/*
-// navigation requests to this script; everything else keeps Phase 3A behavior.
+// The `assets.run_worker_first = ["/auth/*", "/api/*"]` patterns route the
+// authentication and API boundaries to this script; everything else keeps
+// assets-first behavior.
 //
 // Routes (allowed methods enforced per route, 405 + Allow otherwise):
 //   GET  /auth/github/login  -> start GitHub OAuth (signed state cookie)
@@ -23,10 +23,6 @@
 //   GET  /api/sync/objects   -> pull account's server object state (200/401/503/500)
 // Worker-generated responses carry their own security headers (public/_headers
 // applies only to static-asset responses, not to script responses).
-//
-// Still NOT implemented (later phases): /api/* beyond /api/me and
-// /api/session/refresh, session validation on app requests beyond these
-// handlers, the HTTP AuthAdapter bridge, any frontend coupling, cloud sync.
 import { handleOAuthLogin, handleOAuthCallback, handleAuthMe, handleAuthLogout } from './auth.js'
 import { handleApiMe, handleApiSessionRefresh, handleApiSyncMutation, handleApiSyncMutations, handleApiSyncObjects } from './api.js'
 

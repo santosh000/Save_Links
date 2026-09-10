@@ -1,28 +1,28 @@
-// Save_Links Worker — Phase 3D: authenticated API boundary.
+// Save_Links Worker — authenticated API boundary.
 //
-// The /api/* boundary is the point where a browser request, a session cookie,
-// and a D1 account come together. Chunk 1 proved the read boundary:
-//   GET /api/me  -> 200 { authenticated: true, accountId } | 401 | 503 | 500
-//
-// Chunk 2 adds the first real state-changing endpoint:
-//   POST /api/session/refresh -> 200 { ok: true } + fresh session cookie
-//   | 401 | 403 | 503 | 500
+// The /api/* boundary is where a browser request, a session cookie, and a D1
+// account come together:
+//   GET  /api/me               -> 200 { authenticated: true, accountId } | 401 | 503 | 500
+//   POST /api/session/refresh  -> 200 { ok: true } + fresh session cookie
+//                                | 401 | 403 | 503 | 500
+//   POST /api/sync/mutation    -> 200/409 (single push, idempotent)
+//   POST /api/sync/mutations   -> 200 (batched push, up to 25)
+//   GET  /api/sync/objects     -> 200 { objects } (pull) | 401 | 503 | 500
 //
 // Design constraints honored here:
-//   - GET /api/me is READ-ONLY: no CSRF token, no Origin/Referer gate (a
-//     cross-site read is harmless and same-origin policy already guards it).
-//     It also deliberately never inspects APPROVED_ORIGINS.
-//   - POST /api/session/refresh IS state-changing, so it enforces the full
-//     boundary FIRST: POST (router) -> Origin/Referer gate -> authenticated
-//     session -> account. Origin validation fails closed and never derives a
-//     trusted origin from Host/X-Forwarded-Host/X-Forwarded-Proto, query
-//     params, or the request body — only from APPROVED_ORIGINS.
+//   - GET /api/me and GET /api/sync/objects are READ-ONLY: no CSRF token, no
+//     Origin/Referer gate (a cross-site read is harmless and same-origin
+//     policy already guards it). They also deliberately never inspect
+//     APPROVED_ORIGINS.
+//   - POST endpoints are state-changing, so they enforce the full boundary
+//     FIRST: POST (router) -> Origin/Referer gate -> authenticated session ->
+//     account. Origin validation fails closed and never derives a trusted
+//     origin from Host/X-Forwarded-Host/X-Forwarded-Proto, query params, or
+//     the request body — only from APPROVED_ORIGINS.
 //   - Session resolution + rotation REUSE the existing authentication
 //     machinery (auth.js readSessionCookie/setCookieHeader/sessionCookieConfig,
 //     store.js getSessionByToken/getAccount/revokeSessionByToken/createSession)
 //     — no duplicated hashing/cookie-parse/lookup logic.
-//   - Nothing here touches application data, IndexedDB, or sync. Local-first
-//     behavior stays completely independent.
 
 import {
   getAccount,

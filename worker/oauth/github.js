@@ -1,10 +1,10 @@
-// Save_Links — GitHub OAuth web-flow client (Phase 3C-1 spike).
+// Save_Links — GitHub OAuth web-flow client.
 //
 // Runs in the Cloudflare Worker runtime (workerd) against GitHub's public
 // endpoints. This module is HTTP-only: it never persists anything, never logs
 // tokens or codes, and returns typed errors whose messages never contain
 // credentials. The only value that ever leaves this module is the stable
-// provider subject (and a display login for the spike result page).
+// provider subject (and a display login).
 //
 // Endpoints (GitHub docs, "Authorizing OAuth apps", fetched 2026-09-01):
 //   GET  https://github.com/login/oauth/authorize          (web application flow)
@@ -12,7 +12,7 @@
 //   GET  https://api.github.com/user                       (identity)
 //
 // Scopes: NONE are requested. GitHub's "(no scope)" grants read-only access to
-// public profile information, which is all the spike needs for a stable
+// public profile information, which is all this client needs for a stable
 // identity. See MAINTAINERS.md for why an empty scope list is deliberate.
 
 /** Non-exported error type: message is safe to surface to a browser. */

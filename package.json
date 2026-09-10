@@ -9,8 +9,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "deploy:preview": "npm run build && wrangler pages deploy dist --project-name savelinks",
-    "deploy:production": "npm run build && wrangler pages deploy dist --project-name savelinks --branch main",
+    "deploy:pages:preview": "npm run build && wrangler pages deploy dist --project-name savelinks",
+    "deploy:pages": "npm run build && wrangler pages deploy dist --project-name savelinks --branch main",
     "deploy:worker": "npm run build && wrangler deploy"
   },
   "dependencies": {
