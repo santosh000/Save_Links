@@ -14,7 +14,7 @@
 
 ## Stable vs Development Builds
 
-Save_Links is under active development: the `master` branch always carries the latest unreleased work.
+Save_Links is under active development: new work lands on the `master` branch between releases.
 
 | | Stable | Development |
 | --- | --- | --- |
@@ -22,10 +22,10 @@ Save_Links is under active development: the `master` branch always carries the l
 | Contains | verified, released features | the latest work in progress |
 | May contain | — | unfinished features, bugs, or breaking changes |
 
-- **Stable** — the latest **released** version. Use it if you simply want to use Save_Links. The current stable release is v2.0.2, available at **https://savelinks.pages.dev** — just open the address; there is nothing to install. Features on the `master` branch are not part of v2.0.2 and are not released yet.
+- **Stable** — the latest **released** version. Use it if you simply want to use Save_Links. The current stable release is v2.2.0, available at **https://save-links.ucancallmesan.workers.dev** — just open the address; there is nothing to install.
 - **Development** — the latest **unreleased** code on the repository's `master` branch. Use it if you want to test upcoming work or contribute to the project. It may contain unfinished features, bugs, or breaking changes, and there is currently **no permanent public development URL** — developers and testers run it locally (see [Development](#development)). Temporary Cloudflare preview deployments may be created when specifically needed for testing; they are not permanent and are not created automatically.
 
-Save_Links is hosted on Cloudflare Pages. The stable version is available at savelinks.pages.dev.
+Save_Links is hosted on Cloudflare Workers. The stable version is available at save-links.ucancallmesan.workers.dev.
 
 ## What Save Links Does
 
@@ -49,6 +49,9 @@ Save_Links is a Progressive Web App, so once you have opened it online it also w
 - **Appearance** — light, dark, or system theme with a choice of four accent colors; your preference is remembered
 - **Installable app** — Save_Links can be installed on your device like a native app
 - **Responsive layouts** — clean desktop, tablet, and mobile layouts; on smaller screens the folders and filters/tools panels open one at a time
+- **Sticky Saved Links toolbar** — search, filters, sorting, quick add, and view mode stay within reach while you scroll
+- **Card, list, or compact views** — switch how saved links are presented with one tap
+- **Inline editing** — update a link's details directly in place
 - **Saves instantly** — every change is written immediately to your browser's storage, so a page reload always shows the latest state
 - **Google or GitHub authentication** — sign in to enable optional cloud synchronization
 - **Cross-browser synchronization** — synchronized links and folders appear across all authenticated browsers
@@ -87,12 +90,14 @@ Currently, Save_Links supports **Google (primary) and GitHub sign-in** to enable
 - Cloud synchronization is **optional** — you can use Save_Links completely without an account.
 - **Cloud synchronization is not a backup.** It is a synchronization service. For backups, use the application's export/backup functionality.
 - **No analytics or telemetry.** Save_Links does not collect usage data.
-- The website (savelinks.pages.dev) is where the app comes from; it is not a backend, and no data is uploaded to it during local use.
-- One optional external request: when you save a URL, your browser may ask that website for its title, description, and preview image. Some websites block this, in which case the link is saved with just what you entered.
+- The production site is only where the app comes from; it is not a backend, and no data is uploaded to it during local use.
+- **Offline.** After a first visit online, the app shell is cached by your browser, and Save_Links keeps working without a connection, including adding, editing, and deleting links.
+- **One optional external request.** When you save a URL, your browser may ask that website for its title, description, and preview image. Some websites block this, in which case the link is saved with just what you entered.
+- **Backups are your safety net.** Clearing your browser's data removes your saved links, so export a backup first if you want to move or protect them.
 
-## Authentication (Worker-side, optional)
+## Authentication and Security
 
-The repository includes a Cloudflare Worker authentication boundary:
+Sign-in and cloud synchronization are live in the production application at **https://save-links.ucancallmesan.workers.dev**:
 
 - **Google OAuth** — `/auth/google/login`, `/auth/google/callback`
 - **GitHub OAuth** — `/auth/github/login`, `/auth/github/callback`
@@ -100,7 +105,7 @@ The repository includes a Cloudflare Worker authentication boundary:
 - **API boundary** — `/api/me` (read), `POST /api/session/refresh` (rotate session)
 - **Security** — PKCE, signed single-use OAuth state, approved-origin allowlist, session token hashing, HttpOnly cookies, rate limiting on authentication and API endpoints
 
-This infrastructure is deployed to a separate Workers preview environment (`save-links.<account>.workers.dev`). The stable Pages deployment at `savelinks.pages.dev` does not include it. The local application works completely without authentication.
+The local application works completely without authentication.
 
 ## URL Cleaning
 
@@ -143,16 +148,6 @@ All your data can be exported to a JSON file and imported again later — which 
 
 **Cloud synchronization is not a backup.** Use export/import for backups.
 
-## Offline and Privacy
-
-- **Offline.** After a first visit online, the app shell is cached by your browser, and Save_Links keeps working without a connection, including adding, editing, and deleting links.
-- **Local use** stores data locally in IndexedDB. No data leaves your device.
-- **Authenticated cloud synchronization** sends supported synchronized data to the cloud.
-- **No analytics or telemetry.** Save_Links does not collect usage data.
-- **The website is just where the app comes from.** The app is served from savelinks.pages.dev; it is not a backend, and no data is uploaded to it during local use.
-- **One optional external request.** When you save a URL, your browser may ask that website for its title, description, and preview image. Some websites block this, in which case the link is saved with just what you entered.
-- **Backups are your safety net.** Clearing your browser's data removes your saved links, so export a backup first if you want to move or protect them.
-
 ## App Preview
 
 Save links quickly with automatic metadata and keep everything organized in one place.
@@ -191,7 +186,7 @@ The dev server is available at `http://localhost:5173` by default.
 
 Save_Links is built with **Vue 3** and **Vite**, stores data in the browser's **IndexedDB**, and uses a **service worker and PWA manifest** for installation and offline support. Unit tests use **Vitest**, and end-to-end tests use **Playwright**.
 
-Optional worker-side authentication uses **Cloudflare Workers**, **D1 (SQLite)**, and **OAuth (Google primary, GitHub)**.
+Authentication and cloud synchronization use **Cloudflare Workers**, **D1 (SQLite)**, and **OAuth (Google primary, GitHub)**.
 
 ## Development with OpenCode
 
@@ -214,8 +209,8 @@ Changes are validated with automated unit, end-to-end, and build checks.
 - [x] Backup and restore, including older backup formats
 - [x] Offline use, installation, and safe migration of older data
 - [x] Responsive desktop, tablet, and mobile layouts
-- [x] GitHub OAuth authentication (Worker-side)
-- [x] Google OAuth authentication (Worker-side)
+- [x] GitHub OAuth authentication
+- [x] Google OAuth authentication
 - [x] Session management with rotation
 - [x] Authenticated API boundary (`/api/me`, `POST /api/session/refresh`)
 - [x] Rate limiting on authentication and API endpoints
