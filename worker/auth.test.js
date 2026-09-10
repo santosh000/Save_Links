@@ -1109,3 +1109,48 @@ describe('GET /auth/google/callback', () => {
     expect(sqlite.prepare('SELECT count(*) AS n FROM users').get().n).toBe(1)
   })
 })
+
+describe('rate limiting — auth scope, per client IP (Security Task 1)', () => {
+  const IP = '203.0.113.77'
+  const AUTH_WINDOW_MS = 300_000
+  const AUTH_LIMIT = 30
+
+  // An env whose rate_limits table already has this IP at the limit for the
+  // window containing NOW.
+  function exhaustedEnv(scopeKey = IP) {
+    const env = makeEnv()
+    const windowStart = Math.floor(NOW / AUTH_WINDOW_MS) * AUTH_WINDOW_MS
+    env.DB.prepare('INSERT INTO rate_limits (scope, key, window_start, count) VALUES (?, ?, ?, ?)')
+      .bind('auth', scopeKey, windowStart, AUTH_LIMIT)
+      .run()
+    return env
+  }
+
+  it('GET /auth/github/login 429s with Retry-After when the IP budget is exhausted', async () => {
+    const res = await handleOAuthLogin(new Request(LOGIN_URL, { headers: { 'cf-connecting-ip': IP } }), exhaustedEnv(), { now: NOW })
+    expect(res.status).toBe(429)
+    expect(res.headers.get('Retry-After')).toBe('100')
+    expect(res.headers.get('Cache-Control')).toBe('no-store')
+    expect(await res.json()).toEqual({ error: 'rate_limited' })
+  })
+
+  it('a different IP is unaffected — budgets are never shared across IPs', async () => {
+    const res = await handleOAuthLogin(
+      new Request(LOGIN_URL, { headers: { 'cf-connecting-ip': '203.0.113.78' } }),
+      exhaustedEnv(), // the exhausted row belongs to a DIFFERENT IP
+      { now: NOW }
+    )
+    expect(res.status).toBe(302)
+  })
+
+  it('GET /auth/github/callback is gated by the same per-IP budget, before any state work', async () => {
+    const res = await handleOAuthCallback(
+      new Request(CALLBACK_URL, { headers: { 'cf-connecting-ip': IP } }),
+      exhaustedEnv(),
+      { now: NOW, provider: 'github' }
+    )
+    expect(res.status).toBe(429)
+    expect(res.headers.get('Retry-After')).toBe('100')
+    expect(await res.json()).toEqual({ error: 'rate_limited' })
+  })
+})

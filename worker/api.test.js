@@ -1077,3 +1077,71 @@ describe('POST /api/sync/mutations — batched push (Opt #3)', () => {
     expect(body.results.every((r) => r.accepted)).toBe(true)
   })
 })
+
+describe('rate limiting — api scope, per account (Security Task 1)', () => {
+  const API_WINDOW_MS = 60_000
+  const API_LIMIT = 120
+  const BATCH_URL = 'http://localhost:8787/api/sync/mutations'
+
+  function entry() {
+    return {
+      mutation_id: crypto.randomUUID(), object_type: 'link', object_id: crypto.randomUUID(),
+      operation: 'create', base_revision: 0, payload: '{}',
+    }
+  }
+
+  function batchRequest({ cookie, body }) {
+    const headers = new Headers()
+    headers.set('Origin', 'http://localhost:8787')
+    if (cookie) headers.set('Cookie', cookie)
+    headers.set('Content-Type', 'application/json')
+    return new Request(BATCH_URL, { method: 'POST', headers, body: JSON.stringify(body) })
+  }
+
+  function exhaustAccount(env, accountId) {
+    const windowStart = Math.floor(NOW / API_WINDOW_MS) * API_WINDOW_MS
+    env.DB.prepare('INSERT INTO rate_limits (scope, key, window_start, count) VALUES (?, ?, ?, ?)')
+      .bind('api', accountId, windowStart, API_LIMIT)
+      .run()
+  }
+
+  it('POST /api/session/refresh 429s with Retry-After when the account budget is exhausted', async () => {
+    const env = makeEnv()
+    const { accountId, token } = await seedSession(env)
+    exhaustAccount(env, accountId)
+    const res = await handleApiSessionRefresh(
+      refreshRequest({ origin: 'http://localhost:8787', cookie: `${DEV_COOKIE}=${encodeURIComponent(token)}` }),
+      env,
+      { now: NOW }
+    )
+    expect(res.status).toBe(429)
+    expect(res.headers.get('Retry-After')).toBe('40')
+    expect(res.headers.get('Cache-Control')).toBe('no-store')
+    expect(await res.json()).toEqual({ error: 'rate_limited' })
+  })
+
+  it('a different account with an exhausted budget does not throttle this account', async () => {
+    const env = makeEnv()
+    const { token } = await seedSession(env)
+    exhaustAccount(env, 'some-other-account')
+    const res = await handleApiSessionRefresh(
+      refreshRequest({ origin: 'http://localhost:8787', cookie: `${DEV_COOKIE}=${encodeURIComponent(token)}` }),
+      env,
+      { now: NOW }
+    )
+    expect(res.status).toBe(200)
+  })
+
+  it('a batched sync mutation over budget is rejected before parsing the body', async () => {
+    const env = makeEnv()
+    const { accountId, token } = await seedSession(env)
+    exhaustAccount(env, accountId)
+    const res = await handleApiSyncMutations(
+      batchRequest({ cookie: `${DEV_COOKIE}=${token}`, body: { mutations: [entry()] } }),
+      env,
+      { now: NOW }
+    )
+    expect(res.status).toBe(429)
+    expect(await res.json()).toEqual({ error: 'rate_limited' })
+  })
+})

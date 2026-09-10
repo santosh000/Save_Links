@@ -57,6 +57,7 @@ import {
   revokeSessionByToken,
   resolveAccountByProvider,
 } from './db/store.js'
+import { checkRateLimit, clientIp, rateLimitedResponse } from './rate-limit.js'
 
 export const SESSION_TTL_SECONDS = Math.floor(DEFAULT_SESSION_TTL_MS / 1000)
 
@@ -303,6 +304,12 @@ export async function handleOAuthLogin(request, env, { now = Date.now(), provide
   if (origin.status === 503) return errorResponse(503, `${spec.name} sign-in is not configured on this deployment.`)
   if (origin.status === 400) return errorResponse(400, 'Sign-in is not allowed from this address.')
 
+  // Per-IP budget BEFORE any work (state insert, provider redirect). All
+  // fail-closed authorization checks (config, origin) already ran; the limiter
+  // itself fails open on storage errors (see rate-limit.js header).
+  const gate = await checkRateLimit(env.DB, { scope: 'auth', key: clientIp(request), now })
+  if (!gate.allowed) return rateLimitedResponse(gate.retryAfterMs)
+
   // Opportunistic housekeeping: expired single-use state tombstones are swept
   // (index-driven) so oauth_states stays a rolling ~10-minute window of
   // attempts. Login does not require the DB — this sweep is best-effort.
@@ -341,6 +348,12 @@ export async function handleOAuthCallback(request, env, { now = Date.now(), fetc
   const origin = resolveApprovedOrigin(request, env)
   if (origin.status === 503) return errorResponse(503, `${spec.name} sign-in is not configured on this deployment.`)
   if (origin.status === 400) return errorResponse(400, 'Sign-in is not allowed from this address.')
+
+  // Per-IP budget BEFORE any work: state verification, the single-use claim
+  // and every provider round-trip. Same fail-open semantics as login; the
+  // authorization gates above already ran.
+  const gate = await checkRateLimit(env.DB, { scope: 'auth', key: clientIp(request), now })
+  if (!gate.allowed) return rateLimitedResponse(gate.retryAfterMs)
 
   const url = new URL(request.url)
   const redirectUri = `${origin.origin}/auth/${provider}/callback`

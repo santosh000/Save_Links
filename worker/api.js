@@ -41,6 +41,7 @@ import {
   sessionCookieConfig,
   SESSION_TTL_SECONDS,
 } from './auth.js'
+import { checkRateLimit, rateLimitedResponse } from './rate-limit.js'
 
 // ---- GET /api/me --------------------------------------------------------------
 
@@ -69,6 +70,8 @@ export async function handleApiMe(request, env, { now = Date.now() } = {}) {
     if (!session) return jsonResponse(401, { error: 'unauthenticated' })
     const account = await getAccount(env.DB, { accountId: session.account_id })
     if (!account) return jsonResponse(401, { error: 'unauthenticated' })
+    const limit = await checkRateLimit(env.DB, { scope: 'api', key: account.account_id, now })
+    if (!limit.allowed) return rateLimitedResponse(limit.retryAfterMs)
     return jsonResponse(200, { authenticated: true, accountId: account.account_id })
   } catch {
     return jsonResponse(500, { error: 'server_error' })
@@ -134,6 +137,11 @@ export async function handleApiSessionRefresh(request, env, { now = Date.now() }
     if (!session) return jsonResponse(401, { error: 'unauthenticated' })
     const account = await getAccount(env.DB, { accountId: session.account_id })
     if (!account) return jsonResponse(401, { error: 'unauthenticated' })
+
+    // Per-account budget BEFORE the rotation side effects: an over-budget
+    // attempt is rejected without revoking/creating anything.
+    const limit = await checkRateLimit(env.DB, { scope: 'api', key: account.account_id, now })
+    if (!limit.allowed) return rateLimitedResponse(limit.retryAfterMs)
 
     // Authenticated + origin-approved: rotate. Revoke first, then create.
     await revokeSessionByToken(env.DB, { token: presented.token, now })
@@ -213,6 +221,10 @@ export async function handleApiSyncMutation(request, env, { now = Date.now() } =
     if (!account) return jsonResponse(401, { error: 'unauthenticated' })
     const accountId = account.account_id
 
+    // Per-account budget before any body parsing or D1 mutation writes.
+    const limit = await checkRateLimit(env.DB, { scope: 'api', key: accountId, now })
+    if (!limit.allowed) return rateLimitedResponse(limit.retryAfterMs)
+
     let body
     try {
       const raw = await request.text()
@@ -267,6 +279,10 @@ export async function handleApiSyncObjects(request, env, { now = Date.now() } = 
     const account = await getAccount(env.DB, { accountId: session.account_id })
     if (!account) return jsonResponse(401, { error: 'unauthenticated' })
     const accountId = account.account_id
+
+    // Per-account budget before the (potentially large) object pull.
+    const limit = await checkRateLimit(env.DB, { scope: 'api', key: accountId, now })
+    if (!limit.allowed) return rateLimitedResponse(limit.retryAfterMs)
 
     const rows = await getObjectsForAccount(env.DB, { accountId })
     // Normalize the SQLite integer deleted flag to a boolean for the client.
@@ -371,6 +387,10 @@ export async function handleApiSyncMutations(request, env, { now = Date.now() } 
     const account = await getAccount(env.DB, { accountId: session.account_id })
     if (!account) return jsonResponse(401, { error: 'unauthenticated' })
     const accountId = account.account_id
+
+    // Per-account budget before any body parsing or batch writes.
+    const limit = await checkRateLimit(env.DB, { scope: 'api', key: accountId, now })
+    if (!limit.allowed) return rateLimitedResponse(limit.retryAfterMs)
 
     let body
     try {

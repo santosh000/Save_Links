@@ -573,3 +573,33 @@ export async function purgeExpiredTombstones(db, { now = Date.now() } = {}) {
     .run()
   return res.meta?.changes ?? 0
 }
+
+// ---- rate limiting (Security Task 1) -----------------------------------------
+
+/**
+ * Read a key's current rate-limit row. The D1 persistence lives here (this is
+ * the ONLY module that touches D1); window math, limit policy and fail-open
+ * behaviour live in worker/rate-limit.js. A missing row -> null (fresh key).
+ */
+export async function getRateLimitCount(db, { scope, key }) {
+  return db.prepare('SELECT window_start, count FROM rate_limits WHERE scope = ? AND key = ?')
+    .bind(scope, key)
+    .first()
+}
+
+/**
+ * Record one request against a key's CURRENT window. A single upsert handles
+ * all three cases: fresh key (insert, count 1), stale row from an older
+ * window (reset to count 1 and adopt the new window_start), or the same
+ * active window (increment). The stale row is therefore overwritten by the
+ * first request of a new window — a key never holds more than one row, so no
+ * background sweep is needed.
+ */
+export async function consumeRateLimit(db, { scope, key, windowStart }) {
+  return db.prepare(
+    `INSERT INTO rate_limits (scope, key, window_start, count) VALUES (?, ?, ?, 1)
+     ON CONFLICT (scope, key) DO UPDATE SET
+       count = CASE WHEN window_start = excluded.window_start THEN count + 1 ELSE 1 END,
+       window_start = excluded.window_start`
+  ).bind(scope, key, windowStart).run()
+}
