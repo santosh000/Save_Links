@@ -98,7 +98,7 @@ The repository includes a Cloudflare Worker authentication boundary:
 - **GitHub OAuth** — `/auth/github/login`, `/auth/github/callback`
 - **Session management** — `/api/me`, `/auth/logout`
 - **API boundary** — `/api/me` (read), `POST /api/session/refresh` (rotate session)
-- **Security** — PKCE, signed single-use OAuth state, approved-origin allowlist, session token hashing, HttpOnly cookies
+- **Security** — PKCE, signed single-use OAuth state, approved-origin allowlist, session token hashing, HttpOnly cookies, rate limiting on authentication and API endpoints
 
 This infrastructure is deployed to a separate Workers preview environment (`save-links.<account>.workers.dev`). The stable Pages deployment at `savelinks.pages.dev` does not include it. The local application works completely without authentication.
 
@@ -218,6 +218,7 @@ Changes are validated with automated unit, end-to-end, and build checks.
 - [x] Google OAuth authentication (Worker-side)
 - [x] Session management with rotation
 - [x] Authenticated API boundary (`/api/me`, `POST /api/session/refresh`)
+- [x] Rate limiting on authentication and API endpoints
 - [x] Cloud bookmark synchronization (create, update, delete)
 - [x] Cross-browser synchronization
 - [x] Sync & Merge for local data after login
@@ -235,9 +236,6 @@ Planned (local improvements):
 Later (enhancements):
 
 - [ ] Email/password sign-in
-- [ ] Improved metadata coverage and a way to refresh it
-- [ ] Link health checking
-- [ ] Bulk actions
 
 ## License
 
