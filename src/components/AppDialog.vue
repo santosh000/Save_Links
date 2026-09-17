@@ -88,8 +88,8 @@ function onKeydown(e) {
 .dialog-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 60;
-  background: rgba(15, 23, 42, 0.5);
+  z-index: var(--z-modal);
+  background: var(--overlay);
   display: grid;
   place-items: center;
   padding: 16px;
@@ -98,19 +98,18 @@ function onKeydown(e) {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: var(--elev-2);
+  box-shadow: var(--shadow-md);
   width: 100%;
   max-width: 420px;
   max-height: calc(100vh - 32px);
   overflow-y: auto;
   padding: 20px;
 }
-.dialog-title { margin: 0 0 8px; font-size: 16px; color: var(--text-h); }
-.dialog-message { margin: 0 0 16px; font-size: 13px; line-height: 1.5; color: var(--text); overflow-wrap: anywhere; }
-.dialog-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
-.dialog-actions .btn { min-height: 38px; }
-.dialog-actions .danger { background: var(--error); color: var(--on-error); border-color: var(--error); }
-.dialog-actions .danger:hover { background: var(--error); filter: brightness(0.92); border-color: var(--error); }
+.dialog-title { margin: 0 0 8px; font-size: var(--text-lg); color: var(--text-h); }
+.dialog-message { margin: 0 0 16px; font-size: var(--text-sm); line-height: var(--leading-normal); color: var(--text); overflow-wrap: anywhere; }
+.dialog-actions { display: flex; gap: var(--space-2); justify-content: flex-end; flex-wrap: wrap; }
+/* Button sizing, variants and states come from the shared control language
+   (src/app-overrides.css) — the dialog only lays its actions out. */
 @media (max-width: 480px) {
   .dialog { padding: 16px; }
   .dialog-actions { flex-direction: column; }

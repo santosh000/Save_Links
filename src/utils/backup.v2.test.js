@@ -34,7 +34,7 @@ describe('backup v2', () => {
 
   it('defaults when not provided', () => {
     const payload = createBackupPayload({ links:[], profile:{} })
-    expect(payload.settings).toEqual({ appearance:'system', colorScheme:'ocean'})
+    expect(payload.settings).toEqual({ appearance:'system', colorScheme:'none'})
     expect(payload.folders).toEqual([])
   })
 
@@ -44,7 +44,7 @@ describe('backup v2', () => {
     expect(v.valid).toBe(true)
     const norm = normalizeBackupData(v1)
     expect(norm.folders).toEqual([])
-    expect(norm.settings).toEqual({ appearance:'system', colorScheme:'ocean'})
+    expect(norm.settings).toEqual({ appearance:'system', colorScheme:'none'})
     expect(norm.links[0].folderId).toBeNull()
   })
 
@@ -69,7 +69,7 @@ describe('backup v2', () => {
     const data = { app:'Save_Link', version:2, exportedAt:new Date().toISOString(), profile:{}, settings:{appearance:'invalid', colorScheme:'neon'}, folders:[{id:'', name:''}, {id:'f1', name:'Good'}, {id:'f1', name:'Duplicate'}], links:[]}
     const norm = normalizeBackupData(data)
     expect(norm.settings.appearance).toBe('system')
-    expect(norm.settings.colorScheme).toBe('ocean')
+    expect(norm.settings.colorScheme).toBe('none')
     expect(norm.folders.length).toBe(1)
   })
 

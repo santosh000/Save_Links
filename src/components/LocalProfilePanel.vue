@@ -70,7 +70,7 @@ function save() {
               id="lp-name"
               ref="input"
               v-model="draftName"
-              class="lp-input"
+              class="input lp-input"
               type="text"
               autocomplete="off"
               placeholder="Local User"
@@ -83,7 +83,7 @@ function save() {
             <textarea
               id="lp-bio"
               v-model="draftBio"
-              class="lp-input lp-textarea"
+              class="input lp-input lp-textarea"
               rows="3"
               autocomplete="off"
               placeholder="A short description"
@@ -108,8 +108,8 @@ function save() {
 .lp-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 70;
-  background: rgba(15, 23, 42, 0.5);
+  z-index: var(--z-panel);
+  background: var(--overlay);
   display: grid;
   place-items: center;
   padding: 16px;
@@ -122,7 +122,7 @@ function save() {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: var(--elev-2);
+  box-shadow: var(--shadow-md);
   padding: 26px 28px;
 }
 .lp-head {
@@ -137,8 +137,8 @@ function save() {
   color: var(--text-h);
 }
 .lp-close {
-  width: 32px;
-  height: 32px;
+  width: var(--control-height-sm);
+  height: var(--control-height-sm);
   border: none;
   background: transparent;
   color: var(--muted);
@@ -149,35 +149,21 @@ function save() {
   flex-shrink: 0;
 }
 .lp-close:hover { background: var(--muted-bg); color: var(--text-h); }
-.lp-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.lp-close:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 1px; }
 .lp-close-icon { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
-.lp-sub { margin: 0 0 20px; font-size: 13px; color: var(--muted); }
+.lp-sub { margin: 0 0 20px; font-size: var(--text-sm); color: var(--muted); }
 .lp-field { margin-bottom: 16px; }
-.lp-label { display: block; font-size: 13px; font-weight: 600; color: var(--text-h); margin-bottom: 7px; }
-.lp-input {
-  width: 100%;
-  padding: 0 13px;
-  height: 46px;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--text-h);
-  font-size: 14px;
-  box-sizing: border-box;
-}
-.lp-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.lp-label { display: block; font-size: var(--text-sm); font-weight: var(--weight-semibold); color: var(--text-h); margin-bottom: 7px; }
+/* Field visuals come from the shared .input base (src/app-overrides.css §11);
+   only the panel's own textarea height is local. */
 .lp-textarea {
-  height: auto;
   min-height: 92px;
-  padding: 11px 13px;
   line-height: 1.45;
-  resize: vertical;
-  font-family: inherit;
 }
 .lp-note {
   margin: 0 0 22px;
   font-size: 12.5px;
-  line-height: 1.5;
+  line-height: var(--leading-normal);
   color: var(--muted);
   max-width: 34ch;
 }

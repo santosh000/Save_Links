@@ -121,7 +121,7 @@ export function normalizeBackupData(data) {
   // folders: v1 has none -> default [], sanitize
   const folders = sanitizeFolders(data.folders || [])
   const validFolderIds = new Set(folders.map(f => f.id))
-  // settings: v1 defaults to system/ocean, v2 uses data.settings
+  // settings: v1 defaults to system/none, v2 uses data.settings
   let appearance = DEFAULT_APPEARANCE
   let colorScheme = DEFAULT_COLOR_SCHEME
   if (data.settings && typeof data.settings === 'object' && !Array.isArray(data.settings)) {

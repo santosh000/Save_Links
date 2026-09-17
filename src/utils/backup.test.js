@@ -67,7 +67,7 @@ describe('backup utils', () => {
       expect(links[0].title).toBe('Title')
       // v2 payload contains folders and settings defaults
       expect(payload.folders).toEqual([])
-      expect(payload.settings).toEqual({ appearance: 'system', colorScheme: 'ocean' })
+      expect(payload.settings).toEqual({ appearance: 'system', colorScheme: 'none' })
     })
 
     it('includes backup version 2', () => {

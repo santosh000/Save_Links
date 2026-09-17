@@ -1,247 +1,194 @@
 import { test, expect } from '@playwright/test'
+import { clearStorage, openView, ensureAddLinkOpen, visibleLinkRows, expectNoHorizontalScroll } from './helpers.js'
 
-async function clearStorage(page) {
-  await page.goto('/')
-  await page.evaluate(async () => {
-    localStorage.clear()
-    // links live in IndexedDB (localStorage is only the v1 recovery source);
-    // without this, a "clear" silently keeps the previous data
-    const dbs = await (indexedDB.databases ? indexedDB.databases() : Promise.resolve([]))
-    await Promise.all(dbs.map((d) => new Promise((resolve) => {
-      const req = indexedDB.deleteDatabase(d.name)
-      req.onsuccess = req.onerror = req.onblocked = () => resolve()
-    })))
-  })
-  await page.reload()
-}
-
-async function ensureSaveFormOpen(page) {
-  const urlInput = page.locator('#save-url')
-  if (!(await urlInput.isVisible().catch(() => false))) {
-    await page.getByRole('button', { name: 'Save a link', exact: true }).click()
+// The identity/profile surface lives in the sidebar (a drawer below the desktop
+// breakpoint), so reveal it before interacting with it.
+async function openIdentity(page) {
+  const identity = page.locator('.identity-btn')
+  if (!(await identity.isVisible().catch(() => false))) {
+    await page.locator('#sidebar-toggle').click()
+    await expect(page.locator('.sidebar-wrapper')).toHaveClass(/\bshow\b/)
   }
+  await expect(identity).toBeVisible()
+  return identity
 }
 
-async function saveLink(page, { url, title, folder } = {}) {
-  await ensureSaveFormOpen(page)
-  await page.locator('#save-url').fill(url)
-  if (title) await page.locator('#save-title').fill(title)
-  if (folder) await page.getByLabel('Select folder').selectOption({ label: folder })
-  // metadata autoFill reflows the form after the 500ms debounce; the meta-hint
-  // shows the domain only once it settles, so waiting for it pins the button
-  const domain = url.replace(/^https?:\/\//, '').split('/')[0]
-  await expect(page.locator('.meta-hint', { hasText: domain })).toBeVisible()
-  await page.getByRole('button', { name: 'Save link' }).click()
-  // every submit collapses the form; waiting for the unmount proves the save
-  // ran and gives the next save a settled, freshly re-expanded form
-  await expect(page.locator('#add-form')).toHaveCount(0)
-  await expect(page.getByText('Link saved')).toBeVisible()
-}
-
-async function expectNoHorizontalScroll(page) {
-  const noHS = await page.evaluate(() => document.scrollingElement.scrollWidth <= document.scrollingElement.clientWidth)
-  expect(noHS).toBe(true)
-}
-
-test.describe('Layout redesign', () => {
+test.describe('Application layout', () => {
   test.beforeEach(async ({ page }) => {
     await clearStorage(page)
   })
 
-  test('Desktop ≥1200px: three areas, saved links near top, no overflow', async ({ page }) => {
+  test('Desktop >=1200px: sidebar permanent, brand visible, saved link renders in the list', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 })
     await page.goto('/')
-    // drawer toggles are hidden — columns are permanent
-    await expect(page.getByRole('button', { name: 'Toggle folders navigation' })).toBeHidden()
-    await expect(page.getByRole('button', { name: 'Toggle filters and tools' })).toBeHidden()
-    // left area: folders + appearance
-    await expect(page.getByRole('button', { name: 'All links' })).toBeInViewport()
-    await expect(page.getByLabel('Ocean color scheme')).toBeInViewport()
-    // right area: backup, search, stats
-    await expect(page.getByRole('button', { name: 'Export Backup' })).toBeInViewport()
-    await expect(page.getByLabel('Search links')).toBeInViewport()
-    await expect(page.getByRole('heading', { name: 'Statistics' })).toBeInViewport()
-    // center: compact save bar sits above the links, not a big form
-    const toggle = page.getByRole('button', { name: 'Save a link', exact: true })
-    await expect(toggle).toBeInViewport()
-    await expect(page.locator('#save-url')).toHaveCount(0)
 
-    await saveLink(page, { url: 'https://example.com/near-top', title: 'Near Top' })
-    const card = page.locator('article.card').first()
-    await expect(card).toBeVisible()
-    const box = await card.boundingBox()
-    expect(box.y).toBeLessThan(500)
+    await expect(page.locator('.sidebar-brand')).toContainText('Save Links')
+    for (const label of ['Saved links', 'Folders', 'Backup & restore', 'Settings', 'About']) {
+      await expect(page.locator('.sidebar-menu-link', { hasText: label })).toBeVisible()
+    }
+    await expect(page.locator('.page-title')).toHaveText('Saved links')
+
+    await ensureAddLinkOpen(page)
+    await page.locator('#save-url').fill('https://example.com/layout-test')
+    await page.getByRole('button', { name: 'Save link', exact: true }).click()
+    await expect(page.getByText('Link saved')).toBeVisible()
+
+    const rows = visibleLinkRows(page)
+    await expect(rows).toHaveCount(1)
+    await expect(rows.first()).toContainText('example.com')
+
     await expectNoHorizontalScroll(page)
   })
 
-  test('Save Link: compact bar expands, collapses after save', async ({ page }) => {
+  test('Save Link: the form expands, saves a link, and collapses after the save', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 })
     await page.goto('/')
-    const toggle = page.getByRole('button', { name: 'Save a link', exact: true })
-    await expect(toggle).toBeVisible()
-    await expect(page.locator('#save-url')).toHaveCount(0)
 
-    await toggle.click()
-    await expect(toggle).toHaveAttribute('aria-expanded', 'true')
-    await expect(page.locator('#save-url')).toBeVisible()
-    await expect(page.getByText('More options')).toBeVisible()
-
-    await saveLink(page, { url: 'https://example.com/auto-collapse', title: 'Auto Collapse' })
-    // form auto-collapses after a successful save; the link is visible
+    // Form initially collapsed
     await expect(page.locator('#save-url')).toHaveCount(0)
-    await expect(page.locator('article.card')).toHaveCount(1)
-    await expect(page.locator('article.card').first()).toContainText('Auto Collapse')
+    await expect(page.locator('.add-toggle')).toHaveAttribute('aria-expanded', 'false')
+
+    // Expand
+    await page.locator('.add-toggle').click()
+    await expect(page.locator('.add-toggle')).toHaveAttribute('aria-expanded', 'true')
+    // Presence is the stable state during the popover enter transition; the
+    // input's usability is proven by the fill below (actionability-checked).
+    await expect(page.locator('#save-url')).toHaveCount(1)
+
+    // Saving collapses the surface (current behaviour). The save is driven here
+    // directly so this test does not depend on the shared helper's auto-detect
+    // hint wait (the old .meta-hint element no longer exists).
+    await page.locator('#save-url').fill('https://example.com/auto-collapse')
+    await page.locator('#save-title').fill('Auto Collapse')
+    await page.getByRole('button', { name: 'Save link', exact: true }).click()
+    await expect(page.getByText('Link saved')).toBeVisible()
+    await expect(page.locator('#save-url')).toHaveCount(0)
+    await expect(page.locator('.add-toggle')).toHaveAttribute('aria-expanded', 'false')
+
+    // The saved link renders
+    await expect(visibleLinkRows(page)).toHaveCount(1)
+    await expect(visibleLinkRows(page).first()).toContainText('Auto Collapse')
   })
 
-  test('Favorites nav entry filters favorites and resets via All links', async ({ page }) => {
+  test('Sidebar navigation switches views and page titles update', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 })
     await page.goto('/')
-    await saveLink(page, { url: 'https://example.com/f1', title: 'Fav One' })
-    await saveLink(page, { url: 'https://example.com/f2', title: 'Plain Two' })
-    await page.locator('article.card', { hasText: 'Fav One' }).getByRole('button', { name: 'Toggle Favorite' }).click()
 
-    await expect(page.getByRole('button', { name: 'Show favorites' })).toContainText('1')
-    await page.getByRole('button', { name: 'Show favorites' }).click()
-    await expect(page.locator('article.card')).toHaveCount(1)
-    await expect(page.locator('article.card').first()).toContainText('Fav One')
-    await expect(page.getByRole('button', { name: 'Show favorites' })).toHaveClass(/active/)
+    await openView(page, 'folders')
+    await expect(page.locator('.page-title')).toHaveText('Folders')
+    await expect(page.locator('.folder-sidebar')).toBeVisible()
 
-    await page.getByRole('button', { name: 'All links' }).click()
-    await expect(page.locator('article.card')).toHaveCount(2)
-    await expect(page.getByRole('button', { name: 'Show favorites' })).not.toHaveClass(/active/)
+    await openView(page, 'backup')
+    await expect(page.locator('.page-title')).toHaveText('Backup & restore')
+    await expect(page.locator('.backup-card')).toBeVisible()
+
+    await openView(page, 'settings')
+    await expect(page.locator('.page-title')).toHaveText('Settings')
+    await expect(page.locator('.settings-card')).toBeVisible()
+
+    await openView(page, 'about')
+    await expect(page.locator('.page-title')).toHaveText('About')
+    await expect(page.locator('.about-card')).toBeVisible()
+
+    await openView(page, 'links')
+    await expect(page.locator('.page-title')).toHaveText('Saved links')
   })
 
-  test('Tablet 768/820/1024: drawers, Escape closes, no overflow', async ({ page }) => {
-    await saveLink(page, { url: 'https://example.com/tablet', title: 'Tablet Card' })
-    for (const width of [1024, 820, 768]) {
+  test('Tablet drawer (<1200px): sidebar off-canvas, hamburger toggles, no overflow', async ({ page }) => {
+    // 820px is inside the drawer range: above the mobile shell (bottom-nav) and
+    // below the permanent-sidebar breakpoint.
+    await clearStorage(page)
+    await page.setViewportSize({ width: 820, height: 800 })
+    await page.goto('/')
+
+    // Sidebar initially off-canvas
+    await expect(page.locator('.sidebar-wrapper')).not.toHaveClass(/show/)
+    await expect(page.locator('#sidebar-toggle')).toBeVisible()
+
+    // Open the drawer
+    await page.locator('#sidebar-toggle').click()
+    await expect(page.locator('.sidebar-wrapper')).toHaveClass(/\bshow\b/)
+
+    // Close it with the overlay
+    await page.locator('.sidebar-overlay').click({ position: { x: 500, y: 100 } })
+    await expect(page.locator('.sidebar-wrapper')).not.toHaveClass(/show/)
+
+    // Reopen and pick a view: the drawer closes after the selection (current nav)
+    await page.locator('#sidebar-toggle').click()
+    await expect(page.locator('.sidebar-wrapper')).toHaveClass(/\bshow\b/)
+    await openView(page, 'folders')
+    await expect(page.locator('.page-title')).toHaveText('Folders')
+    await expect(page.locator('.sidebar-wrapper')).not.toHaveClass(/show/)
+
+    await expectNoHorizontalScroll(page)
+  })
+
+  test('No horizontal overflow at standard breakpoints', async ({ page }) => {
+    for (const width of [1280, 1100, 768, 430, 375]) {
+      await clearStorage(page)
       await page.setViewportSize({ width, height: 800 })
-      await page.reload()
-      await expect(page.locator('article.card').first()).toBeVisible()
-
-      // drawers closed/off-screen; toggles visible
-      await expect(page.locator('#nav-col')).not.toBeInViewport()
-      await expect(page.locator('#side-col')).not.toBeInViewport()
-      const navToggle = page.getByRole('button', { name: 'Toggle folders navigation' })
-      const utilToggle = page.getByRole('button', { name: 'Toggle filters and tools' })
-      await expect(navToggle).toBeVisible()
-      await expect(utilToggle).toBeVisible()
-
-      // nav drawer opens and Escape closes it
-      await navToggle.click()
-      await expect(page.getByRole('button', { name: 'All links' })).toBeInViewport()
-      await page.keyboard.press('Escape')
-      await expect(page.getByRole('button', { name: 'All links' })).not.toBeInViewport()
-
-      // utilities drawer holds backup, filters and stats (search lives in the Saved links header)
-      await utilToggle.click()
-      await expect(page.getByRole('button', { name: 'Export Backup' })).toBeInViewport()
-      await expect(page.locator('#side-col #filter-search')).toHaveCount(0)
-      await expect(page.getByRole('heading', { name: 'Statistics' })).toBeInViewport()
-      await page.keyboard.press('Escape')
-
+      await page.goto('/')
       await expectNoHorizontalScroll(page)
     }
   })
 
-  test('Mobile 375/430: header profile, drawers, near-top cards, aligned create controls', async ({ page }) => {
-    for (const width of [375, 430]) {
+  test('Profile surface: one coherent layer (Account / Edit profile, never stacked)', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await page.goto('/')
+
+    await openIdentity(page)
+    await page.locator('.identity-btn').click()
+    await expect(page.locator('.account-panel')).toBeVisible()
+    await expect(page.locator('.account-backdrop, .lp-backdrop')).toHaveCount(1)
+
+    // Account -> Edit profile replaces the layer (never stacked)
+    await page.locator('.local-profile-edit').click()
+    await expect(page.locator('.lp-panel')).toBeVisible()
+    await expect(page.locator('.account-panel')).toHaveCount(0)
+    await expect(page.locator('.account-backdrop, .lp-backdrop')).toHaveCount(1)
+
+    // Saving the profile keeps the identity surface updated
+    await page.locator('#lp-name').fill('Layer Tester')
+    await page.locator('#lp-bio').fill('Single layer bio')
+    await page.getByRole('button', { name: 'Save changes' }).click()
+    await expect(page.locator('.lp-panel')).toHaveCount(0)
+    await expect(page.locator('.identity-name')).toContainText('Layer Tester')
+
+    // Dismissal: reopening and closing via the backdrop clears the layer
+    await page.locator('.identity-btn').click()
+    await expect(page.locator('.account-panel')).toBeVisible()
+    await page.locator('.account-backdrop').click({ position: { x: 5, y: 5 } })
+    await expect(page.locator('.account-panel')).toHaveCount(0)
+
+    // Mobile: the same single-layer flow works and stays inside the viewport
+    await page.setViewportSize({ width: 375, height: 667 })
+    await openIdentity(page)
+    await page.locator('.identity-btn').click()
+    await expect(page.locator('.account-panel')).toBeVisible()
+    await expect(page.locator('.account-backdrop, .lp-backdrop')).toHaveCount(1)
+    const noHS = await page.evaluate(() => document.scrollingElement.scrollWidth <= document.scrollingElement.clientWidth)
+    expect(noHS).toBe(true)
+  })
+
+  test('Profile surface stays inside the viewport at every width', async ({ page }) => {
+    for (const width of [320, 375, 430, 768, 1024, 1280, 1440]) {
       await clearStorage(page)
-      await page.setViewportSize({ width, height: 667 })
+      await page.setViewportSize({ width, height: 800 })
       await page.goto('/')
-      // profile lives in the header (identity) and opens the account panel
-      await expect(page.locator('.identity-btn')).toBeInViewport()
+
+      await openIdentity(page)
       await page.locator('.identity-btn').click()
-      await expect(page.getByRole('dialog', { name: 'Account' })).toBeVisible()
-      await page.keyboard.press('Escape')
-      // topbar toggles present
-      await expect(page.getByRole('button', { name: 'Toggle folders navigation' })).toBeVisible()
-      await expect(page.getByRole('button', { name: 'Toggle filters and tools' })).toBeVisible()
-
-      // save a link — cards land right under the compact save bar
-      await saveLink(page, { url: 'https://example.com/mobile', title: 'Mobile Card' })
-      const card = page.locator('article.card').first()
-      await expect(card).toBeVisible()
-      const box = await card.boundingBox()
-      expect(box.y).toBeLessThan(450)
-
-      // nav drawer: folders + appearance settings
-      await page.getByRole('button', { name: 'Toggle folders navigation' }).click()
-      await expect(page.getByRole('button', { name: 'All links' })).toBeInViewport()
-      await expect(page.getByLabel('Dark theme')).toBeInViewport()
-      // folder create input and Create button are equal height
-      const inputBox = await page.locator('#new-folder-input').boundingBox()
-      const createBtnBox = await page.getByRole('button', { name: 'Create folder', exact: true }).boundingBox()
-      expect(Math.abs(inputBox.height - createBtnBox.height)).toBeLessThanOrEqual(2)
-      await page.keyboard.press('Escape')
-
-      // utilities drawer: Data & Backup, filters, stats (search lives in the Saved links header)
-      await page.getByRole('button', { name: 'Toggle filters and tools' }).click()
-      await expect(page.getByRole('button', { name: 'Export Backup' })).toBeInViewport()
-      await expect(page.locator('#side-col #filter-search')).toHaveCount(0)
-      await expect(page.getByLabel('Filter by category')).toBeInViewport()
-      await expect(page.getByRole('heading', { name: 'Statistics' })).toBeInViewport()
-      await page.keyboard.press('Escape')
+      const panel = page.locator('.account-panel')
+      await expect(panel).toBeVisible()
 
       await expectNoHorizontalScroll(page)
-    }
-  })
 
-  test('Tablet & mobile: folders and filters drawers are mutually exclusive', async ({ page }) => {
-    for (const width of [768, 375]) {
-      await clearStorage(page)
-      await page.setViewportSize({ width, height: 800 })
-      await page.goto('/')
-      const navToggle = page.getByRole('button', { name: 'Toggle folders navigation' })
-      const utilToggle = page.getByRole('button', { name: 'Toggle filters and tools' })
-      const navMarker = page.getByRole('button', { name: 'All links' })
-      const utilMarker = page.getByRole('button', { name: 'Export Backup' })
+      const box = await panel.boundingBox()
+      expect(box.x).toBeGreaterThanOrEqual(0)
+      expect(box.x + box.width).toBeLessThanOrEqual(width + 1)
 
-      // neither drawer open initially
-      await expect(navToggle).toHaveAttribute('aria-expanded', 'false')
-      await expect(utilToggle).toHaveAttribute('aria-expanded', 'false')
-      await expect(navMarker).not.toBeInViewport()
-      await expect(utilMarker).not.toBeInViewport()
-
-      // A. Folders → Filters & tools: Folders closes, only Filters is open
-      await navToggle.click()
-      await expect(navMarker).toBeInViewport()
-      await utilToggle.click()
-      await expect(navMarker).not.toBeInViewport()
-      await expect(utilMarker).toBeInViewport()
-      await expect(navToggle).toHaveAttribute('aria-expanded', 'false')
-      await expect(utilToggle).toHaveAttribute('aria-expanded', 'true')
-
-      // B. Filters & tools → Folders: Filters closes, only Folders is open
-      await navToggle.click()
-      await expect(utilMarker).not.toBeInViewport()
-      await expect(navMarker).toBeInViewport()
-      await expect(utilToggle).toHaveAttribute('aria-expanded', 'false')
-      await expect(navToggle).toHaveAttribute('aria-expanded', 'true')
-
-      // C. Folders → Folders: closes
-      await navToggle.click()
-      await expect(navMarker).not.toBeInViewport()
-      await expect(navToggle).toHaveAttribute('aria-expanded', 'false')
-      await expect(utilMarker).not.toBeInViewport()
-
-      // D. Filters & tools → Filters & tools: opens then closes
-      await utilToggle.click()
-      await expect(utilMarker).toBeInViewport()
-      await utilToggle.click()
-      await expect(utilMarker).not.toBeInViewport()
-      await expect(utilToggle).toHaveAttribute('aria-expanded', 'false')
-
-      // G. backdrop click closes the active drawer (click the clear side —
-      // drawers sit on the left/right edges, backdrop is full-screen under them)
-      await navToggle.click()
-      await expect(navMarker).toBeInViewport()
-      await page.locator('.nav-backdrop').click({ position: { x: width - 8, y: 400 } })
-      await expect(navMarker).not.toBeInViewport()
-      await utilToggle.click()
-      await expect(utilMarker).toBeInViewport()
-      await page.locator('.util-backdrop').click({ position: { x: 8, y: 400 } })
-      await expect(utilMarker).not.toBeInViewport()
-
-      // H. no horizontal overflow at these widths
-      await expectNoHorizontalScroll(page)
+      await page.locator('.account-backdrop').click({ position: { x: 5, y: 5 } })
+      await expect(panel).toHaveCount(0)
     }
   })
 })

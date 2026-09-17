@@ -151,7 +151,7 @@ describe('indexeddb repository', () => {
       expect(await repo.getAllLinks()).toEqual([])
       expect(await repo.getAllFolders()).toEqual([])
       expect(await repo.getProfile()).toEqual({ name: 'Local User', bio: 'Local-first bookmark manager' })
-      expect(await repo.getSettings()).toEqual({ appearance: 'system', colorScheme: 'ocean' })
+      expect(await repo.getSettings()).toEqual({ appearance: 'system', colorScheme: 'none' })
       expect(await repo.getPendingMutations()).toEqual([])
     })
 
@@ -274,11 +274,11 @@ it('persists folders and deletes by id', async () => {
 
     it('persists settings with sanitization on write and read', async () => {
       const repo = makeRepo()
-      expect(await repo.getSettings()).toEqual({ appearance: 'system', colorScheme: 'ocean' })
+      expect(await repo.getSettings()).toEqual({ appearance: 'system', colorScheme: 'none' })
       await repo.saveSettings({ appearance: 'dark', colorScheme: 'forest' })
       expect(await repo.getSettings()).toEqual({ appearance: 'dark', colorScheme: 'forest' })
       await repo.saveSettings({ appearance: 'neon', colorScheme: 'invalid' })
-      expect(await repo.getSettings()).toEqual({ appearance: 'system', colorScheme: 'ocean' })
+      expect(await repo.getSettings()).toEqual({ appearance: 'system', colorScheme: 'none' })
     })
   })
 

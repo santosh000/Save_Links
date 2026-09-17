@@ -1,5 +1,7 @@
 import { createApp } from 'vue'
-import './style.css'
+import 'bootstrap/dist/css/bootstrap.min.css'
+import 'bootstrap-icons/font/bootstrap-icons.css'
+import './app-overrides.css'
 import App from './App.vue'
 import { repository } from './storage/repository.js'
 import { boot } from './storage/migration.js'

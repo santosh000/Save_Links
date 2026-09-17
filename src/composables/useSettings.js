@@ -10,13 +10,15 @@ export function useSettings() {
   const appearance = ref(bootSettings ? bootSettings.appearance : DEFAULT_APPEARANCE)
   const colorScheme = ref(bootSettings ? bootSettings.colorScheme : DEFAULT_COLOR_SCHEME)
 
+  // Reactive OS preference so System mode follows live light/dark changes.
+  const systemPrefersDark = ref(
+    typeof window !== 'undefined' && window.matchMedia
+      ? window.matchMedia('(prefers-color-scheme: dark)').matches
+      : false
+  )
+
   const resolvedAppearance = computed(() => {
-    if (appearance.value === 'system') {
-      if (typeof window !== 'undefined' && window.matchMedia) {
-        return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-      }
-      return 'light'
-    }
+    if (appearance.value === 'system') return systemPrefersDark.value ? 'dark' : 'light'
     return appearance.value
   })
 
@@ -24,9 +26,25 @@ export function useSettings() {
     if (typeof document === 'undefined') return
     const root = document.documentElement
     root.setAttribute('data-appearance', resolvedAppearance.value)
-    root.setAttribute('data-color-scheme', colorScheme.value)
+    // "none" means no named scheme: the base theme tokens apply unchanged.
+    root.setAttribute('data-color-scheme', colorScheme.value || 'none')
     // also set color-scheme css property for native controls
     root.style.colorScheme = resolvedAppearance.value
+    syncBrowserChrome()
+  }
+
+  // Keep the browser/PWA chrome neutral and aligned with the page canvas.
+  // --bg is the design-system source of truth, so the value is read from the
+  // token rather than duplicated here. The static media-scoped <meta> tags in
+  // index.html remain the no-JS / System fallback: when the token is unreadable
+  // (e.g. jsdom, or a stylesheet that has not applied yet) this is a no-op and
+  // the tags keep deciding. Never scheme-tinted.
+  function syncBrowserChrome() {
+    const canvas = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()
+    if (!canvas) return
+    for (const meta of document.querySelectorAll('meta[name="theme-color"]')) {
+      meta.setAttribute('content', canvas)
+    }
   }
 
   // watch and persist — both settings are written together in one settings
@@ -55,9 +73,7 @@ export function useSettings() {
     if (typeof window === 'undefined' || !window.matchMedia) return
     mql = window.matchMedia('(prefers-color-scheme: dark)')
     handler = () => {
-      if (appearance.value === 'system') {
-        applyTheme()
-      }
+      systemPrefersDark.value = mql.matches
     }
     if (mql.addEventListener) mql.addEventListener('change', handler)
     else if (mql.addListener) mql.addListener(handler)

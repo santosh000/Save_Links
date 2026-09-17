@@ -26,11 +26,11 @@ describe('appearance & colorScheme persistence', () => {
     getLS().clear()
   })
 
-  it('defaults to system and ocean when no saved preference', () => {
+  it('defaults to system and none when no saved preference', () => {
     expect(loadAppearance()).toBe(DEFAULT_APPEARANCE)
     expect(loadAppearance()).toBe('system')
     expect(loadColorScheme()).toBe(DEFAULT_COLOR_SCHEME)
-    expect(loadColorScheme()).toBe('ocean')
+    expect(loadColorScheme()).toBe('none')
   })
 
   it('persists appearance values isolated', () => {
@@ -49,7 +49,7 @@ describe('appearance & colorScheme persistence', () => {
   })
 
   it('persists colorScheme', () => {
-    for (const c of ['ocean','forest','lavender','amber']) {
+    for (const c of ['none','ocean','forest','lavender','amber']) {
       saveColorScheme(c)
       expect(loadColorScheme()).toBe(c)
     }
@@ -57,7 +57,7 @@ describe('appearance & colorScheme persistence', () => {
 
   it('rejects invalid colorScheme -> defaults', () => {
     saveColorScheme('neon')
-    expect(loadColorScheme()).toBe('ocean')
+    expect(loadColorScheme()).toBe('none')
   })
 
   it('appearance and colorScheme independent', () => {

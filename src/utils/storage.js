@@ -103,9 +103,9 @@ export function saveFolders(folders) {
 }
 
 export const APPEARANCE_VALUES = ['light', 'dark', 'system']
-export const COLOR_SCHEME_VALUES = ['ocean', 'forest', 'lavender', 'amber']
+export const COLOR_SCHEME_VALUES = ['none', 'ocean', 'forest', 'lavender', 'amber']
 export const DEFAULT_APPEARANCE = 'system'
-export const DEFAULT_COLOR_SCHEME = 'ocean'
+export const DEFAULT_COLOR_SCHEME = 'none'
 
 export function sanitizeAppearance(v) {
   return APPEARANCE_VALUES.includes(v) ? v : DEFAULT_APPEARANCE

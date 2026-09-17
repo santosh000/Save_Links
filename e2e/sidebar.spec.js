@@ -1,193 +1,107 @@
 import { test, expect } from '@playwright/test'
+import { clearStorage, createFolder, linkRowByTitle, openView, saveLink, visibleLinkRows } from './helpers.js'
 
-async function clearStorage(page) {
-  await page.goto('/')
-  await page.evaluate(async () => {
-    localStorage.clear()
-    // links live in IndexedDB (localStorage is only the v1 recovery source);
-    // without this, a "clear" silently keeps the previous data
-    const dbs = await (indexedDB.databases ? indexedDB.databases() : Promise.resolve([]))
-    await Promise.all(dbs.map((d) => new Promise((resolve) => {
-      const req = indexedDB.deleteDatabase(d.name)
-      req.onsuccess = req.onerror = req.onblocked = () => resolve()
-    })))
-  })
-  await page.reload()
+// Assign a saved link to a folder through the current More-actions menu (the
+// AppSelect native value carrier is the stable hook, as in the sort spec).
+async function assignFolder(page, title, folderName) {
+  await linkRowByTitle(page, title).getByRole('button', { name: 'More actions' }).click()
+  const menu = page.locator('.more-menu')
+  await expect(menu).toBeVisible()
+  await menu.locator('.more-field', { hasText: 'Folder' }).locator('select').selectOption({ label: folderName })
+  // The app confirms the assignment itself, so the helper returns only when it settled
+  await expect(page.getByText('Folder updated')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(menu).toBeHidden()
 }
 
-async function ensureSaveFormOpen(page) {
-  const urlInput = page.locator('#save-url')
-  if (!(await urlInput.isVisible().catch(() => false))) {
-    await page.getByRole('button', { name: 'Save a link', exact: true }).click()
-  }
-}
-
-async function saveLink(page, { url, title, folder, category }) {
-  await ensureSaveFormOpen(page)
-  await page.locator('#save-url').fill(url)
-  if (title) await page.locator('#save-title').fill(title)
-  if (folder) await page.getByLabel('Select folder').selectOption({ label: folder })
-  // metadata autoFill reflows the form after the 500ms debounce; the meta-hint
-  // shows the domain only once it settles, so waiting for it pins the button
-  const domain = url.replace(/^https?:\/\//, '').split('/')[0]
-  await expect(page.locator('.meta-hint', { hasText: domain })).toBeVisible()
-  // autoFill re-categorizes during its debounce, which would clobber a category
-  // picked earlier — select after metadata settles so the choice survives
-  if (category) await page.locator('#save-category').selectOption(category)
-  await page.getByRole('button', { name: 'Save link' }).click()
-  // every submit collapses the form; waiting for the unmount proves the save
-  // ran and gives the next save a settled, freshly re-expanded form
-  await expect(page.locator('#add-form')).toHaveCount(0)
-  await expect(page.getByText('Link saved')).toBeVisible()
-}
-
-async function createFolder(page, name) {
-  await page.getByLabel('New folder name').fill(name)
-  await page.getByRole('button', { name: 'Create folder', exact: true }).click()
-  await expect(page.locator('.folder-item', { hasText: name })).toBeVisible()
-}
-
-test.describe('Folder sidebar navigation', () => {
+test.describe('Folders view + sidebar navigation', () => {
   test.beforeEach(async ({ page }) => {
     await clearStorage(page)
   })
 
-  test('Shows All Links, Unfiled and folders with counts', async ({ page }) => {
-    await page.goto('/')
+  test('Folders view lists folders with counts and the sidebar badge shows the total', async ({ page }) => {
+    await openView(page, 'folders')
     await createFolder(page, 'Work')
     await createFolder(page, 'Personal')
-    await saveLink(page, { url: 'https://example.com/w', title: 'Work Link', folder: 'Work' })
-    await saveLink(page, { url: 'https://example.com/p', title: 'Personal Link', folder: 'Personal' })
+
+    await openView(page, 'links')
+    await saveLink(page, { url: 'https://example.com/w', title: 'Work Link' })
+    await saveLink(page, { url: 'https://example.com/p', title: 'Personal Link' })
     await saveLink(page, { url: 'https://example.com/u', title: 'Unfiled Link' })
+    await assignFolder(page, 'Work Link', 'Work')
+    await assignFolder(page, 'Personal Link', 'Personal')
 
-    await expect(page.getByRole('button', { name: 'All links' })).toContainText('3')
-    await expect(page.locator('.folder-item', { hasText: 'Unfiled' })).toContainText('1')
-    await expect(page.locator('.folder-item', { hasText: 'Work' })).toContainText('1')
-    await expect(page.locator('.folder-item', { hasText: 'Personal' })).toContainText('1')
-    // all three cards visible
-    await expect(page.locator('article.card')).toHaveCount(3)
+    await openView(page, 'folders')
+    await expect(page.locator('.folder-item', { hasText: 'Unfiled' }).locator('.folder-count')).toHaveText('1')
+    await expect(page.locator('.folder-item', { hasText: 'Work' }).locator('.folder-count')).toHaveText('1')
+    await expect(page.locator('.folder-item', { hasText: 'Personal' }).locator('.folder-count')).toHaveText('1')
+
+    await expect(page.locator('.sidebar-menu-link', { hasText: 'Saved links' }).locator('.sidebar-menu-badge')).toContainText('3')
+    await expect(page.locator('.sidebar-menu-link', { hasText: 'Folders' }).locator('.sidebar-menu-badge')).toContainText('2')
   })
 
-  test('Sidebar selection filters links and All Links resets', async ({ page }) => {
+  test('View navigation marks the current sidebar item and updates the page title', async ({ page }) => {
     await page.goto('/')
-    await createFolder(page, 'Office')
-    await saveLink(page, { url: 'https://example.com/o', title: 'Office Link', folder: 'Office' })
-    await saveLink(page, { url: 'https://example.com/f', title: 'Free Link' })
-
-    await page.getByRole('button', { name: 'Show folder Office' }).click()
-    await expect(page.locator('article.card')).toHaveCount(1)
-    await expect(page.locator('article.card').first()).toContainText('Office Link')
-    // active state on the selected folder
-    const officeItem = page.locator('.folder-item', { hasText: 'Office' })
-    await expect(officeItem).toHaveClass(/active/)
-
-    await page.getByRole('button', { name: 'Show Unfiled links' }).click()
-    await expect(page.locator('article.card')).toHaveCount(1)
-    await expect(page.locator('article.card').first()).toContainText('Free Link')
-    await expect(page.locator('.folder-item', { hasText: 'Unfiled' })).toHaveClass(/active/)
-
-    await page.getByRole('button', { name: 'All links' }).click()
-    await expect(page.locator('article.card')).toHaveCount(2)
-    await expect(page.getByRole('button', { name: 'All links' })).toHaveClass(/active/)
+    for (const [view, label] of [['folders', 'Folders'], ['backup', 'Backup & restore'], ['settings', 'Settings'], ['about', 'About'], ['links', 'Saved links']]) {
+      await openView(page, view)
+      await expect(page.locator('.page-title')).toHaveText(label)
+      await expect(page.locator('.sidebar-menu-link.active', { hasText: label })).toBeVisible()
+    }
   })
 
-  test('Folder selection combines with search, status and favorite filters', async ({ page }) => {
-    await page.goto('/')
-    await createFolder(page, 'Office')
-    await saveLink(page, { url: 'https://github.com/alpha', title: 'Alpha Link', folder: 'Office', category: 'GitHub' })
-    await saveLink(page, { url: 'https://youtube.com/beta', title: 'Beta Link', folder: 'Office', category: 'YouTube' })
-    await saveLink(page, { url: 'https://example.com/gamma', title: 'Gamma Link' })
-
-    // folder + search
-    await page.getByRole('button', { name: 'Show folder Office' }).click()
-    await page.getByLabel('Search links').fill('Beta')
-    await expect(page.locator('article.card')).toHaveCount(1)
-    await expect(page.locator('article.card').first()).toContainText('Beta Link')
-
-    // folder + search + category
-    await page.getByLabel('Filter by category').selectOption('GitHub')
-    await expect(page.locator('article.card')).toHaveCount(0)
-    await page.getByLabel('Search links').fill('Alpha')
-    await expect(page.locator('article.card')).toHaveCount(1)
-    await expect(page.locator('article.card').first()).toContainText('Alpha Link')
-
-    // folder + status
-    await page.getByLabel('Filter by category').selectOption('')
-    await page.getByLabel('Search links').fill('')
-    await page.locator('article.card', { hasText: 'Beta Link' }).getByRole('button', { name: 'Toggle Important' }).click()
-    await page.getByLabel('Filter by status').selectOption('important')
-    await expect(page.locator('article.card')).toHaveCount(1)
-    await expect(page.locator('article.card').first()).toContainText('Beta Link')
-
-    // folder + favorite — important flags independent of folder
-    await page.getByLabel('Filter by status').selectOption('')
-    await page.locator('article.card', { hasText: 'Beta Link' }).getByRole('button', { name: 'Toggle Favorite' }).click()
-    await page.getByLabel('Filter by status').selectOption('favorite')
-    await expect(page.locator('article.card')).toHaveCount(1)
-    await expect(page.locator('article.card').first()).toContainText('Beta Link')
-
-    // reset folder filter from the filter select — Gamma appears
-    await page.getByLabel('Filter by folder').selectOption('All folders')
-    await expect(page.locator('article.card')).toHaveCount(1)
-  })
-
-  test('Move to folder on card moves link, updates counts and persists', async ({ page }) => {
-    await page.goto('/')
+  test('Assigning a folder from a row updates counts and persists', async ({ page }) => {
+    await openView(page, 'folders')
     await createFolder(page, 'Projects')
+    await openView(page, 'links')
     await saveLink(page, { url: 'https://example.com/todo', title: 'TODO Link' })
-    await expect(page.locator('.folder-item', { hasText: 'Unfiled' })).toContainText('1')
+    await expect(page.locator('.sidebar-menu-link', { hasText: 'Folders' }).locator('.sidebar-menu-badge')).toContainText('1')
 
-    const card = page.locator('article.card').first()
-    await card.getByLabel('Move to folder').selectOption({ label: 'Projects' })
-    await expect(page.getByText('Folder updated')).toBeVisible()
-    await expect(card).toContainText('Projects')
-    await expect(page.locator('.folder-item', { hasText: 'Projects' })).toContainText('1')
-    await expect(page.locator('.folder-item', { hasText: 'Unfiled' })).toContainText('0')
+    // Assign through the current More-actions menu
+    await assignFolder(page, 'TODO Link', 'Projects')
+    await openView(page, 'folders')
+    await expect(page.locator('.folder-item', { hasText: 'Projects' }).locator('.folder-count')).toHaveText('1')
+    await expect(page.locator('.folder-item', { hasText: 'Unfiled' }).locator('.folder-count')).toHaveText('0')
 
-    // move back to Unfiled
-    await card.getByLabel('Move to folder').selectOption({ label: 'Unfiled' })
-    await expect(card).toContainText('Unfiled')
-    await expect(page.locator('.folder-item', { hasText: 'Unfiled' })).toContainText('1')
+    // Move back to Unfiled
+    await openView(page, 'links')
+    await assignFolder(page, 'TODO Link', 'Unfiled')
+    await openView(page, 'folders')
+    await expect(page.locator('.folder-item', { hasText: 'Unfiled' }).locator('.folder-count')).toHaveText('1')
 
-    // persists after reload
-    await card.getByLabel('Move to folder').selectOption({ label: 'Projects' })
+    // Persists after reload
+    await openView(page, 'links')
+    await assignFolder(page, 'TODO Link', 'Projects')
     await page.reload()
-    await expect(page.locator('.folder-item', { hasText: 'Projects' })).toBeVisible()
-    await expect(page.locator('article.card').first()).toContainText('Projects')
+    await openView(page, 'folders')
+    await expect(page.locator('.folder-item', { hasText: 'Projects' }).locator('.folder-count')).toHaveText('1')
   })
 
-  test('Mobile drawer: opens via toggle, filters, closes on select', async ({ page }) => {
-    // create folders/links at desktop width (sidebar inputs are in the drawer on mobile)
+  test('Mobile: folders view is reachable and folder selection filters links', async ({ page }) => {
+    // Create folder & link at desktop width, then verify the mobile shell path
     await page.goto('/')
-    await page.getByLabel('New folder name').fill('Mobile')
-    await page.getByRole('button', { name: 'Create folder', exact: true }).click()
-    await saveLink(page, { url: 'https://example.com/m1', title: 'Mobile Link', folder: 'Mobile' })
+    await openView(page, 'folders')
+    await createFolder(page, 'Mobile')
+    await openView(page, 'links')
+    await saveLink(page, { url: 'https://example.com/m1', title: 'Mobile Link' })
     await saveLink(page, { url: 'https://example.com/m2', title: 'Plain Link' })
+    await assignFolder(page, 'Mobile Link', 'Mobile')
 
     await page.setViewportSize({ width: 375, height: 667 })
     await page.reload()
 
-    const toggle = page.getByRole('button', { name: 'Toggle folders navigation' })
-    await expect(toggle).toBeVisible()
-    const navCol = page.locator('#nav-col')
-    // drawer is off-screen when closed; sidebar is not a permanent layout element on mobile
-    await expect(navCol).not.toBeInViewport()
-    await expect(page.getByRole('button', { name: 'All links' })).not.toBeInViewport()
+    // The Folders view is reachable through the current mobile navigation
+    await openView(page, 'folders')
+    await expect(page.locator('.page-title')).toHaveText('Folders')
+    await expect(page.locator('.folder-item', { hasText: 'Mobile' })).toBeVisible()
 
-    // open drawer
-    await toggle.click()
-    await expect(toggle).toHaveAttribute('aria-expanded', 'true')
-    await expect(page.getByRole('button', { name: 'All links' })).toBeInViewport()
+    // Selecting the folder lands on Saved links filtered to it
+    await page.locator('.folder-item .folder-row', { hasText: 'Mobile' }).click()
+    await expect(page.locator('.page-title')).toHaveText('Saved links')
+    await expect(visibleLinkRows(page)).toHaveCount(1)
+    await expect(visibleLinkRows(page).first()).toContainText('Mobile Link')
 
-    // select a folder — drawer closes and links filtered
-    await page.getByRole('button', { name: 'Show folder Mobile' }).click()
-    await expect(toggle).toHaveAttribute('aria-expanded', 'false')
-    await expect(page.locator('article.card')).toHaveCount(1)
-    await expect(page.locator('article.card').first()).toContainText('Mobile Link')
-
-    // back to desktop — sidebar visible, toggle hidden
+    // Back at desktop width the permanent sidebar is visible again
     await page.setViewportSize({ width: 1280, height: 800 })
-    await expect(page.getByRole('button', { name: 'All links' })).toBeInViewport()
-    await expect(toggle).toBeHidden()
+    await expect(page.locator('.sidebar-menu-link', { hasText: 'Saved links' })).toBeInViewport()
   })
 })

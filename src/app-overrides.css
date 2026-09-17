@@ -1,0 +1,1523 @@
+/* SaveLinks application styles */
+/* Derived in part from the Spark Admin template (https://sparkadmin.web.id) */
+/* Original Spark Admin attribution preserved above where applicable. */
+
+/* ---------------------------------------------------------------------
+   TABLE OF CONTENTS
+   ---------------------------------------------------------------------
+   1.  Google Fonts Import (Plus Jakarta Sans)
+   2.  Design System Tokens (single source of truth)
+   3.  Base & Typography
+   4.  Sidebar Component (.sidebar-wrapper)
+   5.  Main Wrapper Layout
+   6.  Header / Navbar Component
+   7.  Page Title & Controls Row
+   8.  Cards
+   9.  Responsive Adjustments
+   10. Pagination
+   11. Form Elements
+   12. Buttons
+   13. App Components (toast, modal, fade, focus, utilities)
+   14. Motion & Accessibility
+   15. Select / dropdown (AppSelect.vue)
+   16. Anchored Popovers
+   ---------------------------------------------------------------------
+   Every rule below consumes the tokens from section 2. Appearance and
+   colour scheme propagate by changing those tokens, never by adding
+   component-specific colour overrides.
+--------------------------------------------------------------------- */
+
+/* ---------------------------------------------------------------------
+   VISUAL LANGUAGE RULES (binding for every rule in this file)
+   ---------------------------------------------------------------------
+   R1  One surface per region. A border marks a region; nested grouping uses
+       spacing or the subtle divider token, never another bordered box.
+   R2  Shadows are reserved for off-plane surfaces (menus, popovers, dialogs,
+       toasts, the drawer). In-flow content sits flat on its surface.
+   R3  Accent communicates state: active/selected, focus, and normally ONE
+       filled primary CTA per view. It is never a generic surface colour.
+   R4  Radius follows component class. --radius-full is for circular geometry
+       (avatars, status dots, icon discs), not for generic text pills.
+   R5  Metadata stays subordinate text (size/weight/muted colour), not
+       badge-shaped decoration.
+   R6  Prefer the design-system tokens (section 2) over literal scale values;
+       a literal is either a documented gap or a mistake.
+--------------------------------------------------------------------- */
+
+/* ---------------------------------------------------------------------
+   1. Google Fonts CDN Import (Plus Jakarta Sans)
+--------------------------------------------------------------------- */
+
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+
+/* ---------------------------------------------------------------------
+   2. Design System Tokens — the single source of truth
+   ---------------------------------------------------------------------
+   Layering (nothing below redefines these concepts):
+     :root                          global semantic tokens (light values)
+     [data-appearance="dark"]       appearance tokens
+     [data-color-scheme="..."]      scheme accent tokens
+     component + state styles       consume tokens only
+   Appearance and scheme are independent: switching either one propagates
+   automatically because every surface/text/border/accent below is a token.
+--------------------------------------------------------------------- */
+:root {
+    color-scheme: light;
+
+    /* Surfaces — soft near-white canvas, white raised surfaces */
+    --bg: #F6F6F7;                 /* page canvas */
+    --card: #FFFFFF;               /* default surface (cards, inputs, menus) */
+    --surface-raised: #FFFFFF;     /* floating surfaces: modals, popovers */
+    --muted-bg: #F0F0F2;           /* inset / quiet surface */
+
+    /* Text — softened charcoal, never pure black */
+    --text-h: #1C1D1F;             /* headings + strong labels */
+    --text: #3C3E42;               /* body copy */
+    --muted: #6B6E74;              /* secondary text */
+    --text-subtle: #8E9196;        /* tertiary text, placeholders, meta */
+
+    /* Borders — subtle neutral grey */
+    --border: #E4E4E7;
+    --border-subtle: rgba(20, 21, 24, 0.06);
+
+    /* Accent — the scheme layer overrides --accent only;
+       hover/bg/border derive from it so nothing drifts to another hue. */
+    --accent: #4F545B;             /* None: neutral base, not a blue/purple */
+    --accent-hover: color-mix(in srgb, var(--accent) 88%, #000);
+    --accent-bg: color-mix(in srgb, var(--accent) 8%, #FFFFFF);
+    --accent-border: color-mix(in srgb, var(--accent) 45%, var(--border));
+    --on-accent: #FFFFFF;
+
+    /* Status (only the states the app actually renders) */
+    --success: #15803D;
+    --error: #C0392B;
+    --error-bg: #FCEBE9;
+    --on-error: #FFFFFF;
+
+    /* Sidebar — follows the global surface system */
+    --sidebar-bg: #FFFFFF;
+    --sidebar-border: #E4E4E7;
+    --sidebar-title: #8E9196;
+    --sidebar-text: #6B6E74;
+    --sidebar-text-strong: #1C1D1F;
+    --sidebar-hover-bg: rgba(20, 21, 24, 0.04);
+    --sidebar-active-bg: rgba(20, 21, 24, 0.05);
+    --sidebar-badge-bg: rgba(20, 21, 24, 0.06);
+    --sidebar-badge-text: #1C1D1F;
+
+    /* Elevation — restrained, neutral (no colour cast) */
+    --shadow-sm: 0 1px 3px rgba(20, 21, 24, 0.05);
+    --shadow-md: 0 4px 12px rgba(20, 21, 24, 0.07);
+    --shadow-lg: 0 16px 40px rgba(20, 21, 24, 0.10);
+
+    /* Radii */
+    --radius-sm: 10px;
+    --radius: 14px;
+    --radius-lg: 18px;
+    --radius-full: 999px;
+
+    /* Spacing scale */
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 24px;
+    --space-6: 32px;
+
+    /* Controls */
+    --control-height: 40px;
+    --control-height-sm: 32px;
+
+    /* Mobile shell: the fixed bottom navigation and the display cutout insets
+       it (and the sticky top bar) have to stay clear of. --bottom-nav-height is
+       the bar's box height, excluding the safe area appended below it. */
+    --bottom-nav-height: 56px;
+    --safe-area-top: env(safe-area-inset-top, 0px);
+    --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+
+    /* Focus */
+    --focus-ring: var(--accent);
+    --focus-ring-width: 2px;
+    --focus-ring-offset: 2px;
+
+    /* Overlay + layering — neutral, never scheme-tinted.
+       Order (bottom→top): nav chrome (navbar + mobile bottom nav) → sidebar
+       overlay (mobile) → sidebar → modal/dialog → panel → anchored popover →
+       toast. Modals must sit above the app chrome, otherwise the overlay
+       cannot cover it. */
+    --overlay: rgba(18, 18, 20, 0.45);
+    --z-sticky: 1000;
+    --z-overlay: 1025;
+    --z-sidebar: 1030;
+    --z-modal: 1040;
+    --z-panel: 1050;
+    --z-popover: 1200;
+    --z-toast: 9999;
+
+    /* Motion */
+    --transition-fast: 0.15s ease;
+    --transition-normal: 0.2s ease;
+    --transition-slow: 0.25s ease;
+
+    /* Typography */
+    --font-sans: 'Plus Jakarta Sans', sans-serif;
+    --text-xs: 0.75rem;
+    --text-sm: 0.85rem;
+    --text-md: 0.875rem;
+    --text-lg: 1rem;
+    --text-xl: 1.1rem;
+    --text-2xl: 1.5rem;
+    --weight-medium: 500;
+    --weight-semibold: 600;
+    --weight-bold: 700;
+    --leading-tight: 1.25;
+    --leading-normal: 1.5;
+
+    /* Shared state opacity */
+    --opacity-disabled: 0.5;
+
+    /* Layout */
+    --sidebar-width: 280px;
+}
+
+/* ---- Appearance: dark (scheme-independent surfaces/text/borders) ---- */
+[data-appearance="dark"]{
+    color-scheme: dark;
+
+    --bg: #000000;
+    --card: #080808;
+    --surface-raised: #0D0D0D;
+    --muted-bg: #0D0D0D;
+
+    --text-h: #E6E6E6;
+    --text: #A8A8A8;
+    --muted: #808080;
+    --text-subtle: #808080;
+
+    --border: #1F1F1F;
+    --border-subtle: rgba(255, 255, 255, 0.07);
+
+    --on-accent: #0A0A0A;
+
+    --success: #4ADE80;
+    --error: #F87171;
+    --error-bg: rgba(248, 113, 113, 0.12);
+    --on-error: #101114;
+
+    --sidebar-bg: #000000;
+    --sidebar-border: #1F1F1F;
+    --sidebar-title: #808080;
+    --sidebar-text: #A8A8A8;
+    --sidebar-text-strong: #E6E6E6;
+    --sidebar-hover-bg: rgba(255, 255, 255, 0.06);
+    --sidebar-active-bg: rgba(255, 255, 255, 0.08);
+    --sidebar-badge-bg: rgba(255, 255, 255, 0.10);
+    --sidebar-badge-text: #E6E6E6;
+
+    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.30);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.40);
+    --shadow-lg: 0 20px 50px rgba(0, 0, 0, 0.55);
+
+    --accent: #9FA3A9;
+    --accent-hover: color-mix(in srgb, var(--accent) 88%, #FFFFFF);
+    --accent-bg: color-mix(in srgb, var(--accent) 14%, #000000);
+    --accent-border: color-mix(in srgb, var(--accent) 45%, var(--border));
+
+    --overlay: rgba(0, 0, 0, 0.6);
+}
+
+/* ---- Scheme accent: light ---- */
+[data-color-scheme="ocean"]{ --accent: #5366C9; }
+[data-color-scheme="forest"]{ --accent: #3F8064; }
+[data-color-scheme="lavender"]{ --accent: #7969A8; }
+[data-color-scheme="amber"]{ --accent: #B87824; }
+
+/* ---- Scheme accent: dark ---- */
+[data-appearance="dark"][data-color-scheme="ocean"]{ --accent: #7C8CF2; }
+[data-appearance="dark"][data-color-scheme="forest"]{ --accent: #62A982; }
+[data-appearance="dark"][data-color-scheme="lavender"]{ --accent: #A695D4; }
+[data-appearance="dark"][data-color-scheme="amber"]{ --accent: #E0A43A; }
+
+/* ---------------------------------------------------------------------
+   3. Base & Typography
+--------------------------------------------------------------------- */
+body{
+    background-color: var(--bg);
+    color: var(--text-h);
+    font-family: var(--font-sans);
+    font-size: 0.925rem;
+    font-weight: var(--weight-medium);
+    -webkit-font-smoothing: antialiased;
+    letter-spacing: -0.01em;
+}
+
+h1, h2, h3, h4, h5, h6, .h1, .h2, .h3, .h4{
+    color: var(--text-h);
+    font-weight: var(--weight-bold);
+    letter-spacing: -0.025em;
+}
+
+a{
+    color: var(--accent);
+    text-decoration: none;
+    transition: all var(--transition-slow);
+}
+a:hover{
+    color: var(--accent-hover);
+}
+
+/* Shared interaction language for every control */
+button, select, [role="button"]{ cursor: pointer; }
+button:disabled, select:disabled, input:disabled, textarea:disabled{
+    cursor: not-allowed;
+    opacity: var(--opacity-disabled);
+}
+.btn:active:not(:disabled){ transform: scale(0.985); }
+
+::selection{ background: var(--accent-bg); }
+
+/* Generic content-entrance: cards and empty states rise 6px while fading. */
+@keyframes rise-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+::-webkit-scrollbar{
+    width: 6px;
+    height: 6px;
+}
+::-webkit-scrollbar-track{
+    background: transparent;
+}
+::-webkit-scrollbar-thumb{
+    background: var(--muted);
+    border-radius: var(--radius-sm);
+}
+::-webkit-scrollbar-thumb:hover{
+    background: var(--text);
+}
+
+/* ---------------------------------------------------------------------
+   4. Sidebar Component (.sidebar-wrapper)
+   Neutral surface (light) / true black (dark); accent only on interaction
+--------------------------------------------------------------------- */
+.sidebar-wrapper{
+    width: var(--sidebar-width);
+    background-color: var(--sidebar-bg);
+    height: 100vh;
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: var(--z-sidebar);
+    display: flex;
+    flex-direction: column;
+    padding: var(--space-6) var(--space-5);
+    border-right: 1px solid var(--sidebar-border);
+    transition: all var(--transition-slow);
+}
+
+.sidebar-brand{
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    font-size: 1.35rem;
+    font-weight: var(--weight-bold);
+    color: var(--sidebar-text-strong);
+    margin-bottom: 2.5rem;
+    padding-inline-start: var(--space-2);
+    text-decoration: none;
+}
+
+.sidebar-brand:hover{
+    color: var(--sidebar-text-strong);
+}
+
+/* The brand mark is identity, not a hover toy: the accent icon stays, the
+   decorative rotation is gone. */
+.sidebar-brand i{
+    color: var(--accent);
+    font-size: var(--text-2xl);
+}
+
+.sidebar-menu-section{
+    margin-bottom: var(--space-5);
+}
+
+/* Group labels are quiet supporting text (sentence case, no tracking): the
+   template-style uppercase micro-heading read as chrome, not navigation. */
+.sidebar-menu-title{
+    font-size: var(--text-xs);
+    font-weight: var(--weight-semibold);
+    color: var(--sidebar-title);
+    padding-inline-start: var(--space-3);
+    margin-bottom: var(--space-3);
+}
+
+.sidebar-menu-list{
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.sidebar-menu-item{
+    margin-bottom: var(--space-1);
+}
+
+/* Nav row: one control-height row on the spacing scale. The inline-start
+   border is reserved (transparent) so the active indicator never shifts the
+   label, and no absolute positioning or negative offsets are needed. */
+.sidebar-menu-link{
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    min-height: var(--control-height);
+    padding: var(--space-2) var(--space-3);
+    color: var(--sidebar-text);
+    border-inline-start: 2px solid transparent;
+    /* The inline-start corner radii stay square so the reserved accent border
+       renders as a straight navigation rail instead of a curved outline that
+       wraps the row like a selected button. */
+    border-start-end-radius: var(--radius-sm);
+    border-end-end-radius: var(--radius-sm);
+    font-weight: var(--weight-medium);
+    transition: color var(--transition-normal), background-color var(--transition-normal), border-color var(--transition-normal);
+}
+
+.sidebar-menu-link i{
+    font-size: var(--text-xl);
+    transition: color var(--transition-normal);
+}
+
+/* Active State & Hover States */
+/* Inactive/default: neutral muted text + icons (never scheme-tinted). */
+.sidebar-wrapper .sidebar-menu-link{
+    color: var(--sidebar-text);
+}
+
+.sidebar-wrapper .sidebar-menu-link i{
+    color: inherit;
+}
+
+/* Hover: the active scheme accent on text + icon (never white). The
+   .sidebar-wrapper prefix keeps this above the generic dark-mode a:hover. */
+.sidebar-wrapper .sidebar-menu-link:hover{
+    color: var(--accent);
+    background-color: var(--sidebar-hover-bg);
+}
+
+.sidebar-wrapper .sidebar-menu-link:hover i{
+    color: var(--accent);
+}
+
+/* Active: accent indicator + accent icon + strong label. No filled active
+   block — the same state language the mobile bottom navigation already uses. */
+.sidebar-wrapper .sidebar-menu-link.active{
+    color: var(--sidebar-text-strong);
+    border-inline-start-color: var(--accent);
+    font-weight: var(--weight-semibold);
+}
+
+.sidebar-wrapper .sidebar-menu-link.active i{
+    color: var(--accent);
+}
+
+/* Counts are supporting metadata (quiet text), not badge-shaped decoration. */
+.sidebar-menu-badge{
+    margin-left: auto;
+    font-size: var(--text-xs);
+    font-weight: var(--weight-medium);
+    color: var(--muted);
+}
+
+/* Minimized Sidebar Adjustments */
+body.sidebar-minimized{
+    --sidebar-width: 80px;
+}
+
+body.sidebar-minimized .sidebar-wrapper{
+    padding: var(--space-6) var(--space-3);
+    align-items: center;
+}
+
+body.sidebar-minimized .sidebar-brand span, body.sidebar-minimized .sidebar-menu-title, body.sidebar-minimized .sidebar-menu-link span, body.sidebar-minimized .sidebar-menu-badge{
+    display: none !important;
+}
+
+body.sidebar-minimized .sidebar-brand{
+    padding-inline-start: 0;
+    justify-content: center;
+    width: 100%;
+}
+
+body.sidebar-minimized .sidebar-menu-link{
+    justify-content: center;
+    padding: var(--space-3);
+}
+
+body.sidebar-minimized .sidebar-menu-link i{
+    font-size: var(--text-2xl);
+}
+
+/* ---------------------------------------------------------------------
+   5. Main Wrapper Layout
+--------------------------------------------------------------------- */
+.main-wrapper{
+    margin-left: var(--sidebar-width);
+    padding: 2rem 2.5rem;
+    min-height: 100vh;
+    min-height: 100dvh;
+    transition: all var(--transition-slow);
+    display: flex;
+    flex-direction: column;
+}
+
+/* ---------------------------------------------------------------------
+   6. Custom Header / Navbar Component
+--------------------------------------------------------------------- */
+.navbar-custom{
+    position: sticky;
+    top: 0;
+    z-index: var(--z-sticky);
+    background-color: color-mix(in srgb, var(--bg) 85%, transparent);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    margin-top: -2rem;
+    margin-left: -2.5rem;
+    margin-right: -2.5rem;
+    padding: 1.25rem 2.5rem;
+    border-bottom: 1px solid var(--border);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 480px) minmax(0, 1fr);
+    align-items: center;
+    margin-bottom: 2rem;
+    gap: var(--space-5);
+}
+
+.navbar-left{
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    min-width: 0;
+}
+
+/* Brand inside the top bar. Only the mobile shell shows it (the sidebar carries
+   the brand on desktop/tablet), so it is hidden above the mobile breakpoint. */
+.mobile-brand{
+    display: none;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+    color: var(--text-h);
+    font-size: var(--text-lg);
+    font-weight: var(--weight-bold);
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.mobile-brand img{
+    display: block;
+    flex-shrink: 0;
+}
+
+.navbar-search-wrapper{
+    width: 480px;
+    max-width: 100%;
+    position: relative;
+    margin: 0 auto;
+}
+
+.navbar-search-input{
+    width: 100%;
+    background-color: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 0.65rem 1.25rem;
+    padding-right: 2.75rem;
+    font-size: var(--text-md);
+    font-weight: var(--weight-medium);
+    color: var(--text-h);
+    outline: none;
+    transition: all var(--transition-normal);
+}
+
+/* Focus follows the shared field recipe: the border becomes the accent base
+   and the one focus indicator is the shared focus-visible outline. No tinted
+   halo — that combination read as a second, heavier ring on top of the
+   border. */
+.navbar-search-input:focus{
+    border-color: var(--accent);
+}
+
+.navbar-search-btn{
+    position: absolute;
+    right: 1.25rem;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    color: var(--muted);
+    padding: 0;
+    display: flex;
+    align-items: center;
+}
+
+/* Search shortcut keycap: discoverability only. It occupies the search
+   button's existing trailing slot, so the field keeps its reserved
+   padding-right and neither the input nor the app bar changes height. The
+   keycap shows only while the field is empty and unfocused; the button
+   (magnifier / clear) owns the slot in every other state. Hidden on
+   touch-only pointers and below the mobile shell breakpoint, where search is
+   a collapsed affordance. */
+.navbar-search-kbd{
+    position: absolute;
+    right: 1.25rem;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none;
+    font-family: inherit;
+    font-size: var(--text-xs);
+    font-weight: var(--weight-medium);
+    line-height: 1;
+    white-space: nowrap;
+    color: var(--text);
+    background-color: var(--muted-bg);
+    border: 1px solid var(--border);
+    /* The smallest radius token (10px) rounds a key this size into a pill; a
+       compact key needs a squarer corner, so this one literal is used. */
+    border-radius: 4px;
+    padding: var(--space-1) var(--space-2);
+}
+
+.navbar-search-input:focus ~ .navbar-search-kbd,
+.navbar-search-input:not(:placeholder-shown) ~ .navbar-search-kbd{
+    display: none;
+}
+
+.navbar-search-input:placeholder-shown:not(:focus) ~ .navbar-search-btn{
+    visibility: hidden;
+}
+
+@media (max-width: 768px){
+    .navbar-search-kbd{
+        display: none;
+    }
+}
+
+@media (hover: none){
+    .navbar-search-kbd{
+        display: none;
+    }
+}
+
+.navbar-actions{
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--space-3);
+    min-width: 0;
+}
+
+/* Top-bar utility icon buttons: one shared quiet/ghost treatment */
+.navbar-action-btn, .sidebar-toggle-btn, .btn-desktop-toggle, .navbar-search-toggle{
+    min-width: var(--control-height);
+    min-height: var(--control-height);
+    border-radius: var(--radius-sm);
+    background-color: transparent;
+    border: 1px solid transparent;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.05rem;
+    cursor: pointer;
+    transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+
+/* The collapsible mobile search affordance only exists below the mobile
+   breakpoint (it reuses the shared top-bar icon-button treatment above). */
+.navbar-search-toggle{
+    display: none;
+}
+
+.navbar-action-btn:hover, .sidebar-toggle-btn:hover, .btn-desktop-toggle:hover, .navbar-search-toggle:hover{
+    background-color: var(--muted-bg);
+    color: var(--text-h);
+}
+
+.navbar-action-btn:focus-visible, .sidebar-toggle-btn:focus-visible, .btn-desktop-toggle:focus-visible, .navbar-search-toggle:focus-visible{
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: var(--focus-ring-offset);
+}
+
+.navbar-action-btn{
+    position: relative;
+}
+
+/* Mobile Sidebar Toggle Button (shown below the desktop breakpoint).
+   Size/visuals come from the shared top-bar icon-button rule above. */
+.sidebar-toggle-btn{
+    display: none;
+}
+
+/* ---------------------------------------------------------------------
+   7. Page Title & Controls Row
+--------------------------------------------------------------------- */
+.page-header{
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 2rem;
+    flex-wrap: wrap;
+    gap: var(--space-5);
+}
+
+.page-title{
+    font-size: 1.75rem;
+    margin-bottom: 0.25rem;
+}
+
+.page-subtitle{
+    font-size: var(--text-md);
+    color: var(--muted);
+    margin-bottom: 0;
+}
+
+.btn-date-picker{
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    padding: 0.5rem 0.85rem;
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    cursor: pointer;
+    transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+
+.btn-date-picker:hover{
+    background-color: var(--muted-bg);
+    color: var(--text-h);
+}
+
+/* ---------------------------------------------------------------------
+   8. Cards & Styling Components
+--------------------------------------------------------------------- */
+.card{
+    background-color: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: var(--space-5);
+    margin-bottom: 1.5rem;
+    position: relative;
+    overflow: hidden;
+}
+
+/* ---------------------------------------------------------------------
+   9. Responsive Adjustments
+--------------------------------------------------------------------- */
+@media (max-width: 1200px) {
+    .sidebar-wrapper{
+        transform: translateX(-100%);
+    }
+
+    .sidebar-wrapper.show{
+        transform: translateX(0);
+        box-shadow: var(--shadow-lg);
+    }
+
+    .main-wrapper{
+        margin-left: 0;
+        padding: 1.5rem 1.5rem;
+    }
+
+    .sidebar-toggle-btn{
+        display: flex;
+    }
+
+    .navbar-search-wrapper{
+        order: 3;
+        max-width: 100%;
+        width: 100%;
+        margin-top: 0.5rem;
+    }
+
+    /* Below the desktop breakpoint the navbar is a wrapped flex row instead of
+       the three-column grid, so the free space on the first line has to be
+       handed to the actions: this keeps the account/utility controls in the
+       right-hand position the grid gives them (and that they keep on mobile). */
+    .navbar-actions{
+        margin-left: auto;
+    }
+
+    .navbar-custom{
+        display: flex;
+        margin-top: -1.5rem;
+        margin-left: -1.5rem;
+        margin-right: -1.5rem;
+        padding: 1rem 1.5rem;
+        flex-wrap: wrap;
+        gap: var(--space-3);
+    }
+}
+
+/* Mobile bottom navigation (Links · Folders · Add · More): the primary
+   destinations of the mobile shell. Hidden above the mobile breakpoint —
+   desktop and tablet keep the sidebar, so the bar never duplicates it. */
+.bottom-nav{
+    display: none;
+}
+
+@media (max-width: 768px) {
+    .page-header{
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--space-4);
+    }
+
+    /* The mobile shell replaces the drawer with the bottom bar: the sidebar,
+       its toggle and its overlay are not part of the mobile navigation. */
+    .sidebar-wrapper,
+    .sidebar-overlay,
+    .sidebar-toggle-btn{
+        display: none;
+    }
+
+    .navbar-custom{
+        padding-top: calc(1rem + var(--safe-area-top));
+    }
+
+    .mobile-brand{
+        display: inline-flex;
+    }
+
+    /* One Add entry point on mobile: the Add item in the bottom bar. */
+    .btn-date-picker{
+        display: none;
+    }
+
+    /* The top bar stays brand · search · profile (no fullscreen utility). */
+    #btn-fullscreen{
+        display: none;
+    }
+
+    /* Keep the fixed bar from covering the end of the page (pagination, footer). */
+    .main-wrapper{
+        padding-bottom: calc(var(--bottom-nav-height) + var(--safe-area-bottom) + var(--space-5));
+    }
+
+    .bottom-nav{
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: var(--z-sticky);
+        display: flex;
+        align-items: stretch;
+        gap: var(--space-1);
+        height: calc(var(--bottom-nav-height) + var(--safe-area-bottom));
+        padding: var(--space-1) var(--space-2);
+        padding-bottom: calc(var(--space-1) + var(--safe-area-bottom));
+        background-color: var(--card);
+        border-top: 1px solid var(--border);
+    }
+}
+
+.bottom-nav-item{
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: var(--control-height);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 0 var(--space-1);
+    border: none;
+    border-radius: var(--radius-sm);
+    background-color: transparent;
+    color: var(--muted);
+    font-family: inherit;
+    font-size: var(--text-xs);
+    font-weight: var(--weight-semibold);
+    line-height: 1;
+    cursor: pointer;
+    transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+
+.bottom-nav-item i{
+    font-size: 1.15rem;
+    line-height: 1;
+}
+
+.bottom-nav-item:hover{
+    background-color: var(--muted-bg);
+    color: var(--text-h);
+}
+
+.bottom-nav-item:focus-visible{
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: -2px;
+}
+
+/* Only a real destination (or an open More menu) takes the scheme accent. */
+.bottom-nav-item.active{
+    color: var(--accent);
+}
+
+/* ---------------------------------------------------------------------
+   10. Pagination
+--------------------------------------------------------------------- */
+.table-footer-control{
+    background-color: var(--card);
+    padding: 1.25rem;
+    border-top: 1px solid var(--border-subtle);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--space-4);
+}
+
+.table-pagination-info{
+    font-size: var(--text-sm);
+    color: var(--muted);
+}
+
+/* Pagination: quiet page controls on the shared control tokens (no filled
+   accent block — the current page is a state, marked the same way every other
+   state in the app is marked). */
+.table-footer-control .pagination .page-link{
+    display: grid;
+    place-items: center;
+    min-width: var(--control-height-sm);
+    min-height: var(--control-height-sm);
+    padding: 0 var(--space-2);
+    border: none;
+    border-radius: var(--radius-sm);
+    background-color: transparent;
+    color: var(--muted);
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+    transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+
+.table-footer-control .pagination .page-link:hover{
+    background-color: var(--muted-bg);
+    color: var(--text-h);
+}
+
+.table-footer-control .pagination .page-item.active .page-link{
+    background-color: var(--accent-bg);
+    color: var(--accent);
+    font-weight: var(--weight-semibold);
+}
+
+.table-footer-control .pagination .page-item.disabled .page-link{
+    opacity: var(--opacity-disabled);
+    color: var(--muted);
+    pointer-events: none;
+}
+
+/* Bootstrap's own .page-link:focus paints an off-palette blue halo and a fixed
+   light-grey background (its --bs-* variables are not mapped to our theme), so
+   the focused page control looked wrong — most visibly in dark mode. Neutralise
+   that and use the shared focus outline, like every other control. */
+.table-footer-control .pagination .page-link:focus{
+    background-color: transparent;
+    color: var(--text-h);
+    box-shadow: none;
+}
+.table-footer-control .pagination .page-link:focus-visible{
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: var(--focus-ring-offset);
+}
+
+/* ---------------------------------------------------------------------
+   11. Form Elements
+--------------------------------------------------------------------- */
+/* Shared field control (Add/Edit link forms, folder name, local profile).
+   One field language everywhere: inset at rest, surface + accent ring while
+   focused, height from the shared control token. Components add layout only. */
+.input{
+    width: 100%;
+    min-height: var(--control-height);
+    box-sizing: border-box;
+    padding: var(--space-2) var(--space-3);
+    font-family: inherit;
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+    color: var(--text-h);
+    background-color: var(--muted-bg);
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    outline: none;
+    transition: border-color var(--transition-fast), background-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.input:focus{
+    background-color: var(--card);
+    border-color: var(--accent);
+}
+
+.input::placeholder{ color: var(--text-subtle); opacity: 1; }
+
+textarea.input{ resize: vertical; }
+
+/* Select overrides live with the shared dropdown component (section 15). */
+
+/* ---------------------------------------------------------------------
+   12. Buttons
+--------------------------------------------------------------------- */
+/* Button variants (.btn.primary / .secondary / .ghost / .danger) are defined once,
+   in the "Button control language" block at the end of this file. */
+
+.sidebar-overlay{
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background-color: var(--overlay);
+    backdrop-filter: blur(4px);
+    z-index: var(--z-overlay);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity var(--transition-slow), visibility var(--transition-slow);
+}
+
+.sidebar-overlay.show{
+    opacity: 1;
+    visibility: visible;
+}
+
+/* ---------------------------------------------------------------------
+   13. App Components
+--------------------------------------------------------------------- */
+
+/* ---- Toast ---- */
+/* Neutral feedback surface with an accent edge: the accent marks the state,
+   it never becomes a filled notification pill. It still floats (overlay).
+   One shared recipe for every toast message — nothing is styled per message. */
+.sl-toast{
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: var(--card);
+  color: var(--text-h);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--accent);
+  padding: var(--space-2) var(--space-4);
+  /* Moderate corner: at 10px (--radius-sm) the short ends of a ~38px-tall
+     toast curved into a pill. The scale has no radius below --radius-sm, so
+     this is a documented literal (same approach as the search keycap). */
+  border-radius: 8px;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  /* Quieter than --shadow-lg: still floats clear of the page, no heavy glow. */
+  box-shadow: var(--shadow-md);
+  z-index: var(--z-toast);
+  white-space: nowrap;
+}
+/* The mobile shell owns the bottom of the screen: the toast clears the bottom
+   bar instead of covering the navigation. */
+@media (max-width: 768px){
+  .sl-toast{
+    bottom: calc(var(--bottom-nav-height) + var(--safe-area-bottom) + var(--space-3));
+  }
+}
+.toast-enter-active, .toast-leave-active{
+  transition: opacity var(--transition-fast), transform var(--transition-fast);
+}
+.toast-enter-from, .toast-leave-to{
+  opacity: 0;
+  transform: translateX(-50%) translateY(6px);
+}
+
+/* ---- Modal ---- */
+.modal-enter-active, .modal-leave-active{
+  transition: opacity var(--transition-fast);
+}
+.modal-enter-from, .modal-leave-to{
+  opacity: 0;
+}
+.modal-enter-active > *, .modal-leave-active > *{
+  transition: transform var(--transition-fast), opacity var(--transition-fast);
+}
+.modal-enter-from > *, .modal-leave-to > *{
+  transform: scale(0.97) translateY(6px);
+  opacity: 0;
+}
+
+/* ---- Fade ---- */
+.fade-enter-active, .fade-leave-active{ transition: opacity var(--transition-normal); }
+.fade-enter-from, .fade-leave-to{ opacity: 0; }
+
+/* ---- Focus-visible ---- */
+:focus-visible{
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* Bordered form controls indicate focus with their own border: it turns accent
+   and is the single visible focus boundary. The global outline above would draw
+   a second accent boundary right outside that border, so it is suppressed for
+   exactly these controls. The accent border is the equivalent visible focus
+   treatment (1px accent against the surrounding surface/resting border), so the
+   focused state stays clearly distinguishable without outline, shadow or halo.
+   Non-form controls keep the global outline. */
+.input:focus,
+.navbar-search-input:focus,
+.asel--field .asel-trigger:focus-visible,
+.asel--header .asel-trigger:focus-visible,
+.asel--inline .asel-trigger:focus-visible{
+  outline: none;
+}
+
+/* Bootstrap resets the focus outline on `.btn` (`.btn:focus-visible{outline:0}`).
+   That rule has the same specificity as the global one above but is imported
+   first, so it won and keyboard focus on every .btn was invisible. A button's
+   fill is its own edge, so it keeps the shared outline (as do .icon-btn,
+   .row-toggle and the chrome buttons). Bootstrap's own focus box-shadow is not
+   applied here (no --bs-btn-focus-shadow-rgb is defined), so nothing doubles. */
+.btn:focus-visible{
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* Text utilities: Bootstrap .text-muted is not driven by data-appearance,
+   so it is mapped to the shared muted text token once, globally. */
+.text-muted{ color: var(--muted) !important; }
+
+/* ---------------------------------------------------------------------
+   14. Motion & Accessibility
+--------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after{
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ---- Button control language --------------------------------------------
+   One base plus explicit variants, so a SaveLink button is never "a framework
+   button with patches on top":
+     .btn.primary    the single filled action in a view (accent)
+     .btn.secondary  a surface action (card + border)
+     .btn.ghost      a quiet action (no chrome at rest)
+     .btn.danger     a destructive action (error fill)
+     .btn.sm         the dense size (control-height-sm) used inside rows/forms
+   All states use the shared tokens; only :focus-visible draws the focus ring,
+   so a mouse click never leaves a button stuck in a highlighted state.
+------------------------------------------------------------------------- */
+.btn{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: var(--control-height);
+  padding: 0 var(--space-4);
+  font-family: inherit;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-normal);
+  color: var(--text-h);
+  background-color: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), transform .1s ease;
+}
+.btn.sm{
+  min-height: var(--control-height-sm);
+  padding: 0 var(--space-3);
+  font-size: var(--text-sm);
+}
+.btn.primary{
+  background-color: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+.btn.primary:hover, .btn.primary:focus-visible{
+  background-color: var(--accent-hover);
+  border-color: var(--accent-hover);
+  color: var(--on-accent);
+}
+.btn.secondary{
+  background-color: var(--card);
+  border-color: var(--border);
+  color: var(--text-h);
+}
+.btn.secondary:hover, .btn.secondary:focus-visible{
+  background-color: var(--muted-bg);
+  color: var(--text-h);
+}
+.btn.ghost{
+  background-color: transparent;
+  color: var(--text-h);
+}
+.btn.ghost:hover, .btn.ghost:focus-visible{
+  background-color: var(--muted-bg);
+  color: var(--text-h);
+}
+.btn.danger{
+  background-color: var(--error);
+  border-color: var(--error);
+  color: var(--on-error);
+}
+.btn.danger:hover, .btn.danger:focus-visible{
+  background-color: color-mix(in srgb, var(--error) 88%, #000);
+  border-color: color-mix(in srgb, var(--error) 88%, #000);
+  color: var(--on-error);
+}
+.btn.block{ display: flex; width: 100%; }
+
+/* ---- Icon-only action (link items, folder rows) --------------------------
+   Transparent at rest so item actions stay quiet next to the content, and the
+   same box everywhere so Card and List never drift apart. The destructive
+   state appears only on hover. */
+.icon-btn, .row-toggle{
+  width: var(--control-height-sm);
+  height: var(--control-height-sm);
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  background-color: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  cursor: pointer;
+  transition: color var(--transition-fast), background-color var(--transition-fast), border-color var(--transition-fast), transform .1s ease;
+}
+.icon-btn:hover, .row-toggle:hover{ background-color: var(--muted-bg); color: var(--text-h); }
+.icon-btn:active, .row-toggle:active{ transform: scale(0.92); }
+.icon-btn:focus-visible, .row-toggle:focus-visible{ outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 1px; }
+.icon-btn svg, .row-toggle svg{ width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.icon-btn.delete:hover{ background-color: var(--error-bg); color: var(--error); }
+/* Status toggle: the accent marks the active state on the icon only. */
+.row-toggle.active{ color: var(--accent); }
+.row-toggle.active:hover{ background-color: var(--accent-bg); }
+.row-toggle.active svg{ fill: currentColor; stroke: currentColor; }
+
+/* ---------------------------------------------------------------------
+   15. Select / dropdown (AppSelect.vue)
+   Deliberately NEUTRAL: the menu surface, its hover and its selection row
+   use surface/text tokens, never the active scheme accent, so a bright
+   scheme never turns the dropdown into a coloured popup. Only the selected
+   option's check mark picks up the accent (a selected state).
+   A visually hidden native <select> stays as the value carrier.
+--------------------------------------------------------------------- */
+.asel {
+    position: relative;
+    display: inline-flex;
+    min-width: 0;
+    max-width: 100%;
+}
+.asel-native {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    border: 0;
+    padding: 0;
+    opacity: 0;
+    pointer-events: none; /* the visible trigger owns interaction */
+}
+.asel-trigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    width: 100%;
+    min-width: 0;
+    font: inherit;
+    cursor: pointer;
+    text-align: left;
+    transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.asel-value {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.asel-caret {
+    flex-shrink: 0;
+    width: 12px;
+    height: 12px;
+    opacity: 0.7;
+    transition: transform var(--transition-fast);
+}
+.asel-trigger[aria-expanded="true"] .asel-caret { transform: rotate(180deg); }
+.asel-trigger:disabled { cursor: not-allowed; opacity: var(--opacity-disabled); }
+
+/* field — form field on an inset surface (Add/Edit link) */
+.asel--field { display: flex; width: 100%; }
+.asel--field .asel-trigger {
+    min-height: var(--control-height);
+    padding: 8px 10px;
+    border-radius: var(--radius-sm);
+    border: 1px solid transparent;
+    background-color: var(--muted-bg);
+    color: var(--text-h);
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+}
+.asel--field .asel-trigger:hover { border-color: var(--accent-border); }
+/* Shared focus recipe for form controls: the border becomes the accent base
+   and the single indicator is the shared focus-visible outline. The tinted
+   halo was removed because outline + accent border + halo read as a double,
+   heavier ring around an already-bordered control. */
+.asel--field .asel-trigger:focus-visible {
+    border-color: var(--accent);
+    background-color: var(--card);
+}
+
+/* header — quiet toolbar control (sort / filter) */
+.asel--header { flex: 0 1 auto; min-width: 96px; }
+.asel--header .asel-trigger {
+    min-height: var(--control-height-sm);
+    padding: 7px 6px;
+    border-radius: var(--radius-sm);
+    border: 1px solid transparent;
+    background-color: transparent;
+    color: var(--muted);
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+}
+.asel--header .asel-trigger:hover { background-color: var(--muted-bg); color: var(--text-h); }
+.asel--header .asel-trigger:focus-visible,
+.asel--header .asel-trigger[aria-expanded="true"] {
+    border-color: var(--accent);
+    background-color: var(--card);
+    color: var(--text-h);
+}
+
+/* inline — tiny control inside a card or list row */
+.asel--inline { min-width: 0; }
+.asel--inline .asel-trigger {
+    padding: 4px;
+    border-radius: var(--radius-sm);
+    border: 1px solid transparent;
+    background-color: transparent;
+    color: var(--muted);
+    font-size: var(--text-xs);
+    font-weight: var(--weight-medium);
+}
+.asel--inline .asel-trigger:hover { background-color: var(--muted-bg); color: var(--text-h); }
+.asel--inline .asel-trigger:focus-visible,
+.asel--inline .asel-trigger[aria-expanded="true"] {
+    border-color: var(--accent);
+    background-color: var(--card);
+    color: var(--text-h);
+}
+
+/* The menu is teleported to <body>, so it is styled globally. */
+.asel-menu {
+    position: fixed;
+    z-index: var(--z-popover);
+    margin: 0;
+    padding: var(--space-1);
+    list-style: none;
+    min-width: 150px;
+    max-height: 280px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    background-color: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-md);
+}
+.asel-option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    padding: 7px var(--space-2);
+    border-radius: var(--radius-sm);
+    font-size: var(--text-md);
+    color: var(--text);
+    cursor: pointer;
+    white-space: nowrap;
+}
+/* Neutral highlight — never the scheme accent */
+.asel-option.is-active { background-color: var(--muted-bg); color: var(--text-h); }
+.asel-option[aria-selected="true"] { color: var(--text-h); font-weight: var(--weight-semibold); }
+.asel-option-label { overflow: hidden; text-overflow: ellipsis; }
+.asel-check { flex-shrink: 0; width: 14px; height: 14px; color: var(--accent); }
+
+/* ---------------------------------------------------------------------
+   16. Anchored popovers (Save a Link form + card edit form)
+   Fixed, content-sized shells positioned by src/utils/anchoredPopover.js.
+   The trigger stays in place; the form floats above/below it and flips
+   only when the viewport lacks room. Height is content-driven, capped to
+   the viewport only so a tall expanded form stays reachable.
+--------------------------------------------------------------------- */
+.anchored-popover{
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: var(--z-popover);
+    box-sizing: border-box;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-md);
+    padding: 14px;
+    max-height: calc(100vh - 16px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+/* Widths are viewport-aware so the anchored popover never leaves the screen.
+   Save a Link is wider (3-up basic row); the shared edit form is narrow. */
+.add-popover{ width: min(520px, calc(100vw - 16px)); }
+.edit-popover{ width: min(340px, calc(100vw - 16px)); }
+/* Mobile presentation of the anchored forms: consistent side margins and a
+   viewport-aware height cap, so a tall form scrolls internally (the popover
+   already has overflow-y: auto) instead of running past the visible edge.
+   100dvh tracks the visible viewport as browser chrome shows/hides; browsers
+   without dvh keep the 100vh cap declared above. The cap also reserves the
+   fixed mobile bottom navigation (its height token + its safe-area inset), so a
+   fully expanded form never reaches into the bar. anchoredPopover.js keeps the
+   centred placement inside the same reserved band. */
+@media (max-width: 768px){
+    .add-popover{
+        width: min(520px, calc(100vw - var(--space-6)));
+    }
+    .edit-popover{
+        width: min(340px, calc(100vw - var(--space-6)));
+    }
+    .add-popover,
+    .edit-popover{
+        max-height: calc(100dvh - var(--space-6) - var(--bottom-nav-height) - var(--safe-area-bottom));
+    }
+    /* The Add/Edit select fields match the mobile form controls (44px tap
+       target, 16px text) so a field never looks denser than the inputs beside
+       it. The dropdown menu itself is unchanged. */
+    .add-popover .asel--field .asel-trigger,
+    .edit-popover .asel--field .asel-trigger{
+        min-height: calc(var(--control-height) + var(--space-1));
+        font-size: var(--text-lg);
+    }
+}
+/* Shared open/close fade for anchored popovers and revealed sections. */
+.fade-down-enter-active, .fade-down-leave-active{ transition: opacity var(--transition-fast), transform var(--transition-fast); }
+.fade-down-enter-from, .fade-down-leave-to{ opacity: 0; transform: translateY(4px); }
+
+/* "More" menu (mobile bottom navigation): a neutral popover on the standard
+   anchored-popover surface, holding the secondary destinations the desktop
+   sidebar keeps under "Tools". Positioned by anchoredPopover.js, so it flips
+   above the bar. */
+.more-menu{
+    width: min(240px, calc(100vw - 16px));
+    padding: var(--space-1);
+}
+
+.more-item{
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    width: 100%;
+    min-height: var(--control-height);
+    padding: var(--space-2) var(--space-3);
+    border: none;
+    border-radius: var(--radius-sm);
+    background-color: transparent;
+    color: var(--text);
+    font-family: inherit;
+    font-size: var(--text-md);
+    font-weight: var(--weight-medium);
+    text-align: left;
+    cursor: pointer;
+    transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+
+.more-item i{
+    font-size: var(--text-lg);
+    color: var(--muted);
+}
+
+.more-item:hover{
+    background-color: var(--muted-bg);
+    color: var(--text-h);
+}
+
+.more-item:hover i{
+    color: var(--text-h);
+}
+
+.more-item:focus-visible{
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: -2px;
+}
+
+/* The destination behind the closed menu stays marked while it is current. */
+.more-item.active,
+.more-item.active i{
+    color: var(--accent);
+}
+
+/* Status toggle rows in an item menu (Must Have): accent colour plus the same
+   filled-icon cue the card's status pill uses, so the active state never
+   depends on colour alone. */
+.more-item.active svg{
+    fill: currentColor;
+    stroke: currentColor;
+}
+
+/* Item quick-action menu (card/row "More actions"): same surface and rows as
+   the mobile More menu, plus a labelled field row for the contextual
+   Category / Folder selects and the destructive row treatment.
+   Icons use the app's shared outline recipe (stroke + currentColor), so they
+   follow the row's semantic colour in light and dark alike. */
+.more-item svg,
+.more-field svg{
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.more-field{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    min-height: var(--control-height);
+    padding: var(--space-2) var(--space-3);
+}
+
+.more-field-label{
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-3);
+    min-width: 0;
+    font-size: var(--text-md);
+    color: var(--text);
+}
+
+.more-field .asel{
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+.more-item.danger,
+.more-item.danger svg{
+    color: var(--error);
+}
+
+.more-item.danger:hover{
+    background-color: var(--error-bg);
+    color: var(--error);
+}

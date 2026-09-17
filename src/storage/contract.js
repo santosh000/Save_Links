@@ -49,7 +49,7 @@
 //
 // @typedef {Object} Settings
 // @property {'light'|'dark'|'system'} appearance
-// @property {'ocean'|'forest'|'lavender'|'amber'} colorScheme
+// @property {'none'|'ocean'|'forest'|'lavender'|'amber'} colorScheme
 
 /**
  * Repository interface (documented, not enforced at runtime).
@@ -82,7 +82,7 @@
  *   getProfile(): Promise<Object>                  stored profile, else default
  *                                                  { name: 'Local User', bio: 'Local-first bookmark manager' }
  *   saveProfile(profile): Promise<void>            throws unless a plain object
- *   getSettings(): Promise<Settings>               sanitized; defaults system/ocean when absent
+ *   getSettings(): Promise<Settings>               sanitized; defaults system/none when absent
  *   saveSettings(settings): Promise<void>          sanitizes to valid values
  *
  * Atomic bulk replacement — AUTHORITATIVE and all-or-nothing: it replaces

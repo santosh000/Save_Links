@@ -96,7 +96,7 @@ describe('migration', () => {
     expect(marker()).toBe(MIGRATION_STATE.COMPLETE)
     expect(await repo.getAllLinks()).toEqual([])
     expect(await repo.getAllFolders()).toEqual([])
-    expect(await repo.getSettings()).toEqual({ appearance: 'system', colorScheme: 'ocean' })
+    expect(await repo.getSettings()).toEqual({ appearance: 'system', colorScheme: 'none' })
   })
 
   it('migrates links preserving ids, createdAt, flags, and the canonical shape', async () => {
@@ -183,7 +183,7 @@ describe('migration', () => {
     seedRaw('colorScheme', '"bogus"')
     seed('links', [legacyLink('s')])
     await migrateIfNeeded(repo)
-    expect(await repo.getSettings()).toEqual({ appearance: 'system', colorScheme: 'ocean' })
+    expect(await repo.getSettings()).toEqual({ appearance: 'system', colorScheme: 'none' })
   })
 
   it('is idempotent: a second boot does not migrate again and never duplicates', async () => {

@@ -42,19 +42,19 @@ function openEditor() {
 .avatar {
   width: 44px;
   height: 44px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: var(--accent);
   color: var(--on-accent);
   display: grid;
   place-items: center;
-  font-weight: 700;
-  font-size: 14px;
+  font-weight: var(--weight-bold);
+  font-size: var(--text-md);
   flex-shrink: 0;
 }
 .info { flex: 1; min-width: 0; text-align: left; background: none; border: none; padding: 0; cursor: pointer; color: inherit; font: inherit; }
 .info:hover .name { color: var(--accent); }
-.name { font-weight: 700; color: var(--text-h); font-size: 15px; }
-.bio { font-size: 13px; color: var(--muted); margin: 2px 0 0; word-break: break-word; }
+.name { font-weight: var(--weight-bold); color: var(--text-h); font-size: var(--text-lg); }
+.bio { font-size: var(--text-sm); color: var(--muted); margin: 2px 0 0; word-break: break-word; }
 .badge-local {
   position: absolute;
   top: 10px;
@@ -66,7 +66,7 @@ function openEditor() {
   color: var(--accent);
   border: 1px solid var(--accent-border);
   padding: 3px 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
 }
 
 /* header variant: single row, no card chrome */
@@ -74,13 +74,13 @@ function openEditor() {
   background: none;
   border: none;
   padding: 4px 6px;
-  gap: 8px;
+  gap: var(--space-2);
   align-items: center;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
 }
 .profile.compact:hover { background: var(--muted-bg); }
-.profile.compact .avatar { width: 30px; height: 30px; font-size: 11px; }
-.profile.compact .name { font-size: 13px; line-height: 1.2; }
+.profile.compact .avatar { width: 30px; height: 30px; font-size: var(--text-xs); }
+.profile.compact .name { font-size: var(--text-sm); line-height: 1.2; }
 .profile.compact .bio,
 .profile.compact .badge-local { display: none; }
 .profile.compact .info { min-width: 0; }

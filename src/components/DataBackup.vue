@@ -15,7 +15,7 @@ const props = defineProps({
   profile: { type: Object, required: true },
   folders: { type: Array, default: () => [] },
   appearance: { type: String, default: 'system' },
-  colorScheme: { type: String, default: 'ocean' },
+  colorScheme: { type: String, default: 'none' },
 })
 
 const emit = defineEmits(['import-request', 'show-toast'])
@@ -209,8 +209,8 @@ function handleImportClick() {
     <h4>Data & Backup</h4>
     <p class="muted">Protect your saved links.</p>
     <div class="actions">
-      <button class="btn" @click="triggerExport">Export Backup</button>
-      <button class="btn" @click="triggerImport">Import Backup</button>
+<button class="btn secondary" @click="triggerExport">Export Backup</button>
+        <button class="btn secondary" @click="triggerImport">Import Backup</button>
       <input ref="fileInput" type="file" accept=".json,application/json" style="display:none" @change="handleImport" />
     </div>
     <p v-if="lastBackupAt" class="muted small">Last backup: {{ formattedLastBackup }}</p>
@@ -270,49 +270,34 @@ function handleImportClick() {
 
 <style scoped>
 .backup-card {
-  background: var(--card);
-  border-radius: var(--radius);
-  padding: 16px;
+  background: transparent;
+  padding: 0;
 }
 .backup-card h4 {
   margin: 0 0 6px;
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--text-h);
 }
 .muted {
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--text-sm);
   margin: 0;
 }
 .muted.small {
-  font-size: 12px;
+  font-size: var(--text-xs);
   margin-top: 10px;
 }
 .actions {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   margin-top: 12px;
   flex-wrap: wrap;
 }
-.btn {
-  appearance: none;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--card);
-  color: var(--text-h);
-  padding: 8px 12px;
-  font-weight: 600;
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-.btn:hover {
-  border-color: var(--accent-border);
-  box-shadow: var(--shadow);
-}
+/* Button visuals come from the shared control language (src/app-overrides.css):
+   the backup actions are secondary buttons, not one-off local styling. */
 .error {
   color: var(--error);
-  font-size: 12px;
+  font-size: var(--text-xs);
   margin-top: 8px;
 }
 
@@ -320,8 +305,8 @@ function handleImportClick() {
 .import-preview-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 70;
-  background: rgba(15, 23, 42, 0.5);
+  z-index: var(--z-panel);
+  background: var(--overlay);
   display: grid;
   place-items: center;
   padding: 16px;
@@ -330,7 +315,7 @@ function handleImportClick() {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: var(--elev-2);
+  box-shadow: var(--shadow-md);
   width: 100%;
   max-width: 460px;
   max-height: calc(100vh - 32px);
@@ -344,27 +329,27 @@ function handleImportClick() {
 }
 .import-preview-summary {
   margin: 0 0 12px;
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--text);
-  line-height: 1.5;
+  line-height: var(--leading-normal);
 }
 .import-preview-summary span {
   display: block;
   margin-top: 4px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--text-h);
 }
 .import-preview-duplicates {
   margin: 16px 0 8px;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
   color: var(--text-h);
 }
 .import-preview-counts {
   list-style: none;
   margin: 0 0 16px;
   padding: 0;
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--text);
   line-height: 1.8;
 }
@@ -374,14 +359,14 @@ function handleImportClick() {
 }
 .import-preview-choice {
   margin: 16px 0 8px;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
   color: var(--text-h);
 }
 .import-preview-radio {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
   margin-bottom: 20px;
 }
 .import-preview-radio label {
@@ -393,7 +378,7 @@ function handleImportClick() {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg);
-  transition: all 0.15s;
+  transition: all var(--transition-fast);
 }
 .import-preview-radio label:hover {
   border-color: var(--accent-border);
@@ -413,23 +398,23 @@ function handleImportClick() {
   min-width: 0;
 }
 .radio-option-title {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
   color: var(--text-h);
 }
 .radio-option-desc {
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--muted);
   line-height: 1.4;
 }
 .import-preview-safety {
   margin: 16px 0 0;
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--muted);
 }
 .import-preview-no-conflicts {
   margin: 16px 0 0;
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--muted);
   font-style: italic;
 }

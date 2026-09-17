@@ -1,7 +1,12 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, toRaw } from 'vue'
 import { sortLinks, SORT_OPTIONS, DEFAULT_SORT } from './utils/sort.js'
+import { CATEGORIES } from './utils/categorize.js'
+import { paginationLabel } from './utils/pagination.js'
 import { pickImportSlices } from './utils/backup.js'
+import { getStorageKey } from './utils/environment.js'
+import { detectPlatform } from './utils/device.js'
+import { useAnchoredPopover } from './utils/anchoredPopover.js'
 import { useLinks, DuplicateLinkError } from './composables/useLinks.js'
 import { useProfile } from './composables/useProfile.js'
 import { useFolders } from './composables/useFolders.js'
@@ -10,17 +15,15 @@ import { session } from './auth/session.js'
 import { repository } from './storage/repository.js'
 import AppDialog from './components/AppDialog.vue'
 import AddLink from './components/AddLink.vue'
-import LinkCard from './components/LinkCard.vue'
-import LinkRow from './components/LinkRow.vue'
-import StatsPanel from './components/StatsPanel.vue'
-import SearchFilter from './components/SearchFilter.vue'
-import { getStorageKey } from './utils/environment.js'
 import About from './components/About.vue'
 import DataBackup from './components/DataBackup.vue'
 import AccountPanel from './components/AccountPanel.vue'
 import LocalProfilePanel from './components/LocalProfilePanel.vue'
 import FolderManager from './components/FolderManager.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
+import LinkCard from './components/LinkCard.vue'
+import LinkRow from './components/LinkRow.vue'
+import AppSelect from './components/AppSelect.vue'
 import pkg from '../package.json'
 
 const appVersion = pkg.version
@@ -31,32 +34,71 @@ const { folders, createFolder, renameFolder, deleteFolder, setFolders, mergeFold
 const { appearance, colorScheme, setAppearance, setColorScheme } = useSettings()
 
 const search = ref('')
-// Debounced copy of the search text, consumed by filteredLinks. `search`
-// stays the immediate input value (drives the :value binding, clear button,
-// empty-state text), while searchQuery trails it by ~150ms so filtering is
-// not recomputed on every single keystroke.
 const searchQuery = ref('')
 let searchTimer = null
 watch(search, (val) => {
   clearTimeout(searchTimer)
-  if (!val) {
-    // clearing is instant — restore the full result set immediately
-    searchQuery.value = ''
-    return
-  }
+  if (!val) { searchQuery.value = ''; return }
   searchTimer = setTimeout(() => { searchQuery.value = val }, 150)
 })
+
+// Mobile search presentation: below the shell breakpoint the field is collapsed
+// behind its affordance. This is presentation state ONLY — `search`/`searchQuery`
+// above stay the single source of truth for the query and the filtering.
+const searchOpen = ref(false)
+const searchInputEl = ref(null)
+const searchToggleEl = ref(null)
+
+async function openSearch() {
+  searchOpen.value = true
+  await nextTick()
+  searchInputEl.value?.focus()
+}
+
+async function closeSearch(restoreFocus = false) {
+  searchOpen.value = false
+  if (!restoreFocus) return
+  // Let the collapsed bar render first — the affordance is display:none while
+  // the field is open, so focusing it before the update would be a no-op.
+  await nextTick()
+  searchToggleEl.value?.focus()
+}
+
+// Collapse an untouched field when focus leaves it, so the bar never stays stuck
+// in the search state. The query is never cleared here.
+function onSearchBlur() {
+  if (!search.value) closeSearch()
+}
+
+// Search keyboard shortcut (Ctrl+K / ⌘K): discoverability + a fast path into the
+// existing search. The keycap label follows the platform; the handler accepts
+// either modifier and reuses openSearch() (the one search-opening path). Events
+// from editable controls are ignored so native editing is never intercepted.
+const searchShortcutLabel = detectPlatform() === 'macOS' ? '⌘ K' : 'Ctrl K'
+
+function isEditableTarget(el) {
+  if (!el) return false
+  const tag = el.tagName
+  return el.isContentEditable === true || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
+}
+
+function onSearchShortcutKeydown(e) {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return
+  if (e.key !== 'k' && e.key !== 'K') return
+  if (isEditableTarget(e.target)) return
+  e.preventDefault()
+  openSearch()
+}
+
+onMounted(() => document.addEventListener('keydown', onSearchShortcutKeydown))
+onBeforeUnmount(() => document.removeEventListener('keydown', onSearchShortcutKeydown))
 const filterCategory = ref('')
 const filterStatus = ref('')
 const filterFolder = ref('')
-// Display-order sort (session-only preference; defaults to newest first).
-// Kept in memory only — persisting it would require widening the settings
-// blob, which is out of scope for this milestone.
 const sortBy = ref(DEFAULT_SORT)
-// Saved Links presentation: 'card' | 'list' | 'compact'. UI-state only —
-// persisted to plain localStorage (NOT the settings blob, NOT synced). Card
-// remains the default and the single source of truth for all views is the
-// filteredLinks computed below.
+
+// Saved Links presentation: 'card' | 'list' | 'compact'.
+// Persisted to plain localStorage (NOT the synced settings blob).
 const VIEW_MODES = ['card', 'list', 'compact']
 const VIEW_MODE_LABELS = { card: 'Card', list: 'List', compact: 'Compact' }
 function readViewMode() {
@@ -72,44 +114,88 @@ function setViewMode(m) {
   viewMode.value = m
   try { localStorage.setItem(getStorageKey('viewMode'), m) } catch { /* non-fatal */ }
 }
-// Sticky-toolbar Add (+): reveals the EXISTING Save-a-link form (single open
-// state lives in AddLink) and focuses its URL field. No duplicate UI/state.
-const addLinkEl = ref(null)
-async function openAddLink() {
-  const exposed = addLinkEl.value
-  // `exposed.open` is the ref unwrapped to a plain boolean by the component
-  // exposed-proxy; assigning writes through to the ref (setting `.value`
-  // would be reading a boolean's property and silently no-op).
-  if (!exposed) return
-  exposed.open = true
-  await nextTick()
-  document.querySelector('.add-card')?.scrollIntoView({ block: 'start' })
-  document.getElementById('save-url')?.focus()
-}
-// ONE source of truth for the responsive drawers: 'folders' | 'filters' | null.
-// The two drawers are mutually exclusive by construction — toggling one open
-// can never leave the other open (a single assignment per interaction).
-const activeDrawer = ref(null)
 
-// Online account/auth panel (distinct from the local Profile identity).
+// Navigation
+const currentView = ref('links')
+const sidebarOpen = ref(false)
+
+// Mobile bottom navigation: "More" is a menu of the secondary destinations the
+// desktop sidebar keeps under "Tools" — not a fifth destination of its own.
+const MORE_VIEWS = ['settings', 'backup', 'about']
+const moreOpen = ref(false)
+const moreTriggerEl = ref(null)
+const moreMenuEl = ref(null)
+const moreActive = computed(() => MORE_VIEWS.includes(currentView.value))
+
+function toggleMore() { moreOpen.value = !moreOpen.value }
+function closeMore() { moreOpen.value = false }
+function closeMoreFromKey() {
+  moreOpen.value = false
+  moreTriggerEl.value?.focus()
+}
+
+useAnchoredPopover({
+  trigger: moreTriggerEl,
+  popover: moreMenuEl,
+  isOpen: moreOpen,
+  onOutside: closeMore,
+})
+
+function go(view) { currentView.value = view; sidebarOpen.value = false; moreOpen.value = false }
+
+// Desktop sidebar minimize + fullscreen toggle
+const sidebarMinimized = ref(false)
+function toggleSidebarMinimized() {
+  sidebarMinimized.value = !sidebarMinimized.value
+  document.body.classList.toggle('sidebar-minimized', sidebarMinimized.value)
+}
+function toggleFullscreen() {
+  if (document.fullscreenElement) { document.exitFullscreen?.().catch?.(() => {}) }
+  else { document.documentElement.requestFullscreen?.().catch?.(() => {}) }
+}
+
+// AddLink ref + toggle handler (opens the same anchored popover from the page
+// header "+ Add link" button; the toolbar toggle opens it from inside AddLink).
+const addLinkEl = ref(null)
+async function openAddLink(triggerEl) {
+  currentView.value = 'links'
+  await nextTick()
+  await nextTick()
+  const exposed = addLinkEl.value
+  if (!exposed) return
+  const opened = exposed.toggleFrom(triggerEl)
+  if (opened) {
+    await nextTick()
+    document.getElementById('save-url')?.focus()
+  }
+}
+
+// Profile UI: Account panel and Edit-profile panel (sidebar profile card opens Account)
 const accountOpen = ref(false)
+const localProfileOpen = ref(false)
+
 function toggleAccount() {
   accountOpen.value = !accountOpen.value
+  if (accountOpen.value) localProfileOpen.value = false
 }
 
-// Local Profile panel (local-only identity, separate from the online account).
-const localProfileOpen = ref(false)
-function openLocalProfile() {
+function openAccountPanel() {
+  localProfileOpen.value = false
+  accountOpen.value = true
+}
+
+function openLocalProfilePanel() {
+  accountOpen.value = false
   localProfileOpen.value = true
 }
-function closeLocalProfile() {
-  localProfileOpen.value = false
-}
-function saveLocalProfile(name, bio) {
-  updateProfile({ name, bio })
-}
 
-// Session/authentication state (for unified identity display)
+const openLocalProfile = openLocalProfilePanel
+
+function closeAccountPanel() { accountOpen.value = false }
+function closeLocalProfile() { localProfileOpen.value = false }
+function saveLocalProfile(name, bio) { updateProfile({ name, bio }) }
+
+// Session/authentication state
 const authState = ref(session.getState())
 let authUnsubscribe = null
 onMounted(() => {
@@ -121,99 +207,75 @@ onBeforeUnmount(() => {
   clearTimeout(searchTimer)
 })
 
+// Initials for avatar fallback
+const initials = computed(() =>
+  (profile.name || 'L').trim().split(/\s+/).filter(Boolean).map(s => s[0]).join('').slice(0, 2).toUpperCase() || 'L'
+)
+
+// Page header computed props
+const pageTitle = computed(() => ({
+  links: 'Saved links',
+  folders: 'Folders',
+  backup: 'Backup & restore',
+  settings: 'Settings',
+  about: 'About',
+}[currentView.value] || 'Saved links'))
+
+const pageSubtitle = computed(() => {
+  if (currentView.value === 'links') return `${filteredLinks.value.length} of ${total.value} links shown`
+  if (currentView.value === 'folders') return 'Organize your links into folders'
+  if (currentView.value === 'backup') return 'Export and import your data'
+  if (currentView.value === 'settings') return 'Customize how Save Links looks and behaves'
+  if (currentView.value === 'about') return `Save Links v${appVersion}`
+  return ''
+})
+
+// Folder name helper
+function folderName(id) {
+  if (!id) return 'Unfiled'
+  return folders.value.find(f => f.id === id)?.name || 'Unfiled'
+}
+
 // Anonymous → Authenticated sync confirmation
 const pendingAnonymousSync = ref(false)
 let hasPromptedForAnonymousSync = false
 
 async function handleAnonymousSyncChoice(choice) {
-  // choice: 'merge' | 'keep-local'
   pendingAnonymousSync.value = false
   hasPromptedForAnonymousSync = true
-
   if (choice === 'merge') {
-    // Convert anonymous links/folders to authenticated mutations
     const anonLinks = getAnonymousLinks()
     const anonFolders = getAnonymousFolders()
-
     const accountId = session.getState().user?.id
     if (!accountId) return
-
-    // Queue create mutations for anonymous links
     for (const link of anonLinks) {
-      // Deep unwrap: toRaw is shallow in Vue 3, so nested reactive arrays (like tags)
-      // would remain Proxies. Use JSON serialization to deeply unwrap all nested proxies.
       const plainLink = JSON.parse(JSON.stringify(toRaw(link)))
-      await repository.addPendingMutation(
-        'create',
-        plainLink.id,
-        'link',
-        { ...plainLink, account_id: accountId },
-        accountId,
-        0 // base_revision = 0 for new objects
-      )
+      await repository.addPendingMutation('create', plainLink.id, 'link', { ...plainLink, account_id: accountId }, accountId, 0)
     }
-
-    // Queue create mutations for anonymous folders
     for (const folder of anonFolders) {
       const plainFolder = JSON.parse(JSON.stringify(toRaw(folder)))
-      await repository.addPendingMutation(
-        'create',
-        plainFolder.id,
-        'folder',
-        { ...plainFolder, account_id: accountId },
-        accountId,
-        0
-      )
+      await repository.addPendingMutation('create', plainFolder.id, 'folder', { ...plainFolder, account_id: accountId }, accountId, 0)
     }
-
-    // The queued mutations carry the account identity, but the reactive
-    // arrays are the UI's source of truth (and the watch persists them into
-    // IndexedDB). Mark the converted records owned NOW: otherwise they keep
-    // counting as anonymous — the prompt resurfaces after a refresh, the
-    // persisted store loses the account attribution, and later edits claim a
-    // stale anonymous record. Revisions stay local until the server
-    // acknowledges them (the coordinator assigns them), but ownership must
-    // not wait.
     const mergedLinkIds = new Set(anonLinks.map(l => l.id))
     const mergedFolderIds = new Set(anonFolders.map(f => f.id))
     links.value = links.value.map(l => (mergedLinkIds.has(l.id) ? { ...l, account_id: accountId } : l))
     folders.value = folders.value.map(f => (mergedFolderIds.has(f.id) ? { ...f, account_id: accountId } : f))
-
-    // Perform sync to push the new mutations and WAIT for them to complete
     const { syncNowWithMutations } = await import('./composables/useSync.js')
     await syncNowWithMutations()
     showToast('Local data synced to your account')
   } else {
-    // Keep Local: do nothing - anonymous data stays local
-    // Mark anonymous data as "kept local" so it doesn't trigger prompt again
     const anonLinks = getAnonymousLinks()
     const anonFolders = getAnonymousFolders()
     const accountId = session.getState().user?.id
     if (accountId) {
       for (const link of anonLinks) {
         const plainLink = JSON.parse(JSON.stringify(toRaw(link)))
-        await repository.addPendingMutation(
-          'update',
-          plainLink.id,
-          'link',
-          { ...plainLink, account_id: accountId, kept_local: true },
-          accountId,
-          plainLink.revision
-        ).catch(err => console.warn('Failed to queue mutation:', err))
+        await repository.addPendingMutation('update', plainLink.id, 'link', { ...plainLink, account_id: accountId, kept_local: true }, accountId, plainLink.revision).catch(() => {})
       }
       for (const folder of anonFolders) {
         const plainFolder = JSON.parse(JSON.stringify(toRaw(folder)))
-        await repository.addPendingMutation(
-          'update',
-          plainFolder.id,
-          'folder',
-          { ...plainFolder, account_id: accountId, kept_local: true },
-          accountId,
-          plainFolder.revision
-        ).catch(err => console.warn('Failed to queue mutation:', err))
+        await repository.addPendingMutation('update', plainFolder.id, 'folder', { ...plainFolder, account_id: accountId, kept_local: true }, accountId, plainFolder.revision).catch(() => {})
       }
-      // Mark the same records kept-local in the reactive arrays so the
-      // anonymous counts drop immediately and the watch persists the marker.
       const keptLinkIds = new Set(anonLinks.map(l => l.id))
       const keptFolderIds = new Set(anonFolders.map(f => f.id))
       links.value = links.value.map(l => (keptLinkIds.has(l.id) ? { ...l, account_id: accountId, kept_local: true } : l))
@@ -226,87 +288,54 @@ async function handleAnonymousSyncChoice(choice) {
 function checkAndPromptAnonymousSync() {
   const state = session.getState()
   const isAuthenticated = state.status === 'authenticated' && !!state.user
-
   if (!isAuthenticated) return
-
-  // Only prompt once per session
   if (hasPromptedForAnonymousSync) return
-
   const anonLinkCount = getAnonymousLinksCount()
   const anonFolderCount = getAnonymousFoldersCount()
-
   if (anonLinkCount > 0 || anonFolderCount > 0) {
     const parts = []
     if (anonLinkCount > 0) parts.push(`${anonLinkCount} link${anonLinkCount > 1 ? 's' : ''}`)
     if (anonFolderCount > 0) parts.push(`${anonFolderCount} folder${anonFolderCount > 1 ? 's' : ''}`)
-    const itemList = parts.join(' and ')
-
     pendingAnonymousSync.value = true
     openDialog({
       kind: 'anonymous-sync',
       title: 'Sync your local data?',
-      message: `You have ${itemList} saved locally. Would you like to sync them to your account?`,
+      message: `You have ${parts.join(' and ')} saved locally. Would you like to sync them to your account?`,
       buttons: [
         { label: 'Sync & Merge', variant: 'primary', value: 'merge', default: true },
         { label: 'Keep Local', variant: 'ghost', value: 'keep-local' }
       ]
     })
   } else {
-    // No anonymous data - just do normal authenticated sync
     triggerAuthenticatedSync()
   }
 }
 
-// Automatic authenticated sync trigger (on login/restore)
 let initialSyncTriggered = false
 async function triggerAuthenticatedSync() {
   if (initialSyncTriggered) return
   initialSyncTriggered = true
-
   const { syncNow } = await import('./composables/useSync.js')
   await syncNow()
 }
 
-// Watch for auth state changes to handle login transition
 watch(() => authState.value.status, (newStatus, oldStatus) => {
   const wasUnauthenticated = oldStatus === 'anonymous' || oldStatus === 'unknown'
   const isNowAuthenticated = newStatus === 'authenticated'
-
   if (wasUnauthenticated && isNowAuthenticated) {
-    // Login transition: check for anonymous data
     hasPromptedForAnonymousSync = false
     initialSyncTriggered = false
-    // Defer to next tick so session state is fully settled
     nextTick(() => checkAndPromptAnonymousSync())
-    // Ensure the 30-second cross-browser sync poll is running. The onMounted
-    // check may have missed this if initSession() had not resolved yet.
-    // nextTick-deferred: the immediate watch fires during setup, before the
-    // polling state (syncPollingInterval) declared later is initialized.
     nextTick(() => startSyncPolling())
   } else if (isNowAuthenticated && !initialSyncTriggered) {
-    // Session restored (already authenticated on mount): the anonymous-data
-    // check must run here too. Without it, the Sync & Merge / Keep Local
-    // prompt could never appear for unmerged local data until the next login
-    // transition — restoring an already-authenticated session only synced.
-    // When there is no anonymous data the check falls through to the one
-    // initial authenticated sync (its own else branch), so nothing is lost.
     nextTick(() => checkAndPromptAnonymousSync())
-    // Ensure the 30-second cross-browser sync poll is running. The onMounted
-    // check may have missed this if initSession() had not resolved yet.
-    // nextTick-deferred: the immediate watch fires during setup, before the
-    // polling state (syncPollingInterval) declared later is initialized.
     nextTick(() => startSyncPolling())
   }
 }, { immediate: true })
 
 // Authenticated polling for cross-browser sync
-// This enables already-open browsers to discover remote changes made by other browsers
 let syncPollingInterval = null
-const POLLING_INTERVAL_MS = 30000 // 30 seconds
-
-// True while the tab is hidden (visibility-state). Drives the immediate-sync
-// on a genuine hidden → visible transition; repeated 'visible' events without
-// an intervening 'hidden' event never re-trigger it.
+const POLLING_INTERVAL_MS = 30000
 let wasTabHidden = false
 
 function isAuthenticatedAndOnline() {
@@ -316,53 +345,34 @@ function isAuthenticatedAndOnline() {
   return true
 }
 
-/** Fire-and-forget background sync (poll tick and visibility resume share one quiet path). */
 async function backgroundSync() {
   try {
     const { syncNow } = await import('./composables/useSync.js')
     await syncNow()
-  } catch (err) {
-    // Log but don't spam user with toasts for background sync failures
-    console.warn('Background sync failed:', err)
-  }
+  } catch (err) { console.warn('Background sync failed:', err) }
 }
 
 function startSyncPolling() {
-  if (syncPollingInterval) return // Already polling
+  if (syncPollingInterval) return
   const state = session.getState()
-  if (state.status !== 'authenticated' || !state.user) return // Only poll when authenticated
-
+  if (state.status !== 'authenticated' || !state.user) return
   syncPollingInterval = setInterval(async () => {
-    // Only poll when the document is visible (tab is active)
     if (document.visibilityState !== 'visible') return
-    // Only poll when online
     if (typeof navigator !== 'undefined' && navigator.onLine === false) return
     await backgroundSync()
   }, POLLING_INTERVAL_MS)
 }
 
 function stopSyncPolling() {
-  if (syncPollingInterval) {
-    clearInterval(syncPollingInterval)
-    syncPollingInterval = null
-  }
+  if (syncPollingInterval) { clearInterval(syncPollingInterval); syncPollingInterval = null }
 }
 
-// Handle visibility changes to pause/resume polling
 function onVisibilityChange() {
   if (document.visibilityState === 'visible') {
-    // Restart polling (guarded: startSyncPolling never creates a duplicate
-    // interval) AND run one immediate sync on a genuine hidden → visible
-    // transition, so the tab does not wait up to a full poll interval to
-    // discover remote changes. The inflight lock inside useSync dedupes
-    // this against any poll tick already running.
     const resumingFromHidden = wasTabHidden
     wasTabHidden = false
     startSyncPolling()
     if (resumingFromHidden && isAuthenticatedAndOnline()) {
-      // Rotate the session on resume (approved trigger #2): extend the server
-      // session expiry instead of discovering the expiry via a later sync 401.
-      // Fire-and-forget — refreshSession() never rejects and never fails sync.
       session.refreshSession()
       backgroundSync()
     }
@@ -374,23 +384,11 @@ function onVisibilityChange() {
 
 onMounted(() => {
   document.addEventListener('visibilitychange', onVisibilityChange)
-  // Start polling if already authenticated on mount
   const state = session.getState()
-  if (state.status === 'authenticated' && state.user) {
-    startSyncPolling()
-  }
+  if (state.status === 'authenticated' && state.user) startSyncPolling()
 })
 
-onBeforeUnmount(() => {
-  document.removeEventListener('visibilitychange', onVisibilityChange)
-  authUnsubscribe?.()
-  stopSyncPolling()
-})
-
-function toggleDrawer(name) {
-  activeDrawer.value = activeDrawer.value === name ? null : name
-}
-
+// FolderManager navigation (sidebar → links view with folder filter)
 const navView = computed(() => {
   if (filterFolder.value) return filterFolder.value
   if (filterStatus.value === 'favorite') return '__favorites'
@@ -398,43 +396,17 @@ const navView = computed(() => {
 })
 
 function handleSelectFolder(value) {
-  if (value === '__all') {
-    filterFolder.value = ''
-    filterStatus.value = ''
-  } else if (value === '__favorites') {
-    filterFolder.value = ''
-    filterStatus.value = 'favorite'
-  } else {
-    filterFolder.value = value
-    filterStatus.value = ''
-  }
-  activeDrawer.value = null
-}
-
-function onKeydown(e) {
-  if (e.key === 'Escape') {
-    activeDrawer.value = null
-  }
-}
-onMounted(() => window.addEventListener('keydown', onKeydown))
-onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
-
-function handleSetFolder(id, folderId) {
-  updateLink(id, { folderId })
-  showToast('Folder updated')
+  if (value === '__all') { filterFolder.value = ''; filterStatus.value = '' }
+  else if (value === '__favorites') { filterFolder.value = ''; filterStatus.value = 'favorite' }
+  else { filterFolder.value = value; filterStatus.value = '' }
+  currentView.value = 'links'
 }
 
 const toast = ref('')
+function showToast(msg) { toast.value = msg; setTimeout(() => toast.value = '', 2500) }
+watch(storageError, (msg) => { if (msg) showToast(msg) })
 
-function showToast(msg) {
-  toast.value = msg
-  setTimeout(() => toast.value = '', 2500)
-}
-
-watch(storageError, (msg) => {
-  if (msg) showToast(msg)
-})
-
+// Link add/duplicate
 async function handleAdd(payload) {
   try {
     await addLink(payload)
@@ -452,9 +424,7 @@ async function handleAdd(payload) {
           { label: 'Cancel', variant: 'ghost', value: 'cancel' }
         ]
       })
-    } else {
-      showToast(e.message || 'Failed to save')
-    }
+    } else { showToast(e.message || 'Failed to save') }
   }
 }
 
@@ -462,27 +432,15 @@ async function handleDuplicateChoice(value) {
   const { payload, existing } = pendingDuplicate.value
   pendingDuplicate.value = null
   if (value === 'replace') {
-    try {
-      await replaceLink(existing.id, payload)
-      showToast('Link updated')
-    } catch (e) {
-      showToast(e.message || 'Failed to update')
-    }
+    try { await replaceLink(existing.id, payload); showToast('Link updated') } catch (e) { showToast(e.message || 'Failed to update') }
   } else if (value === 'add-another') {
-    try {
-      await addLink(payload, { allowDuplicate: true })
-      showToast('Link saved')
-    } catch (e) {
-      showToast(e.message || 'Failed to save')
-    }
+    try { await addLink(payload, { allowDuplicate: true }); showToast('Link saved') } catch (e) { showToast(e.message || 'Failed to save') }
   }
-  // cancel: no record created, nothing modified
 }
 
 function requestDeleteLink(id) {
   openDialog({
-    kind: 'delete-link',
-    id,
+    kind: 'delete-link', id,
     title: 'Delete this link?',
     message: 'This will remove it from your device and your synced account.',
     buttons: [
@@ -494,8 +452,7 @@ function requestDeleteLink(id) {
 
 function requestDeleteFolder(id) {
   openDialog({
-    kind: 'delete-folder',
-    id,
+    kind: 'delete-folder', id,
     title: 'Delete this folder?',
     message: 'This will remove it from your device and your synced account. Links will move to Unfiled.',
     buttons: [
@@ -505,147 +462,112 @@ function requestDeleteFolder(id) {
   })
 }
 
-function requestImport(payload) {
-  // The new preview modal in DataBackup.vue already handles the confirmation.
-  // Directly proceed with the import using the selected strategy.
-  handleImportBackup(payload)
-}
+function requestImport(payload) { handleImportBackup(payload) }
 
 const dialog = ref(null)
 const pendingDuplicate = ref(null)
 const lastTrigger = ref(null)
 
-function openDialog(cfg) {
-  lastTrigger.value = document.activeElement
-  dialog.value = cfg
-}
+function openDialog(cfg) { lastTrigger.value = document.activeElement; dialog.value = cfg }
 
 function closeDialog() {
   dialog.value = null
   const el = lastTrigger.value
   lastTrigger.value = null
-  // return focus to whatever opened the dialog; fall back to the compact bar toggle.
-  // Runs after the DOM flush so a confirm that removed the trigger (folder/link
-  // delete) has actually detached it — otherwise focus returns to a node that is
-  // removed moments later and drops to <body>.
-  nextTick(() => {
-    if (el && document.body.contains(el)) {
-      el.focus()
-    } else {
-      const fallback = document.querySelector('.add-toggle')
-      if (fallback) fallback.focus()
-    }
-  })
+  nextTick(() => { if (el && document.body.contains(el)) el.focus() })
 }
 
 function onDialogChoose(value) {
   const cfg = dialog.value
-  // Run the chosen action BEFORE closing, so that a confirm that removes the
-  // trigger control from the DOM (e.g. folder/link delete) has already
-  // detached it when closeDialog() restores focus. Otherwise focus is first
-  // returned to the trigger and then dropped to <body> when it is removed.
   if (cfg) {
-    if (cfg.kind === 'duplicate') {
-      handleDuplicateChoice(value)
-    } else if (cfg.kind === 'delete-link') {
-      if (value === 'confirm') {
-        removeLink(cfg.id)
-        showToast('Link deleted')
-      }
-    } else if (cfg.kind === 'delete-folder') {
+    if (cfg.kind === 'duplicate') handleDuplicateChoice(value)
+    else if (cfg.kind === 'delete-link') { if (value === 'confirm') { removeLink(cfg.id); showToast('Link deleted') } }
+    else if (cfg.kind === 'delete-folder') {
       if (value === 'confirm') {
         deleteFolder(cfg.id)
         moveLinksFromFolder(cfg.id)
-        // if filtered folder was deleted, reset filter
         if (filterFolder.value === cfg.id) filterFolder.value = ''
         showToast('Folder deleted')
       }
-    } else if (cfg.kind === 'anonymous-sync') {
-      handleAnonymousSyncChoice(value)
-    }
-    // 'import' kind is handled directly in requestImport() without dialog
+    } else if (cfg.kind === 'anonymous-sync') handleAnonymousSyncChoice(value)
   }
   closeDialog()
 }
 
-function handleEdit(id, patch) {
-  updateLink(id, patch)
-  showToast('Link updated')
+function handleEdit(id, patch) { updateLink(id, patch); showToast('Link updated') }
+
+function handleSetFolder(id, folderId) {
+  updateLink(id, { folderId })
+  showToast('Folder updated')
+}
+
+// Quick-action menu: Copy link and Share reuse one clipboard path (no second
+// clipboard abstraction). Share prefers the native share sheet when the
+// environment provides it, and falls back to copying the link.
+function linkUrl(id) {
+  const link = links.value.find((l) => l.id === id)
+  if (!link) return null
+  return { url: link.normalizedUrl || link.url, title: link.title || '' }
+}
+
+async function handleCopyLink(id) {
+  const target = linkUrl(id)
+  if (!target) return
+  try {
+    await navigator.clipboard.writeText(target.url)
+    showToast('Link copied')
+  } catch {
+    showToast('Could not copy the link')
+  }
+}
+
+async function handleShareLink(id) {
+  const target = linkUrl(id)
+  if (!target) return
+  if (typeof navigator.share === 'function') {
+    try {
+      await navigator.share({ title: target.title, url: target.url })
+      return
+    } catch (e) {
+      if (e && e.name === 'AbortError') return
+      // fall through to the copy fallback when sharing is unavailable
+    }
+  }
+  await handleCopyLink(id)
 }
 
 async function handleImportBackup(payload) {
-  // payload: { data: { links, folders }, strategy: 'skip'|'replace' }
-  // Import ONLY the bookmark and folder data. The Local Profile and the
-  // device-local appearance/color-scheme preferences are NOT overwritten.
   const { data, strategy = 'skip' } = payload
-  const { links, folders } = pickImportSlices(data)
-
-  // mergeLinks/mergeFolders are async now: an authenticated import queues the
-  // outbox mutations (create for new, update on the store-acknowledged base for
-  // replaced) and fires one syncNow before resolving, so an imported backup
-  // syncs exactly like a manually saved link instead of staying local-only.
-  const linkResult = await mergeLinks(links, strategy)
-  const folderResult = await mergeFolders(folders, strategy)
-
+  const { links: importedLinks, folders: importedFolders } = pickImportSlices(data)
+  const linkResult = await mergeLinks(importedLinks, strategy)
+  const folderResult = await mergeFolders(importedFolders, strategy)
   const parts = []
   if (linkResult.newCount) parts.push(`${linkResult.newCount} link${linkResult.newCount > 1 ? 's' : ''} added`)
   if (folderResult.newCount) parts.push(`${folderResult.newCount} folder${folderResult.newCount > 1 ? 's' : ''} added`)
   if (linkResult.replacedCount) parts.push(`${linkResult.replacedCount} link${linkResult.replacedCount > 1 ? 's' : ''} replaced`)
   if (folderResult.replacedCount) parts.push(`${folderResult.replacedCount} folder${folderResult.replacedCount > 1 ? 's' : ''} replaced`)
-
   showToast(parts.length ? `Import complete: ${parts.join(', ')}` : 'Import complete: no changes')
 }
 
-// Expected business errors (e.g. duplicate folder name) are reported to
-// FolderManager through a done callback carried on the event, instead of being
-// thrown through Vue's event system (which warns/handles dev and prod
-// differently). Unexpected programming errors still propagate so they are
-// never silently swallowed.
 function handleCreateFolder(name, done) {
-  try {
-    createFolder(name)
-    showToast('Folder created')
-    done({ ok: true })
-  } catch (e) {
-    showToast(e.message || 'Failed')
-    if (e.message === 'Folder already exists' || e.message === 'Folder name required') {
-      done({ ok: false, error: e.message })
-    } else {
-      throw e
-    }
-  }
+  try { createFolder(name); showToast('Folder created'); done({ ok: true }) }
+  catch (e) { showToast(e.message || 'Failed'); if (e.message === 'Folder already exists' || e.message === 'Folder name required') done({ ok: false, error: e.message }); else throw e }
 }
 function handleRenameFolder({ id, name }, done) {
-  try {
-    renameFolder(id, name)
-    showToast('Folder renamed')
-    done({ ok: true })
-  } catch (e) {
-    showToast(e.message || 'Failed')
-    if (e.message === 'Folder already exists' || e.message === 'Folder name required') {
-      done({ ok: false, error: e.message })
-    } else {
-      throw e
-    }
-  }
+  try { renameFolder(id, name); showToast('Folder renamed'); done({ ok: true }) }
+  catch (e) { showToast(e.message || 'Failed'); if (e.message === 'Folder already exists' || e.message === 'Folder name required') done({ ok: false, error: e.message }); else throw e }
 }
 
-// Cached display-order sort of the FULL collection. A Vue computed caches the
-// result and recomputes only when `links` or `sortBy` actually change — NOT on
-// search keystrokes. `sortLinks` yields a total deterministic order, so every
-// filtered subset below is implicitly in the correct order: filtering a sorted
-// collection is order-identical to sorting the filtered collection.
+// ---- Filtering / sorting ----
 const sortedLinks = computed(() => sortLinks(links.value, sortBy.value))
 
 const filteredLinks = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
-  // build folder name map for search
-  const folderNameById = new Map(folders.value.map(f=>[f.id, f.name]))
+  const folderNameById = new Map(folders.value.map(f => [f.id, f.name]))
   return sortedLinks.value.filter(l => {
     if (filterFolder.value) {
-      if (filterFolder.value === '__unfiled') {
-        if (l.folderId) return false
-      } else if (l.folderId !== filterFolder.value) return false
+      if (filterFolder.value === '__unfiled') { if (l.folderId) return false }
+      else if (l.folderId !== filterFolder.value) return false
     }
     if (filterCategory.value && l.category !== filterCategory.value) return false
     if (filterStatus.value) {
@@ -656,8 +578,8 @@ const filteredLinks = computed(() => {
       if (filterStatus.value === 'not-favorite' && l.favorite) return false
     }
     if (q) {
-      const folderName = l.folderId ? (folderNameById.get(l.folderId) || '') : 'Unfiled'
-      const hay = [l.title, l.normalizedUrl || l.url, l.originalUrl, l.domain, l.description, l.category, folderName, ...(l.tags || [])].join(' ').toLowerCase()
+      const fN = l.folderId ? (folderNameById.get(l.folderId) || '') : 'Unfiled'
+      const hay = [l.title, l.normalizedUrl || l.url, l.originalUrl, l.domain, l.description, l.category, fN, ...(l.tags || [])].join(' ').toLowerCase()
       if (!hay.includes(q)) return false
     }
     return true
@@ -665,30 +587,48 @@ const filteredLinks = computed(() => {
 })
 
 const hasLinks = computed(() => links.value.length > 0)
-
-// Empty-state differentiation: the three cases must tell the user WHY the list
-// is empty and what to do next (no links / search no-results / filter no-match).
 const hasSearch = computed(() => search.value.trim().length > 0)
 const hasFilters = computed(() => !!(filterCategory.value || filterStatus.value || filterFolder.value))
 const favoritesOnly = computed(() => filterStatus.value === 'favorite' && !hasSearch.value && !filterCategory.value && !filterFolder.value)
 
-function clearFilters() {
-  search.value = ''
-  filterCategory.value = ''
-  filterStatus.value = ''
-  filterFolder.value = ''
+function clearFilters() { search.value = ''; filterCategory.value = ''; filterStatus.value = ''; filterFolder.value = '' }
+
+// Pagination
+const ITEMS_PER_PAGE = 10
+const currentPage = ref(1)
+const totalPages = computed(() => Math.max(1, Math.ceil(filteredLinks.value.length / ITEMS_PER_PAGE)))
+const paginatedLinks = computed(() => {
+  const start = (currentPage.value - 1) * ITEMS_PER_PAGE
+  return filteredLinks.value.slice(start, start + ITEMS_PER_PAGE)
+})
+// Result-count label for the pagination footer. Uses the filtered result set
+// (pagination operates on filtered links) and the existing ITEMS_PER_PAGE.
+const paginationText = computed(() => paginationLabel(filteredLinks.value.length, currentPage.value, ITEMS_PER_PAGE))
+watch([search, filterCategory, filterStatus, filterFolder, sortBy], () => { currentPage.value = 1 })
+
+// Open link safely
+function openLink(link) {
+  const url = link.normalizedUrl || link.url
+  if (url) window.open(url, '_blank', 'noopener,noreferrer')
 }
 
-// Active-filter summary chips. Display-only: derived from the same refs the
-// selects/nav bind to, so the summary and the controls can never drift apart.
-// Each chip clears exactly its own constraint; "Clear all" reuses clearFilters.
-// The row lives in the sticky toolbar, so active filters stay visible (and
-// clearable) at every width — the empty state is no longer the only exit.
 const STATUS_OPTION_LABELS = { important: 'Important', 'must-have': 'Must Have', none: 'No status', favorite: 'Favorites', 'not-favorite': 'No favorite' }
+
+// Option lists for the shared dropdown (neutral menu; no native popup).
+const CATEGORY_OPTIONS = CATEGORIES.map((c) => ({ value: c, label: c }))
+const CATEGORY_FILTER_OPTIONS = [{ value: '', label: 'Categories' }, ...CATEGORY_OPTIONS]
+const STATUS_FILTER_OPTIONS = [
+  { value: '', label: 'Status' },
+  { value: 'important', label: 'Important' },
+  { value: 'must-have', label: 'Must Have' },
+  { value: 'none', label: 'No status' },
+  { value: 'favorite', label: 'Favorites' },
+  { value: 'not-favorite', label: 'No favorite' },
+]
 const activeFilterChips = computed(() => {
   const chips = []
   const q = search.value.trim()
-  if (q) chips.push({ key: 'search', label: `Search: “${q}”`, clear: () => { search.value = '' } })
+  if (q) chips.push({ key: 'search', label: `Search: "${q}"`, clear: () => { search.value = '' } })
   if (filterStatus.value) chips.push({ key: 'status', label: `Status: ${STATUS_OPTION_LABELS[filterStatus.value] || filterStatus.value}`, clear: () => { filterStatus.value = '' } })
   if (filterCategory.value) chips.push({ key: 'category', label: `Category: ${filterCategory.value}`, clear: () => { filterCategory.value = '' } })
   if (filterFolder.value) {
@@ -697,39 +637,147 @@ const activeFilterChips = computed(() => {
   }
   return chips
 })
+
+// Mobile progressive disclosure for the secondary sort/filter controls. The
+// three existing AppSelects (and their state above) stay the single source of
+// these values — this only controls when the toolbar surfaces them: inline on
+// desktop/tablet, behind one compact trigger below the breakpoint.
+const sortFilterOpen = ref(false)
+const sortFilterTriggerEl = ref(null)
+const sortFilterEl = ref(null)
+// Derived from the existing state (no new filtering model): a non-default sort
+// or any active filter chip marks the trigger.
+const hasActiveSortFilter = computed(() => activeFilterChips.value.length > 0 || sortBy.value !== DEFAULT_SORT)
+
+function closeSortFilter(restoreFocus = false) {
+  sortFilterOpen.value = false
+  if (restoreFocus) sortFilterTriggerEl.value?.focus()
+}
+
+useAnchoredPopover({
+  trigger: sortFilterTriggerEl,
+  popover: sortFilterEl,
+  isOpen: sortFilterOpen,
+  onOutside: () => { sortFilterOpen.value = false },
+})
+
+onBeforeUnmount(() => {
+  authUnsubscribe?.()
+  document.body.classList.remove('sidebar-minimized')
+  stopSyncPolling()
+  clearTimeout(searchTimer)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
+})
 </script>
 
 <template>
   <div class="app">
-    <header class="topbar">
-      <div class="topbar-inner">
-        <div class="brand">
-          <img src="/logo.png" class="logo-img" alt="Save Links logo" />
-          <div>
-            <div class="brand-title">Save Links</div>
-            <div class="brand-sub">Local-first bookmark manager</div>
-          </div>
+<!-- Mobile sidebar overlay -->
+    <div
+      class="sidebar-overlay"
+      :class="{ show: sidebarOpen }"
+      @click="sidebarOpen = false"
+      aria-hidden="true"
+    />
+
+    <!-- Sidebar -->
+    <aside class="sidebar-wrapper" id="sidebar" :class="{ show: sidebarOpen }">
+      <a href="#" class="sidebar-brand" @click.prevent="go('links')">
+        <img src="/logo.png" alt="Save Links logo" width="30" height="30" />
+        <span>Save Links</span>
+      </a>
+
+      <div class="flex-grow-1 overflow-y-auto">
+        <!-- Group: Menu -->
+        <div class="sidebar-menu-section">
+          <div class="sidebar-menu-title">Menu</div>
+          <ul class="sidebar-menu-list">
+            <li class="sidebar-menu-item">
+              <a href="#" class="sidebar-menu-link" :class="{ active: currentView === 'links' }" @click.prevent="go('links')">
+                <i class="bi bi-bookmarks"></i>
+                <span>Saved links</span>
+                <span class="sidebar-menu-badge">{{ total }}</span>
+              </a>
+            </li>
+            <li class="sidebar-menu-item">
+              <a href="#" class="sidebar-menu-link" :class="{ active: currentView === 'folders' }" @click.prevent="go('folders')">
+                <i class="bi bi-folder2"></i>
+                <span>Folders</span>
+                <span v-if="folders.length" class="sidebar-menu-badge">{{ folders.length }}</span>
+              </a>
+            </li>
+          </ul>
         </div>
-<div class="top-actions">
-          <span class="pill-count">{{ total }} links</span>
-          <button type="button" class="nav-toggle" :aria-expanded="activeDrawer === 'folders'" aria-controls="nav-col" aria-label="Toggle folders navigation" @click="toggleDrawer('folders')">
-            <svg class="toggle-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18" /></svg>
-            <span>Folders</span>
-            <span v-if="navView !== 'all'" class="toggle-badge" aria-hidden="true"></span>
+
+        <!-- Group: Tools -->
+        <div class="sidebar-menu-section">
+          <div class="sidebar-menu-title">Tools</div>
+          <ul class="sidebar-menu-list">
+            <li class="sidebar-menu-item">
+              <a href="#" class="sidebar-menu-link" :class="{ active: currentView === 'backup' }" @click.prevent="go('backup')">
+                <i class="bi bi-arrow-repeat"></i>
+                <span>Backup & restore</span>
+              </a>
+            </li>
+            <li class="sidebar-menu-item">
+              <a href="#" class="sidebar-menu-link" :class="{ active: currentView === 'settings' }" @click.prevent="go('settings')">
+                <i class="bi bi-gear"></i>
+                <span>Settings</span>
+              </a>
+            </li>
+            <li class="sidebar-menu-item">
+              <a href="#" class="sidebar-menu-link" :class="{ active: currentView === 'about' }" @click.prevent="go('about')">
+                <i class="bi bi-info-circle"></i>
+                <span>About</span>
+              </a>
+            </li>
+          </ul>
+        </div>
+      </div>
+
+    </aside>
+
+    <!-- Main wrapper -->
+    <div class="main-wrapper">
+      <!-- Navbar -->
+      <nav class="navbar-custom" :class="{ 'is-searching': searchOpen }">
+        <div class="navbar-left">
+          <a href="#" class="mobile-brand" @click.prevent="go('links')">
+            <img src="/logo.png" alt="" width="26" height="26" />
+            <span>Save Links</span>
+          </a>
+          <button type="button" class="btn-desktop-toggle d-none d-xl-flex align-items-center justify-content-center me-3" id="desktop-sidebar-toggle" aria-label="Minimize sidebar" @click="toggleSidebarMinimized">
+            <i class="bi bi-chevron-bar-left" :class="{ 'bi-chevron-bar-right': sidebarMinimized }"></i>
           </button>
-          <button type="button" class="util-toggle" :aria-expanded="activeDrawer === 'filters'" aria-controls="side-col" aria-label="Toggle filters and tools" @click="toggleDrawer('filters')">
-            <svg class="toggle-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h8m4 0h4M4 12h4m4 0h8M4 18h8m4 0h4" /><circle cx="14" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="14" cy="18" r="2"/></svg>
-            <span class="util-toggle-name">Filters & tools</span>
-            <span v-if="filterCategory || filterStatus" class="toggle-badge" aria-hidden="true"></span>
+          <button type="button" class="sidebar-toggle-btn me-2" id="sidebar-toggle" aria-label="Toggle navigation" @click="sidebarOpen = !sidebarOpen">
+            <i class="bi bi-list"></i>
+          </button>
+        </div>
+
+        <!-- Mid navbar: search pill -->
+        <div class="navbar-search-wrapper" id="main-search">
+          <input ref="searchInputEl" type="search" class="navbar-search-input" placeholder="Search links…" aria-label="Search links" aria-keyshortcuts="Control+K Meta+K" :value="search" @input="search = $event.target.value" @keydown.esc.prevent="closeSearch(true)" @blur="onSearchBlur" />
+          <button v-if="search" type="button" class="navbar-search-btn" aria-label="Clear search" @click="search = ''"><i class="bi bi-x-lg"></i></button>
+          <button v-else type="button" class="navbar-search-btn" :aria-label="searchOpen ? 'Close search' : null" :aria-hidden="searchOpen ? null : 'true'" :tabindex="searchOpen ? null : '-1'" @click="searchOpen && closeSearch(true)"><i class="bi" :class="searchOpen ? 'bi-x-lg' : 'bi-search'"></i></button>
+          <kbd class="navbar-search-kbd" aria-hidden="true">{{ searchShortcutLabel }}</kbd>
+        </div>
+
+        <!-- Right actions -->
+        <div class="navbar-actions">
+          <button ref="searchToggleEl" type="button" class="navbar-search-toggle" aria-label="Search" aria-controls="main-search" :aria-expanded="String(searchOpen)" @click="openSearch">
+            <i class="bi bi-search"></i>
+          </button>
+          <button type="button" class="navbar-action-btn me-1" id="btn-fullscreen" aria-label="Toggle Fullscreen" @click="toggleFullscreen">
+            <i class="bi bi-arrows-fullscreen"></i>
           </button>
           <button
             type="button"
             class="identity-btn"
             :aria-expanded="accountOpen"
-            :aria-label="authState.status === 'authenticated' ? 'Account menu, signed in as ' + profile.name : 'Account menu, sign in' "
+            :aria-label="authState.status === 'authenticated' ? 'Account menu, signed in as ' + profile.name : 'Account menu, sign in'"
             @click="toggleAccount"
           >
-            <div class="identity-avatar">{{ profile.name.trim().split(/\s+/).filter(Boolean).map(s => s[0]).join('').slice(0, 2).toUpperCase() || 'L' }}</div>
+            <div class="identity-avatar">{{ initials }}</div>
             <div class="identity-info">
               <div class="identity-name">{{ profile.name }}</div>
               <div class="identity-status">
@@ -739,171 +787,338 @@ const activeFilterChips = computed(() => {
             </div>
           </button>
         </div>
-      </div>
-    </header>
+      </nav>
 
-    <div class="layout" :class="{ 'nav-open': activeDrawer === 'folders', 'util-open': activeDrawer === 'filters' }">
-      <Transition name="fade">
-        <div v-if="activeDrawer === 'folders'" class="nav-backdrop" @click="activeDrawer = null" aria-hidden="true"></div>
-      </Transition>
-      <Transition name="fade">
-        <div v-if="activeDrawer === 'filters'" class="util-backdrop" @click="activeDrawer = null" aria-hidden="true"></div>
-      </Transition>
-
-      <div id="nav-col" class="nav-col">
-        <FolderManager :folders="folders" :links="links" :active-view="navView" @create="handleCreateFolder" @rename="handleRenameFolder" @delete="requestDeleteFolder" @select="handleSelectFolder" />
-        <div class="nav-divider" role="separator" aria-hidden="true"></div>
-        <SettingsPanel :appearance="appearance" :color-scheme="colorScheme" @update:appearance="setAppearance" @update:color-scheme="setColorScheme" />
-      </div>
-
-      <div class="main-col">
-        <AddLink ref="addLinkEl" :folders="folders" @add="handleAdd" />
-
-        <div class="content-head">
-          <h2>Saved links</h2>
-          <span class="head-count">{{ filteredLinks.length }} {{ filteredLinks.length === 1 ? 'link' : 'links' }}</span>
-          <div class="search-wrap">
-            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
-            <label for="filter-search" class="sr-only">Search</label>
-            <input id="filter-search" :value="search" @input="search = $event.target.value" placeholder="Search title, URL, domain, tags…" class="search-input" aria-label="Search links" />
-            <button v-if="search" class="clear" @click="search = ''" aria-label="Clear search">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
-            </button>
-          </div>
-          <div class="view-switch" role="group" aria-label="View mode">
-            <button
-              v-for="m in VIEW_MODES"
-              :key="m"
-              type="button"
-              class="view-btn"
-              :class="{ active: viewMode === m }"
-              :aria-pressed="String(viewMode === m)"
-              :title="VIEW_MODE_LABELS[m] + ' view'"
-              @click="setViewMode(m)"
-            >
-              <svg class="view-icon" viewBox="0 0 24 24" aria-hidden="true">
-                <g v-if="m === 'card'">
-                  <rect x="3" y="3" width="7.5" height="7.5" rx="1.5" />
-                  <rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5" />
-                  <rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5" />
-                  <rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5" />
-                </g>
-                <g v-else-if="m === 'list'">
-                  <rect x="3" y="5" width="18" height="4" rx="1.5" />
-                  <rect x="3" y="10" width="18" height="4" rx="1.5" />
-                  <rect x="3" y="15" width="18" height="4" rx="1.5" />
-                </g>
-                <g v-else>
-                  <path d="M5 6.5h14M5 12h14M5 17.5h14" />
-                </g>
-              </svg>
-              <span class="view-label">{{ VIEW_MODE_LABELS[m] }}</span>
-            </button>
-          </div>
-          <label for="filter-status" class="sr-only">Filter by status</label>
-          <select id="filter-status" :value="filterStatus" @change="filterStatus = $event.target.value" class="header-status" aria-label="Filter by status">
-            <option value="">All status</option>
-            <option value="important">Important</option>
-            <option value="must-have">Must Have</option>
-            <option value="none">No status</option>
-            <option value="favorite">Favorites</option>
-            <option value="not-favorite">No favorite</option>
-          </select>
-          <button type="button" class="toolbar-add" aria-label="Add link" title="Add link" @click="openAddLink">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-          </button>
-          <div v-if="activeFilterChips.length" class="filter-chips" role="group" aria-label="Active filters">
-            <span v-for="chip in activeFilterChips" :key="chip.key" class="filter-chip">
-              {{ chip.label }}
-              <button type="button" class="chip-clear" :aria-label="'Clear ' + chip.key + ' filter'" title="Remove this filter" @click="chip.clear()">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
-              </button>
-            </span>
-            <button v-if="activeFilterChips.length > 1" type="button" class="chip-clear-all" @click="clearFilters">Clear all</button>
-          </div>
+      <!-- Page Header -->
+      <div class="page-header">
+        <div>
+          <h1 class="page-title">{{ pageTitle }}</h1>
+          <p class="page-subtitle">{{ pageSubtitle }}</p>
         </div>
-
-        <div v-if="!hasLinks" class="empty-state">
-          <div class="empty-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M12 5c-2-1.5-5-2-8-2v14c3 0 6 .5 8 2 2-1.5 5-2 8-2V3c-3 0-6 .5-8 2z"/><path d="M12 5v14"/></svg>
-          </div>
-          <h3>No links yet</h3>
-          <p>Paste a URL above to save your first bookmark. Metadata is auto-detected and fully editable.</p>
-          <div class="example-tags">Try: youtube.com, github.com, instagram.com, amazon.com</div>
-        </div>
-
-        <div v-else-if="filteredLinks.length === 0" class="empty-state">
-          <div class="empty-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-          </div>
-          <h3>{{ favoritesOnly ? 'No favorites yet' : hasSearch ? 'No results' : 'No matches' }}</h3>
-          <p v-if="favoritesOnly">Star any link to pin it here as a favorite.</p>
-          <p v-else-if="hasSearch">Nothing matches “{{ search.trim() }}” in the current view. Try a different search{{ hasFilters ? ' or loosen your filters' : '' }}.</p>
-          <p v-else>No links match the current filters. Try widening them.</p>
-          <button v-if="favoritesOnly" class="btn ghost" @click="filterStatus = ''">Show all links</button>
-          <button v-else-if="hasSearch" class="btn ghost" @click="clearFilters">Clear search{{ hasFilters ? ' and filters' : '' }}</button>
-          <button v-else class="btn ghost" @click="clearFilters">Clear filters</button>
-        </div>
-
-        <template v-else>
-          <div v-if="viewMode === 'card'" class="grid">
-            <LinkCard
-              v-for="link in filteredLinks"
-              :key="link.id"
-              :link="link"
-              :folders="folders"
-              @toggle-important="toggleImportant"
-              @toggle-must-have="toggleMustHave"
-              @toggle-favorite="toggleFavorite"
-              @set-status="setStatus"
-              @delete="requestDeleteLink"
-              @edit="handleEdit"
-              @set-folder="handleSetFolder"
-            />
-          </div>
-          <div v-else class="row-list" :class="{ compact: viewMode === 'compact' }">
-            <LinkRow
-              v-for="link in filteredLinks"
-              :key="link.id"
-              :link="link"
-              :folders="folders"
-              :mode="viewMode"
-              @toggle-important="toggleImportant"
-              @toggle-must-have="toggleMustHave"
-              @toggle-favorite="toggleFavorite"
-              @set-status="setStatus"
-              @delete="requestDeleteLink"
-              @edit="handleEdit"
-              @set-folder="handleSetFolder"
-            />
-          </div>
-        </template>
+        <button type="button" class="btn-date-picker" @click="openAddLink($event.currentTarget)">
+          <i class="bi bi-plus-lg"></i>
+          <span>Add link</span>
+        </button>
       </div>
 
-      <div id="side-col" class="side-col">
-        <DataBackup :links="links" :profile="profile" :folders="folders" :appearance="appearance" :color-scheme="colorScheme" @import-request="requestImport" @show-toast="showToast" />
-        <SearchFilter
-          v-model:category="filterCategory"
-          v-model:folder="filterFolder"
-          v-model:sort="sortBy"
-          :folders="folders"
-          :sort-options="SORT_OPTIONS"
-        />
-        <StatsPanel
-          :total="total"
-          :by-category="byCategory"
-          :important-count="importantCount"
-          :must-have-count="mustHaveCount"
-          :favorite-count="favoriteCount"
-        />
-        <About />
-      </div>
+      <!-- Main Content -->
+      <main class="flex-grow-1">
+
+        <!-- ===== VIEW: Saved Links ===== -->
+        <section v-if="currentView === 'links'" class="links-view">
+          <!-- One unified panel: toolbar header, link content, pagination footer -->
+          <div class="links-panel">
+          <!-- Toolbar: "Save a Link" on the left, view/sort/filter/export on the right -->
+          <div class="content-head">
+            <AddLink ref="addLinkEl" :folders="folders" @add="handleAdd" />
+            <template v-if="hasLinks">
+              <div class="toolbar-controls">
+                <div class="view-switch" role="group" aria-label="View mode">
+                  <button
+                    v-for="m in VIEW_MODES"
+                    :key="m"
+                    type="button"
+                    class="view-btn"
+                    :class="{ active: viewMode === m }"
+                    :aria-pressed="String(viewMode === m)"
+                    :title="VIEW_MODE_LABELS[m] + ' view'"
+                    @click="setViewMode(m)"
+                  >
+                    <svg class="view-icon" viewBox="0 0 24 24" aria-hidden="true">
+                      <g v-if="m === 'card'">
+                        <rect x="3" y="3" width="7.5" height="7.5" rx="1.5" />
+                        <rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5" />
+                        <rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5" />
+                        <rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5" />
+                      </g>
+                      <g v-else-if="m === 'list'">
+                        <rect x="3" y="5" width="18" height="4" rx="1.5" />
+                        <rect x="3" y="10" width="18" height="4" rx="1.5" />
+                        <rect x="3" y="15" width="18" height="4" rx="1.5" />
+                      </g>
+                      <g v-else>
+                        <path d="M5 6.5h14M5 12h14M5 17.5h14" />
+                      </g>
+                    </svg>
+                    <span class="view-label">{{ VIEW_MODE_LABELS[m] }}</span>
+                  </button>
+                </div>
+                <button
+                  ref="sortFilterTriggerEl"
+                  type="button"
+                  class="sort-filter-toggle"
+                  :class="{ active: hasActiveSortFilter }"
+                  aria-controls="sort-filter-panel"
+                  :aria-expanded="String(sortFilterOpen)"
+                  @click="sortFilterOpen = !sortFilterOpen"
+                  @keydown.esc="closeSortFilter(true)"
+                >
+                  <i class="bi bi-sliders" aria-hidden="true"></i>
+                  <span>Sort &amp; Filter</span>
+                </button>
+                <div
+                  id="sort-filter-panel"
+                  ref="sortFilterEl"
+                  class="toolbar-filters anchored-popover"
+                  :class="{ open: sortFilterOpen }"
+                  @keydown.esc="closeSortFilter(true)"
+                >
+                  <div class="filter-field">
+                    <span class="filter-field-label">Sort</span>
+                    <AppSelect
+                      id="filter-sort"
+                      variant="header"
+                      aria-label="Sort by"
+                      :model-value="sortBy"
+                      :options="SORT_OPTIONS"
+                      @update:model-value="sortBy = $event"
+                    />
+                  </div>
+                  <div class="filter-field">
+                    <span class="filter-field-label">Category</span>
+                    <AppSelect
+                      id="filter-category"
+                      variant="header"
+                      aria-label="Filter by category"
+                      :model-value="filterCategory"
+                      :options="CATEGORY_FILTER_OPTIONS"
+                      @update:model-value="filterCategory = $event"
+                    />
+                  </div>
+                  <div class="filter-field">
+                    <span class="filter-field-label">Status</span>
+                    <label for="filter-status" class="sr-only">Filter by status</label>
+                    <AppSelect
+                      id="filter-status"
+                      variant="header"
+                      aria-label="Filter by status"
+                      :model-value="filterStatus"
+                      :options="STATUS_FILTER_OPTIONS"
+                      @update:model-value="filterStatus = $event"
+                    />
+                  </div>
+                </div>
+                <button type="button" class="toolbar-add toolbar-export" aria-label="Export links" @click="go('backup')">
+                  <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i>
+                  <span>Export</span>
+                </button>
+              </div>
+              <div v-if="activeFilterChips.length" class="filter-chips" role="group" aria-label="Active filters">
+                <span v-for="chip in activeFilterChips" :key="chip.key" class="filter-chip">
+                  {{ chip.label }}
+                  <button type="button" class="chip-clear" :aria-label="'Clear ' + chip.key + ' filter'" title="Remove this filter" @click="chip.clear()">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+                  </button>
+                </span>
+                <button v-if="activeFilterChips.length > 1" type="button" class="chip-clear-all" @click="clearFilters">Clear all</button>
+              </div>
+            </template>
+          </div>
+
+          <!-- Link content -->
+          <div class="links-content">
+          <!-- Old Saved Links content section (hybrid: old link presentation + current pagination) -->
+          <template v-if="hasLinks">
+            <!-- Empty state: no matches -->
+            <div v-if="filteredLinks.length === 0" class="empty-state">
+              <div class="empty-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+              </div>
+              <h3>{{ favoritesOnly ? 'No favorites yet' : hasSearch ? 'No results' : 'No matches' }}</h3>
+              <p v-if="favoritesOnly">Star any link to pin it here as a favorite.</p>
+              <p v-else-if="hasSearch">Nothing matches "{{ search.trim() }}" in the current view. Try a different search{{ hasFilters ? ' or loosen your filters' : '' }}.</p>
+              <p v-else>No links match the current filters. Try widening them.</p>
+              <button v-if="favoritesOnly" class="btn ghost" @click="filterStatus = ''">Show all links</button>
+              <button v-else-if="hasSearch" class="btn ghost" @click="clearFilters">Clear search{{ hasFilters ? ' and filters' : '' }}</button>
+              <button v-else class="btn ghost" @click="clearFilters">Clear filters</button>
+            </div>
+
+            <!-- Old link list -->
+            <template v-else>
+              <div v-if="viewMode === 'card'" class="grid">
+                <LinkCard
+                  v-for="link in paginatedLinks"
+                  :key="link.id"
+                  :link="link"
+                  :folders="folders"
+                  @toggle-important="toggleImportant"
+                  @toggle-must-have="toggleMustHave"
+                  @toggle-favorite="toggleFavorite"
+                  @set-status="setStatus"
+                  @delete="requestDeleteLink"
+                  @edit="handleEdit"
+                  @set-folder="handleSetFolder"
+                  @copy="handleCopyLink"
+                  @share="handleShareLink"
+                />
+              </div>
+              <div v-else class="row-list" :class="{ compact: viewMode === 'compact' }">
+                <LinkRow
+                  v-for="link in paginatedLinks"
+                  :key="link.id"
+                  :link="link"
+                  :folders="folders"
+                  :mode="viewMode"
+                  @toggle-important="toggleImportant"
+                  @toggle-must-have="toggleMustHave"
+                  @toggle-favorite="toggleFavorite"
+                  @set-status="setStatus"
+                  @delete="requestDeleteLink"
+                  @edit="handleEdit"
+                  @set-folder="handleSetFolder"
+                  @copy="handleCopyLink"
+                  @share="handleShareLink"
+                />
+              </div>
+            </template>
+          </template>
+
+          <!-- Empty state: no links at all -->
+          <div v-else class="empty-state">
+            <div class="empty-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M12 5c-2-1.5-5-2-8-2v14c3 0 6 .5 8 2 2-1.5 5-2 8-2V3c-3 0-6 .5-8 2z"/><path d="M12 5v14"/></svg>
+            </div>
+            <h3>No links yet</h3>
+            <p>Paste a URL above to save your first bookmark. Metadata is auto-detected and fully editable.</p>
+            <div class="example-tags">Try: youtube.com, github.com, instagram.com, amazon.com</div>
+          </div>
+          </div>
+
+          <!-- Pagination footer -->
+          <div class="table-footer-control">
+            <span class="table-pagination-info">{{ paginationText }}</span>
+            <nav v-if="totalPages > 1" aria-label="Page navigation">
+              <ul class="pagination mb-0 gap-1">
+                <li class="page-item" :class="{ disabled: currentPage === 1 }">
+                  <a class="page-link border-0" href="#" aria-label="Previous page" @click.prevent="currentPage = Math.max(1, currentPage - 1)"><i class="bi bi-chevron-left"></i></a>
+                </li>
+                <li v-for="p in totalPages" :key="p" class="page-item" :class="{ active: p === currentPage }">
+                  <a class="page-link border-0" href="#" :aria-label="'Page ' + p" :aria-current="p === currentPage ? 'page' : undefined" @click.prevent="currentPage = p">{{ p }}</a>
+                </li>
+                <li class="page-item" :class="{ disabled: currentPage === totalPages }">
+                  <a class="page-link border-0" href="#" aria-label="Next page" @click.prevent="currentPage = Math.min(totalPages, currentPage + 1)"><i class="bi bi-chevron-right"></i></a>
+                </li>
+              </ul>
+            </nav>
+          </div>
+          </div>
+        </section>
+
+        <!-- ===== VIEW: Folders ===== -->
+        <section v-else-if="currentView === 'folders'" class="card">
+          <FolderManager
+            :folders="folders"
+            :links="links"
+            :active-view="navView"
+            @create="handleCreateFolder"
+            @rename="handleRenameFolder"
+            @delete="requestDeleteFolder"
+            @select="handleSelectFolder"
+          />
+        </section>
+
+        <!-- ===== VIEW: Backup ===== -->
+        <section v-else-if="currentView === 'backup'" class="card">
+          <DataBackup :links="links" :profile="profile" :folders="folders" :appearance="appearance" :color-scheme="colorScheme" @import-request="requestImport" @show-toast="showToast" />
+        </section>
+
+        <!-- ===== VIEW: Settings ===== -->
+        <section v-else-if="currentView === 'settings'" class="card">
+          <SettingsPanel :appearance="appearance" :color-scheme="colorScheme" @update:appearance="setAppearance" @update:color-scheme="setColorScheme" />
+        </section>
+
+        <!-- ===== VIEW: About ===== -->
+        <section v-else-if="currentView === 'about'" class="card">
+          <About />
+        </section>
+
+      </main>
+
+      <footer class="footer">
+        <span class="footer-tagline">Local-first bookmark manager</span>
+        <span class="footer-meta">Sign in to sync across devices &middot; v{{ appVersion }}</span>
+      </footer>
     </div>
 
-    <Transition name="toast">
-      <div v-if="toast" class="toast" role="status" aria-live="polite">{{ toast }}</div>
-    </Transition>
+    <!-- Mobile bottom navigation: the primary destinations of the mobile shell
+         (Links · Folders · Add · More), hidden above the mobile breakpoint by CSS.
+         Every item routes through the existing go() / openAddLink() state — the
+         bar is another entry point, not a second navigation system. -->
+    <nav class="bottom-nav" aria-label="Primary">
+      <button
+        type="button"
+        class="bottom-nav-item"
+        :class="{ active: currentView === 'links' }"
+        :aria-current="currentView === 'links' ? 'page' : null"
+        @click="go('links')"
+      >
+        <i class="bi bi-bookmarks" aria-hidden="true"></i>
+        <span>Links</span>
+      </button>
+      <button
+        type="button"
+        class="bottom-nav-item"
+        :class="{ active: currentView === 'folders' }"
+        :aria-current="currentView === 'folders' ? 'page' : null"
+        @click="go('folders')"
+      >
+        <i class="bi bi-folder2" aria-hidden="true"></i>
+        <span>Folders</span>
+      </button>
+      <button type="button" class="bottom-nav-item" @click="openAddLink($event.currentTarget)">
+        <i class="bi bi-plus-lg" aria-hidden="true"></i>
+        <span>Add</span>
+      </button>
+      <button
+        type="button"
+        ref="moreTriggerEl"
+        class="bottom-nav-item"
+        :class="{ active: moreActive }"
+        aria-controls="more-menu"
+        :aria-expanded="String(moreOpen)"
+        @click="toggleMore"
+        @keydown.esc="closeMoreFromKey"
+      >
+        <i class="bi bi-three-dots" aria-hidden="true"></i>
+        <span>More</span>
+      </button>
+    </nav>
 
+    <!-- More menu: the secondary destinations (the sidebar's "Tools" group),
+         anchored to the More item by src/utils/anchoredPopover.js. -->
+    <Teleport to="body">
+      <Transition name="fade-down">
+        <div v-if="moreOpen" id="more-menu" ref="moreMenuEl" class="more-menu anchored-popover" @keydown.esc="closeMoreFromKey">
+          <button type="button" class="more-item" :class="{ active: currentView === 'settings' }" @click="go('settings')">
+            <i class="bi bi-gear" aria-hidden="true"></i>
+            <span>Settings</span>
+          </button>
+          <button type="button" class="more-item" :class="{ active: currentView === 'backup' }" @click="go('backup')">
+            <i class="bi bi-arrow-repeat" aria-hidden="true"></i>
+            <span>Backup &amp; restore</span>
+          </button>
+          <button type="button" class="more-item" :class="{ active: currentView === 'about' }" @click="go('about')">
+            <i class="bi bi-info-circle" aria-hidden="true"></i>
+            <span>About</span>
+          </button>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <!-- ===== Panels & Dialog ===== -->
+    <AccountPanel
+      :open="accountOpen"
+      :local-profile="profile"
+      @close="closeAccountPanel"
+      @edit-local-profile="openLocalProfile"
+    />
+    <LocalProfilePanel
+      :open="localProfileOpen"
+      :name="profile.name"
+      :bio="profile.bio"
+      @save="saveLocalProfile"
+      @close="closeLocalProfile"
+    />
     <AppDialog
       :open="!!dialog"
       :title="dialog?.title || ''"
@@ -913,307 +1128,235 @@ const activeFilterChips = computed(() => {
       @close="closeDialog"
     />
 
-    <AccountPanel
-      :open="accountOpen"
-      :local-profile="profile"
-      @close="accountOpen = false"
-      @edit-local-profile="openLocalProfile"
-    />
-
-    <LocalProfilePanel
-      :open="localProfileOpen"
-      :name="profile.name"
-      :bio="profile.bio"
-      @save="saveLocalProfile"
-      @close="closeLocalProfile"
-    />
-
-    <footer class="footer">Local-first bookmark manager • Sign in to sync across devices • v{{ appVersion }}</footer>
+    <!-- Toast -->
+    <Transition name="toast">
+      <div v-if="toast" class="sl-toast" role="status" aria-live="polite">{{ toast }}</div>
+    </Transition>
   </div>
 </template>
 
 <style scoped>
-.app { min-height: 100vh; display: flex; flex-direction: column; }
-.topbar {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  background: var(--card);
-  border-bottom: 1px solid var(--border);
+.app {
+  min-height: 100vh;
+  min-height: 100dvh;
 }
-.topbar-inner {
-  max-width: 1600px;
-  margin: 0 auto;
-  padding: 12px 20px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.brand { display: flex; gap: 12px; align-items: center; }
-.logo-img {
-  height: 40px;
-  width: auto;
-  flex-shrink: 0;
-  display: block;
-}
-.brand-title { font-weight: 800; color: var(--text-h); line-height: 1; letter-spacing: -0.015em; }
-.brand-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
-.top-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
-.pill-count {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--muted);
-  background: var(--muted-bg);
-  border: 1px solid var(--border);
-  padding: 6px 10px;
-  border-radius: 999px;
-}
-.layout {
-  max-width: 1600px;
-  width: 100%;
-  margin: 0 auto;
-  padding: 20px;
-  display: grid;
-  grid-template-columns: 240px minmax(0, 1fr) 280px;
-  gap: 20px;
-  flex: 1;
-  align-items: start;
-}
-.nav-col {
-  min-width: 0;
-  position: sticky;
-  top: 76px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.nav-divider { border-top: 1px solid var(--border); margin: 4px 0; }
-.side-col {
-  min-width: 0;
-  position: sticky;
-  top: 76px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-.nav-toggle, .util-toggle {
-  display: none;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text-h);
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 8px 12px;
-  cursor: pointer;
-}
-.toggle-icon { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.nav-toggle:hover, .util-toggle:hover { border-color: var(--accent-border); }
-.nav-toggle[aria-expanded="true"], .util-toggle[aria-expanded="true"] { background: var(--accent-bg); border-color: var(--accent-border); color: var(--accent); }
-.account-toggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  padding: 0;
-  color: var(--text-h);
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: all 0.15s;
-}
-.account-toggle:hover { border-color: var(--accent-border); }
-.account-toggle[aria-expanded="true"] { background: var(--accent-bg); border-color: var(--accent-border); color: var(--accent); }
-.account-icon { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 
-/* Unified identity button */
+/* Intentional reading width: page header, content and footer stay centered on
+   very wide monitors instead of stretching edge to edge. */
+.main-wrapper > .page-header,
+.main-wrapper > main,
+.main-wrapper > .footer {
+  width: 100%;
+  max-width: 1560px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* Footer: subtle shell chrome (not a floating card) */
+.footer {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 2.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+.footer-tagline { font-size: 12.5px; font-weight: var(--weight-semibold); color: var(--text-h); }
+.footer-meta { color: var(--muted); }
+
+/* Header profile control (from db93ded) */
 .identity-btn {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  padding: 6px 10px 6px 8px;
-  background: var(--card);
-  border: 1px solid var(--border);
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-2);
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 0.15s;
+  transition: background var(--transition-fast);
   color: var(--text-h);
 }
-.identity-btn:hover { background: var(--muted-bg); border-color: var(--accent-border); }
-.identity-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.identity-btn:hover { background: var(--muted-bg); }
+.identity-btn:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 2px; }
 .identity-avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 999px;
-  background: var(--accent);
-  color: var(--on-accent);
+  width: var(--control-height-sm);
+  height: var(--control-height-sm);
+  border-radius: var(--radius-full);
+  background: var(--muted-bg);
+  color: var(--text-h);
   display: grid;
   place-items: center;
-  font-weight: 700;
-  font-size: 12px;
+  font-weight: var(--weight-bold);
+  font-size: var(--text-xs);
   flex-shrink: 0;
 }
 .identity-info { display: flex; flex-direction: column; min-width: 0; }
-.identity-name { font-weight: 700; font-size: 13px; color: var(--text-h); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.identity-status { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; color: var(--muted); }
+.identity-name { font-weight: var(--weight-bold); font-size: var(--text-sm); color: var(--text-h); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.identity-status { display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--text-xs); font-weight: var(--weight-semibold); color: var(--muted); }
 .identity-status .status-dot {
   width: 8px;
   height: 8px;
-  border-radius: 999px;
-  background: var(--success, #22c55e);
+  border-radius: var(--radius-full);
+  background: var(--success);
   flex-shrink: 0;
 }
-.identity-status.signed-out .status-dot {
-  background: var(--muted);
-}
-.nav-backdrop, .util-backdrop {
-  position: fixed; inset: 0; z-index: 9;
-  background: rgba(15, 23, 42, 0.4);
-}
-.fade-enter-active, .fade-leave-active { transition: opacity .2s ease; }
-.fade-enter-from, .fade-leave-to { opacity: 0; }
-.main-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-/* Saved Links toolbar: sticky below the topbar so Search / Add / view mode /
-   status stay reachable while scrolling a long library. Opaque band, same
-   tokens as the header; only this control area pins, never the rows. */
-.content-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
+
+/* Unified Saved Links panel: toolbar header + link content + pagination footer
+   in ONE surface. The items inside carry the only chrome, so the panel itself
+   stays a flat bordered surface (no second elevation layer to nest with). */
+.links-panel {
   margin-top: 4px;
-  position: sticky;
-  top: 76px; /* below the sticky topbar; matches the nav/side columns */
-  z-index: 8; /* above list rows, below topbar(10) and drawers(30) */
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 10px 14px;
+  overflow: hidden;
 }
-.content-head h2 { margin: 0; font-size: 20px; font-weight: 800; color: var(--text-h); white-space: nowrap; letter-spacing: -0.02em; }
-.search-wrap {
-  flex: 1 1 200px;
-  min-width: 180px;
+/* Toolbar = panel header (no card chrome of its own) */
+.content-head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 9px 12px;
-}
-/* filtered count — always visible; doubles as live search/filter feedback */
-.head-count {
-  background: var(--muted-bg);
-  color: var(--text-h);
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1.4;
-  border-radius: 999px;
-  padding: 2px 8px;
-  white-space: nowrap;
-}
-.icon { color: var(--muted); width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; flex-shrink: 0; }
-.search-input {
-  flex: 1;
-  min-width: 0;
-  border: none;
-  outline: none;
+  gap: var(--space-2);
+  flex-wrap: wrap;
   background: transparent;
-  color: var(--text-h);
-  font-size: 14px;
-}
-.clear {
-  background: var(--muted-bg);
   border: none;
-  width: 24px;
-  height: 24px;
-  border-radius: 999px;
-  cursor: pointer;
-  color: var(--muted);
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  padding: 10px 14px;
 }
-.clear svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
-.search-wrap:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
-.search-wrap { transition: border-color .15s, box-shadow .15s; }
-.header-status {
-  flex: 0 1 auto;
-  min-width: 130px;
-  padding: 8px 10px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--card);
-  color: var(--text-h);
-  font-size: 13px;
-  transition: border-color .15s, box-shadow .15s;
+.content-head > * {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
-.header-status:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-bg);
+/* Link content inside the panel */
+.links-content { padding: 14px; }
+/* Pagination = panel footer (no separate card/background) */
+.links-panel .table-footer-control {
+  background: transparent;
+  border-top: 1px solid var(--border);
+  padding: 10px 14px;
+  margin: 0;
 }
-/* View-mode switcher: quiet segmented control, secondary to the search field */
+/* Toolbar layout: Save a Link on the left, view/sort/filter/export on the right.
+   The AddLink root inherits this component's scope, so drop its own card chrome
+   and keep only the compact toggle inside the toolbar. Inner nodes need :deep(). */
+.content-head :deep(.add-card) {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+}
+.content-head :deep(.add-toggle-hint) { display: none; }
+.toolbar-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  /* Share the toolbar row with the Add control instead of dropping to a line of
+     its own when the controls are wider than the space next to it: the group
+     takes the remaining row width (so it never wraps as a block) and its own
+     controls wrap internally, aligned to the right. */
+  flex: 1 1 0;
+  justify-content: flex-end;
+  min-width: 0;
+}
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+
+/* Sorting/filter controls: quiet, borderless — hierarchy from typography + hover */
+
+/* View switch: a compact control group, not a segmented Bootstrap track */
+/* View mode (Card / List / Compact): one segmented group on a quiet inset
+   track using the shared surface/border/radius tokens, so the three modes read
+   as a single control. The track carries the grouping (no outer border and no
+   separators between segments); the accent marks the active mode. */
 .view-switch {
   display: inline-flex;
-  gap: 2px;
-  padding: 3px;
-  background: var(--muted-bg);
-  border-radius: var(--radius-sm);
+  align-items: stretch;
   flex-shrink: 0;
+  background: var(--muted-bg);
+  border: none;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  margin-right: var(--space-1);
 }
 .view-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 5px;
-  padding: 6px 9px;
+  min-height: var(--control-height-sm);
+  padding: 6px 10px;
   border: none;
   background: transparent;
   color: var(--muted);
-  border-radius: calc(var(--radius-sm) - 3px);
   font-size: 12.5px;
-  font-weight: 600;
+  font-weight: var(--weight-medium);
   cursor: pointer;
-  transition: background .15s, color .15s, transform .1s ease;
+  transition: background var(--transition-fast), color var(--transition-fast), transform .1s ease;
 }
+/* No separators between segments: the inset track groups them, and only the
+   active mode carries a fill (a separator line is what makes a segmented
+   control look like a framework button group). */
 .view-btn:hover { color: var(--text-h); }
-.view-btn:active { transform: scale(0.96); }
-.view-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.view-btn.active {
-  background: var(--card);
-  color: var(--accent);
-  box-shadow: var(--elev-1);
-}
+.view-btn:active { transform: scale(0.97); }
+.view-btn:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: -2px; }
+.view-btn.active { background: var(--accent-bg); color: var(--accent); font-weight: var(--weight-semibold); }
 .view-icon { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .view-btn.active .view-icon { stroke: var(--accent); }
 .view-label { white-space: nowrap; }
-/* Sticky-toolbar Add (+): quiet 40px target, reuses the existing form */
+
+/* Secondary sort/filter controls: on desktop/tablet they stay inline in the
+   toolbar (display: contents keeps the existing AppSelects direct flex items of
+   the control row, exactly as before); below the breakpoint they are
+   progressively disclosed behind one compact trigger. */
+.sort-filter-toggle {
+  display: none;
+}
+.toolbar-filters {
+  display: contents;
+}
+.filter-field {
+  display: contents;
+}
+.filter-field-label {
+  display: none;
+}
+
+/* Toolbar utility actions (Export): secondary, quiet */
 .toolbar-add {
-  width: 40px;
-  height: 40px;
+  width: var(--control-height);
+  height: var(--control-height);
   flex-shrink: 0;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--card);
+  border: 1px solid transparent;
+  background: transparent;
   color: var(--muted);
   cursor: pointer;
   display: grid;
   place-items: center;
-  transition: color .15s, background .15s, border-color .15s, transform .1s ease;
+  transition: color var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast), transform .1s ease;
 }
-.toolbar-add:hover { color: var(--accent); background: var(--accent-bg); border-color: var(--accent-border); }
+.toolbar-add:hover { color: var(--text-h); background: var(--muted-bg); }
 .toolbar-add:active { transform: scale(0.94); }
 .toolbar-add svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
-/* Active-filter summary: one chip per applied constraint on its own line in
-   the sticky band. order:99 keeps it last in every toolbar composition (wide
-   and narrow) so the existing row ordering/invariants are untouched. This is
-   the always-visible clear path — search stays clearable via its own ✕ too. */
+/* Export is a labelled control (outgoing icon + text), not a download-only icon button */
+.toolbar-export {
+  width: auto;
+  height: var(--control-height);
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--muted);
+}
+.toolbar-export i { font-size: var(--text-lg); line-height: 1; }
+
+/* Active-filter chips */
 .filter-chips {
   flex: 1 1 100%;
   order: 99;
@@ -1228,13 +1371,13 @@ const activeFilterChips = computed(() => {
 .filter-chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-h);
+  gap: var(--space-1);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--accent);
   background: var(--accent-bg);
-  border: 1px solid var(--accent-border);
-  border-radius: 999px;
+  border: none;
+  border-radius: var(--radius-full);
   padding: 3px 4px 3px 10px;
   white-space: nowrap;
 }
@@ -1242,7 +1385,7 @@ const activeFilterChips = computed(() => {
   width: 18px;
   height: 18px;
   border: none;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: transparent;
   color: var(--accent);
   cursor: pointer;
@@ -1253,36 +1396,34 @@ const activeFilterChips = computed(() => {
 .chip-clear:hover { background: var(--accent); color: var(--on-accent); }
 .chip-clear svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
 .chip-clear-all {
-  font-size: 12px;
-  font-weight: 700;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
   color: var(--muted);
   background: var(--muted-bg);
-  border: 1px solid var(--border);
-  border-radius: 999px;
+  border: none;
+  border-radius: var(--radius-full);
   padding: 3px 10px;
   cursor: pointer;
-  transition: color .15s, border-color .15s;
+  transition: color var(--transition-fast);
 }
-.chip-clear-all:hover { color: var(--text-h); border-color: var(--accent-border); }
-/* Drawer toggles: accent dot when something is filtered/viewed, so the active
-   state is glanceable below 1200px without opening the drawer. */
-.toggle-badge {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: var(--accent);
-  flex-shrink: 0;
-  margin-left: 2px;
+.chip-clear-all:hover { color: var(--text-h); }
+
+/* Old link list layouts */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+  gap: 16px;
 }
-.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
-.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-.row-list { display: flex; flex-direction: column; gap: 10px; }
+.row-list {
+  display: grid;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+  gap: 10px;
+}
 .row-list.compact { gap: 6px; }
+
+/* Empty states: plain centered content inside the panel (no nested box) */
 .empty-state {
-  background: var(--card);
-  border: 1px dashed var(--border);
-  border-radius: var(--radius);
-  padding: 32px 20px;
+  padding: 36px 20px;
   text-align: center;
   animation: rise-in .2s ease;
 }
@@ -1292,109 +1433,208 @@ const activeFilterChips = computed(() => {
   margin: 0 auto 10px;
   color: var(--accent);
   background: var(--accent-bg);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   display: grid;
   place-items: center;
 }
 .empty-icon svg { width: 24px; height: 24px; }
 .empty-state h3 { margin: 0 0 6px; color: var(--text-h); }
-.empty-state p { margin: 0 auto; max-width: 520px; font-size: 14px; line-height: 1.5; }
-.example-tags { margin-top: 12px; font-size: 12px; color: var(--muted); }
-.toast {
-  position: fixed;
-  bottom: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--accent);
-  color: var(--on-accent);
-  padding: 10px 16px;
-  border-radius: 999px;
-  font-size: 13px;
-  font-weight: 500;
-  box-shadow: var(--elev-2);
-  z-index: 50;
+.empty-state p { margin: 0 auto; max-width: 520px; font-size: var(--text-md); line-height: var(--leading-normal); }
+.example-tags { margin-top: 12px; font-size: var(--text-xs); color: var(--muted); }
+
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
 }
-.toast-enter-active { transition: opacity .18s ease, transform .18s ease; }
-.toast-leave-active { transition: opacity .15s ease, transform .15s ease; }
-.toast-enter-from { opacity: 0; transform: translateX(-50%) translateY(6px); }
-.toast-leave-to { opacity: 0; transform: translateX(-50%) translateY(4px); }
-.footer {
-  text-align: center;
-  font-size: 12px;
-  color: var(--muted);
-  padding: 14px 20px 20px;
-  border-top: 1px solid var(--border);
-  margin-top: 12px;
+
+/* Card view columns */
+@media (min-width: 768px) {
+  .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (min-width: 1200px) {
-  .nav-backdrop, .util-backdrop { display: none; }
-}
-@media (min-width: 1500px) {
   .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
-@media (max-width: 1199px) {
-  .layout { grid-template-columns: 1fr; }
-  .nav-toggle, .util-toggle { display: inline-flex; }
-  .nav-col, .side-col {
-    position: fixed;
-    top: 70px; /* below the sticky header so the drawer toggles stay clickable */
-    bottom: 0;
-    z-index: 30;
-    overflow-y: auto;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    padding: 16px;
-    visibility: hidden;
-    transition: transform .22s ease, visibility 0s linear .22s;
+@media (min-width: 1280px) {
+  .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+/* List/Compact view columns */
+@media (min-width: 1100px) {
+  .row-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 768px) {
+  .identity-info { display: none; }
+  .identity-btn { padding: 4px 6px 4px 4px; gap: 0; }
+  .identity-avatar { width: 28px; height: 28px; }
+  /* Compact mobile app bar: brand · search · profile on ONE row (the ≤1200 shell
+     wraps them onto two). The search takes the remaining width, the profile never
+     shrinks, and the brand yields first if the row gets very narrow. */
+  .navbar-custom {
+    flex-wrap: nowrap;
+    align-items: center;
+    padding: var(--space-2) var(--space-4);
+    margin-bottom: var(--space-3);
+    gap: var(--space-2);
   }
-  .nav-col {
-    left: 0;
-    width: 280px;
-    max-width: 85vw;
-    border-right: 1px solid var(--border);
-    transform: translateX(-105%);
+  .navbar-left,
+  .navbar-actions {
+    gap: var(--space-2);
   }
-  .side-col {
-    right: 0;
-    width: 300px;
-    max-width: 85vw;
-    border-left: 1px solid var(--border);
-    transform: translateX(105%);
+  .navbar-left {
+    flex: 0 1 auto;
   }
-  .layout.nav-open .nav-col {
-    transform: translateX(0);
-    visibility: visible;
-    transition: transform .22s ease, visibility 0s;
+  .navbar-actions {
+    flex: 0 0 auto;
   }
-  .layout.util-open .side-col {
-    transform: translateX(0);
-    visibility: visible;
-    transition: transform .22s ease, visibility 0s;
+  .navbar-search-wrapper {
+    order: 0;
+    flex: 1 1 0;
+    width: auto;
+    min-width: 0;
+    margin: 0;
+    /* Collapsed by default: the bar shows the search affordance until search opens. */
+    display: none;
+  }
+  .navbar-custom.is-searching .navbar-search-wrapper {
+    display: block;
+  }
+  .navbar-search-toggle {
+    display: flex;
+  }
+  /* While searching the field owns the bar: the brand and the affordance step
+     aside and the profile keeps its place. The field takes whatever row space is
+     left, so its width is never hardcoded. */
+  .navbar-custom.is-searching .mobile-brand,
+  .navbar-custom.is-searching .navbar-search-toggle {
+    display: none;
+  }
+  .mobile-brand span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .navbar-search-input {
+    padding: 0.5rem 1rem;
+    padding-right: 2.25rem;
+  }
+  /* Compact Saved Links heading: the title and its dynamic count share one
+     baseline row (title left, count ending at the content edge), with the
+     surrounding rhythm tightened to a section-header spacing. The copy wraps
+     gracefully when it needs the width. */
+  .page-header {
+    flex-direction: row;
+    align-items: baseline;
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
+  }
+  .page-header > div {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    column-gap: var(--space-3);
+    row-gap: var(--space-1);
+  }
+  .page-title {
+    font-size: 1.4rem;
+    margin-bottom: 0;
+  }
+
+  /* Mobile toolbar: the bottom bar's Add item is the single Add entry point
+     (same AddLink form), so the panel's duplicate "Save a link" is hidden here.
+     Export stays reachable through More → Backup & restore. Both controls keep
+     their desktop/tablet behavior. */
+  .content-head :deep(.add-card) {
+    display: none;
+  }
+  .toolbar-export {
+    display: none;
+  }
+  /* With the Add control hidden the control group is the only toolbar child, so
+     its rows centre in the available content width instead of hugging the
+     right edge. */
+  .toolbar-controls {
+    justify-content: center;
+  }
+  /* The view-mode group keeps its natural size (it is a segmented control, not a
+     full-width bar): it shares the toolbar row with the sort/filter controls
+     wherever the width allows and otherwise centres on its own line, because the
+     control group above is centred. */
+
+  /* Mobile: the secondary controls collapse into one compact trigger, so the
+     toolbar row is the view-mode group plus this trigger. */
+  .sort-filter-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-height: var(--control-height-sm);
+    padding: 6px 10px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--muted);
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+    cursor: pointer;
+    transition: background-color var(--transition-fast), color var(--transition-fast);
+  }
+  .sort-filter-toggle:hover {
+    background: var(--muted-bg);
+    color: var(--text-h);
+  }
+  .sort-filter-toggle:focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: var(--focus-ring-offset);
+  }
+  /* The existing state (a non-default sort or an active filter) marks the
+     trigger — no new filtering model, the accent only for the active state. */
+  .sort-filter-toggle.active {
+    color: var(--accent);
+  }
+
+  /* Disclosure surface: the existing AppSelects, stacked with their captions.
+     The anchored-popover surface + positioner are reused as-is. */
+  .toolbar-filters {
+    display: none;
+    width: min(280px, calc(100vw - var(--space-6)));
+  }
+  .toolbar-filters.open {
+    display: block;
+  }
+  .filter-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+  .filter-field + .filter-field {
+    margin-top: var(--space-3);
+  }
+  .filter-field-label {
+    display: block;
+    font-size: var(--text-xs);
+    font-weight: var(--weight-semibold);
+    color: var(--text-h);
+  }
+  .toolbar-filters :deep(.asel-trigger) {
+    min-height: var(--control-height);
+  }
+  /* In the stacked disclosure the selects sit on the column axis, so the
+     toolbar's horizontal flex sizing must not stretch them vertically. */
+  .toolbar-filters :deep(.asel--header) {
+    flex: 0 0 auto;
   }
 }
-@media (max-width: 767px) {
-  .grid { grid-template-columns: 1fr; }
-}
-@media (max-width: 640px) {
-  .topbar-inner { padding: 10px 14px; }
-  .layout { padding: 14px; }
-  .brand-sub { display: none; }
-  .pill-count { display: none; }
-  .util-toggle-name { display: none; }
-  /* narrow screens: Saved links on its own row, then full-width Search,
-     then full-width view switcher, then full-width All status — always
-     grouped under the header, never crammed onto one row.
-     The sticky band sheds its box padding/border so the count pill and
-     controls stay flush against the band edge (e2e positional invariants)
-     while Search + Add(+) share ONE compact row. */
-  .content-head { padding: 0; border: none; border-radius: 0; }
-  .content-head .search-wrap { flex: 1 1 0; min-width: 0; }
-  .content-head .toolbar-add { order: 1; }
-  .content-head .view-switch { flex: 1 1 100%; order: 2; }
-  .content-head .view-btn { flex: 1 1 0; justify-content: center; padding: 8px 10px; }
-  .content-head .header-status { flex: 1 1 100%; order: 3; }
-}
-@media (max-width: 480px) {
+
+@media (max-width: 575px) {
+  .content-head { padding: 8px; gap: 6px; }
+  .toolbar-controls { gap: 6px; }
+  .asel--header { min-width: 90px; flex: 1 1 110px; }
+  .asel--header .asel-trigger { font-size: var(--text-xs); }
+  .view-btn { padding: 5px 7px; }
   .view-label { display: none; }
+  .toolbar-add { width: 34px; height: 34px; }
+  .toolbar-export { width: auto; height: 34px; padding: 0 10px; }
 }
 </style>

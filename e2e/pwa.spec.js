@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { linkRowByTitle, openEditFormFor, visibleLinkRows } from './helpers.js'
 
 // PWA foundation + offline verification against the PRODUCTION build
 // (project 'pwa' serves `vite preview` of the real dist/ output). The dev
@@ -14,7 +15,7 @@ test.describe('PWA foundation (production build)', () => {
     expect(manifest.short_name).toBe('Save_Links')
     expect(manifest.start_url).toBe('/')
     expect(manifest.display).toBe('standalone')
-    expect(manifest.theme_color).toBe('#4f46e5')
+    expect(manifest.theme_color).toBe('#F6F6F7')
     const sizes = manifest.icons.map((i) => i.sizes)
     expect(sizes).toContain('192x192')
     expect(sizes).toContain('512x512')
@@ -48,7 +49,9 @@ test.describe('PWA foundation (production build)', () => {
 
     // 1. ONLINE: app loads, data migrates to IndexedDB, SW registers.
     await page.goto('/')
-    await expect(page.locator('article.card', { hasText: 'Offline Seed' })).toBeVisible()
+    // Wait for the link to appear (migration complete). The current UI renders
+    // cards (.grid > .card) or list/compact rows (.row-list > .link-row).
+    await expect(linkRowByTitle(page, 'Offline Seed')).toBeVisible()
     await page.evaluate(() => navigator.serviceWorker.ready)
     // Reload so the current page is CONTROLLED by the active service worker
     // (required for the offline reload to be served from cache).
@@ -59,33 +62,35 @@ test.describe('PWA foundation (production build)', () => {
     // 2. OFFLINE: shell + IndexedDB data both load from the installed SW.
     await context.setOffline(true)
     await page.reload()
-    await expect(page.locator('article.card', { hasText: 'Offline Seed' })).toBeVisible()
+    await expect(linkRowByTitle(page, 'Offline Seed')).toBeVisible()
 
-    // 3. Local CRUD while offline (metadata fetch fails gracefully — save still works).
+    // 3. Local CRUD while offline (metadata fetch fails gracefully - save still works).
     await page.getByRole('button', { name: 'Save a link', exact: true }).click()
     await page.locator('#save-url').fill('https://example.com/offline-new')
     await page.locator('#save-title').fill('Offline New')
     await page.getByRole('button', { name: 'Save link' }).click()
-    await expect(page.locator('article.card', { hasText: 'Offline New' })).toBeVisible()
+    await expect(linkRowByTitle(page, 'Offline New')).toBeVisible()
 
-    // Card scoped by position: while the edit form is open the title lives in
-    // an input VALUE (not text content), so a hasText filter breaks mid-edit.
-    const card = page.locator('article.card').first()
-    await card.getByRole('button', { name: 'Edit link' }).click()
-    await card.locator('.edit-form').locator('input').first().fill('Offline Edited')
-    await card.locator('.edit-form').getByRole('button', { name: 'Save' }).click()
-    await expect(page.locator('article.card', { hasText: 'Offline Edited' })).toBeVisible()
+    // Edit the new link through the current anchored edit form (teleported to body)
+    const { form } = await openEditFormFor(page, 'Offline New')
+    await form.getByLabel('Title').fill('Offline Edited')
+    await form.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(linkRowByTitle(page, 'Offline Edited')).toBeVisible()
 
-    await page.locator('article.card', { hasText: 'Offline Seed' }).getByRole('button', { name: 'Delete link' }).click()
-    await expect(page.getByRole('dialog')).toBeVisible()
+    // Delete the seeded link through the quick-action menu + existing confirmation
+    const seeded = linkRowByTitle(page, 'Offline Seed')
+    await seeded.getByRole('button', { name: 'More actions' }).click()
+    await page.locator('.more-menu').getByRole('button', { name: 'Delete' }).click()
     await page.getByRole('dialog').getByRole('button', { name: 'Delete', exact: true }).click()
-    await expect(page.locator('article.card', { hasText: 'Offline Seed' })).toHaveCount(0)
+    await expect(linkRowByTitle(page, 'Offline Seed')).toHaveCount(0)
 
     // 4. RELOAD OFFLINE: shell comes from cache, data survives from IndexedDB.
     await page.reload()
-    await expect(page.locator('article.card', { hasText: 'Offline Edited' })).toBeVisible()
-    await expect(page.locator('article.card', { hasText: 'Offline Seed' })).toHaveCount(0)
-    await expect(page.locator('.stat-card', { hasText: 'Total saved' }).locator('.num')).toHaveText('1')
+    await expect(linkRowByTitle(page, 'Offline Edited')).toBeVisible()
+    await expect(linkRowByTitle(page, 'Offline Seed')).toHaveCount(0)
+    // Exactly one link remains; the sidebar badge reports the same total.
+    await expect(visibleLinkRows(page)).toHaveCount(1)
+    await expect(page.locator('.sidebar-menu-badge').first()).toHaveText('1')
   })
 
   test('installed service worker cache holds every asset the built HTML references', async ({ page, request }) => {

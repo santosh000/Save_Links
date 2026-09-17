@@ -2,10 +2,18 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover: edge-to-edge on notched devices; the mobile shell
+         consumes the insets via env(safe-area-inset-*) (src/app-overrides.css). -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <link rel="icon" type="image/png" href="/logo.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <meta name="theme-color" content="#4f46e5" />
+    <!-- Browser/PWA chrome is neutral and follows the page canvas (--bg).
+         These media-scoped tags are the no-JS / System fallback; the app syncs
+         them to the resolved appearance at runtime (src/composables/useSettings.js).
+         The manifest cannot be appearance-aware, so it keeps a static neutral value. -->
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#F6F6F7" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#000000" />
     <title>Save Links</title>
   </head>
   <body>

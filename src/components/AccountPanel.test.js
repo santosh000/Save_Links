@@ -1,5 +1,6 @@
 // UI tests for the account/authentication area (AccountPanel.vue, Phase A —
-// provider OAuth: Google primary + GitHub). Mounts the component (teleports to
+// provider OAuth: equal Google + GitHub options). Mounts the component
+// (teleports to
 // body) and mocks the session abstraction and accountService, so the OAuth
 // identity + sign-out UX is tested without a real backend, IndexedDB, or
 // network. The previous username/password register/forgot-* UI was removed in
@@ -77,15 +78,15 @@ describe('AccountPanel — open/close', () => {
 })
 
 describe('AccountPanel — signed out (provider OAuth)', () => {
-  it('shows the signed-out state with Google (primary) and GitHub sign-in actions', async () => {
+  it('shows the signed-out state with equal Google and GitHub sign-in actions', async () => {
     await open()
     const t = document.body.textContent
-    expect(t).toContain('Online account')
+    expect(document.querySelector('.online-account-label').textContent).toBe('Account')
     expect(t).toContain('Not signed in')
     expect(t).toContain('Continue with Google')
     expect(t).toContain('Continue with GitHub')
-    expect(t).toContain('Local profile')
-    expect(t).toContain('Or continue using your local profile only')
+    expect(document.querySelector('.local-profile-label').textContent).toBe('Local')
+    expect(t).toContain('Continue without signing in')
     close()
   })
 
@@ -137,8 +138,8 @@ describe('AccountPanel — signed-in account identity', () => {
     setAuth('authenticated', { id: 'acc-42', name: '', email: null })
     await open()
     const t = document.body.textContent
-    expect(t).toContain('Local profile')
-    expect(t).toContain('Online account')
+    expect(document.querySelector('.local-profile-label').textContent).toBe('Local')
+    expect(document.querySelector('.online-account-label').textContent).toBe('Account')
     expect(t).toContain('Signed in')
     expect(t).toContain('acc-42')
     // Sync stays disabled in Phase A — no misleading "Connected" claim.
@@ -167,7 +168,7 @@ describe('AccountPanel — signed-in account identity', () => {
 describe('AccountPanel — local profile independence', () => {
   it('local profile is always shown, independent of online account state', async () => {
     await open()
-    expect(document.body.textContent).toContain('Local profile')
+    expect(document.querySelector('.local-profile-label').textContent).toBe('Local')
     expect(document.body.textContent).toContain('Local User')
     close()
   })
@@ -176,7 +177,7 @@ describe('AccountPanel — local profile independence', () => {
     setAuth('authenticated', { id: 'acc-9', name: '', email: null })
     await open()
     const t = document.body.textContent
-    expect(t).toContain('Local profile')
+    expect(document.querySelector('.local-profile-label').textContent).toBe('Local')
     expect(t).toContain('Local User') // local profile name preserved — not replaced by account id
     close()
   })

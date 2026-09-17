@@ -1,6 +1,9 @@
 <script setup>
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, nextTick } from 'vue'
 import { CATEGORIES } from '../utils/categorize.js'
+import { useAnchoredPopover } from '../utils/anchoredPopover.js'
+import EditLinkForm from './EditLinkForm.vue'
+import AppSelect from './AppSelect.vue'
 
 // Intl.DateTimeFormat construction is costly; build once per page load
 // instead of once per row per render (matters at 500–1000 links).
@@ -14,7 +17,42 @@ const props = defineProps({
   folders: { type: Array, default: () => [] },
   mode: { type: String, default: 'list' } // 'list' | 'compact'
 })
-const emit = defineEmits(['toggle-important', 'toggle-must-have', 'toggle-favorite', 'set-status', 'delete', 'edit', 'set-folder'])
+const emit = defineEmits(['toggle-important', 'toggle-must-have', 'toggle-favorite', 'set-status', 'delete', 'edit', 'set-folder', 'copy', 'share'])
+
+// Quick-action menu (Open / Copy link / Share / Category / Folder / Delete):
+// the same anchored-popover infrastructure and neutral menu surface as LinkCard
+// and the app's mobile "More" menu. Category/Folder apply through the existing
+// App.vue handlers and close the menu immediately.
+const moreOpen = ref(false)
+const moreTriggerEl = ref(null)
+const morePopoverEl = ref(null)
+useAnchoredPopover({
+  trigger: moreTriggerEl,
+  popover: morePopoverEl,
+  isOpen: moreOpen,
+  onOutside: () => { moreOpen.value = false },
+  // The Category/Folder selects render their own teleported menu; picking an
+  // option there must not tear this menu down before the change is applied.
+  ignoreSelector: '.asel-menu'
+})
+function toggleMore() { moreOpen.value = !moreOpen.value }
+async function closeMore(restoreFocus = false) {
+  moreOpen.value = false
+  if (restoreFocus) {
+    await nextTick()
+    moreTriggerEl.value?.focus()
+  }
+}
+function changeCategory(value) { emit('edit', props.link.id, { category: value }); closeMore() }
+function changeFolder(value) { emit('set-folder', props.link.id, value); closeMore() }
+function copyLink() { emit('copy', props.link.id); closeMore() }
+function shareLink() { emit('share', props.link.id); closeMore() }
+async function deleteLink() {
+  // Close first (restoring focus to the trigger) so the existing confirmation
+  // dialog can restore focus to something that still exists afterwards.
+  await closeMore(true)
+  emit('delete', props.link.id)
+}
 
 function navUrl() {
   return props.link.normalizedUrl || props.link.url
@@ -35,40 +73,28 @@ function savedDate() {
   return DATE_FMT.format(d)
 }
 
-const folderName = () => {
-  if (!props.link.folderId) return ''
-  return props.folders.find(f => f.id === props.link.folderId)?.name || ''
-}
-
-// Inline edit — same fields as LinkCard's edit form (business logic stays in App).
+// Inline edit is presented as an anchored popover (same helper + shared form
+// as Card mode) so the row never expands or pushes surrounding rows. Below the
+// mobile shell breakpoint it is presented centred, like the Add form.
 const editing = ref(false)
-const draftTitle = ref('')
-const draftDesc = ref('')
-const draftImage = ref('')
-const draftTags = ref('')
-const draftCategory = ref('Other')
-const draftFolderId = ref('')
+const editTriggerEl = ref(null)
+const editPopoverEl = ref(null)
+useAnchoredPopover({
+  trigger: editTriggerEl,
+  popover: editPopoverEl,
+  isOpen: editing,
+  onOutside: () => { editing.value = false },
+  mode: 'auto'
+})
 
-function startEdit() {
-  draftTitle.value = props.link.title
-  draftDesc.value = props.link.description || ''
-  draftImage.value = props.link.image || ''
-  draftTags.value = (props.link.tags || []).join(', ')
-  draftCategory.value = props.link.category
-  draftFolderId.value = props.link.folderId || ''
-  editing.value = true
-}
+function startEdit() { editing.value = true }
 function cancelEdit() { editing.value = false }
-function saveEdit() {
-  const tags = draftTags.value.split(',').map(t => t.trim()).filter(Boolean)
-  emit('edit', props.link.id, {
-    title: draftTitle.value.trim().slice(0, 200) || props.link.title,
-    description: draftDesc.value.trim().slice(0, 400),
-    image: draftImage.value.trim(),
-    tags,
-    category: draftCategory.value,
-    folderId: draftFolderId.value || null
-  })
+function toggleEdit() {
+  if (editing.value) cancelEdit()
+  else startEdit()
+}
+function saveEdit(patch) {
+  emit('edit', props.link.id, patch)
   editing.value = false
 }
 
@@ -77,7 +103,7 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
 
 <template>
   <article class="link-row" :class="[mode, { editing }]">
-    <a v-if="!editing" :href="navUrl()" target="_blank" rel="noopener noreferrer" class="row-main" :title="link.title">
+    <a :href="navUrl()" target="_blank" rel="noopener noreferrer" class="row-main" :title="link.title">
       <span class="row-favicon" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.9 5.7 3.9 9S14.5 18.4 12 21c-2.5-2.6-3.9-5.7-3.9-9S9.5 5.6 12 3z"/></svg>
       </span>
@@ -86,8 +112,6 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
         <span class="row-meta">
           <span class="row-domain">{{ domainText }}</span>
           <span v-if="mode === 'list'" class="row-chips" aria-hidden="false">
-            <span class="chip chip-cat">{{ link.category }}</span>
-            <span class="chip">{{ link.folderId ? folderName() : 'Unfiled' }}</span>
             <span v-if="savedDate()" class="chip chip-date">{{ savedDate() }}</span>
             <span v-if="link.tags && link.tags.length" class="chip chip-tags">#{{ link.tags.slice(0, 3).join(' · #') }}</span>
           </span>
@@ -95,7 +119,7 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
       </span>
     </a>
 
-    <div v-if="!editing" class="row-actions">
+    <div class="row-actions">
       <button
         class="row-toggle"
         :class="{ active: link.important }"
@@ -108,16 +132,6 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
       </button>
       <button
         class="row-toggle"
-        :class="{ active: link.mustHave }"
-        :aria-pressed="String(!!link.mustHave)"
-        aria-label="Toggle Must Have"
-        title="Must Have"
-        @click="emit('toggle-must-have', link.id)"
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2 20.8 12 12 20.8 3.2 12z" /></svg>
-      </button>
-      <button
-        class="row-toggle"
         :class="{ active: link.favorite }"
         :aria-pressed="String(!!link.favorite)"
         aria-label="Toggle Favorite"
@@ -126,46 +140,90 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
       >
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21C7 16.8 3 13.6 3 9.6 3 7 5 5 7.4 5c1.8 0 3.4 1 4.6 2.6C13.2 6 14.8 5 16.6 5 19 5 21 7 21 9.6c0 4-4 7.2-9 11.4z" /></svg>
       </button>
-      <label :for="'row-cat-' + link.id" class="sr-only">Category</label>
-      <select :id="'row-cat-' + link.id" :value="link.category" @change="emit('edit', link.id, { category: $event.target.value })" class="row-select" aria-label="Change category" title="Change category">
-        <option v-for="c in CATEGORIES" :key="c" :value="c">{{ c }}</option>
-      </select>
-      <label :for="'row-folder-' + link.id" class="sr-only">Move to folder</label>
-      <select :id="'row-folder-' + link.id" :value="link.folderId || ''" @change="emit('set-folder', link.id, $event.target.value)" class="row-select" aria-label="Move to folder" title="Move to folder">
-        <option value="">Unfiled</option>
-        <option v-for="f in folders" :key="f.id" :value="f.id">{{ f.name }}</option>
-      </select>
-      <button class="icon-btn" @click="startEdit" aria-label="Edit link" title="Edit">
+      <button ref="editTriggerEl" class="icon-btn" @click="toggleEdit" aria-label="Edit link" title="Edit">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
       </button>
-      <button class="icon-btn delete" @click="emit('delete', link.id)" aria-label="Delete link" title="Delete">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      <button
+        ref="moreTriggerEl"
+        class="icon-btn"
+        :aria-expanded="String(moreOpen)"
+        :aria-controls="'row-menu-' + link.id"
+        aria-label="More actions"
+        @click="toggleMore"
+        @keydown.esc="closeMore(true)"
+      >
+        <svg class="more-dots" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg>
       </button>
     </div>
 
-    <div v-else class="row-edit">
-      <div class="edit-grid">
-        <label class="edit-field grow2"><span>Title</span><input v-model="draftTitle" class="input" /></label>
-        <label class="edit-field"><span>Category</span>
-          <select v-model="draftCategory" class="input">
-            <option v-for="c in CATEGORIES" :key="c" :value="c">{{ c }}</option>
-          </select>
-        </label>
-        <label class="edit-field"><span>Folder</span>
-          <select v-model="draftFolderId" class="input">
-            <option value="">Unfiled</option>
-            <option v-for="f in folders" :key="f.id" :value="f.id">{{ f.name }}</option>
-          </select>
-        </label>
-        <label class="edit-field grow2"><span>Description</span><textarea v-model="draftDesc" rows="2" class="input"></textarea></label>
-        <label class="edit-field"><span>Image URL</span><input v-model="draftImage" placeholder="https://..." class="input" /></label>
-        <label class="edit-field"><span>Tags (comma separated)</span><input v-model="draftTags" class="input" /></label>
-      </div>
-      <div class="edit-actions">
-        <button class="btn primary sm" @click="saveEdit">Save</button>
-        <button class="btn ghost sm" @click="cancelEdit">Cancel</button>
-      </div>
-    </div>
+    <Teleport to="body">
+      <Transition name="fade-down">
+        <div
+          v-if="moreOpen"
+          :id="'row-menu-' + link.id"
+          ref="morePopoverEl"
+          class="more-menu anchored-popover"
+          @keydown.esc="closeMore(true)"
+        >
+          <a class="more-item" :href="navUrl()" target="_blank" rel="noopener noreferrer" @click="closeMore()">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>
+            <span>Open</span>
+          </a>
+          <button type="button" class="more-item" @click="copyLink">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            <span>Copy link</span>
+          </button>
+          <button type="button" class="more-item" @click="shareLink">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+            <span>Share</span>
+          </button>
+          <div class="more-field">
+            <span class="more-field-label">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+              Category
+            </span>
+            <AppSelect :id="'row-cat-' + link.id" :model-value="link.category" variant="inline" :options="CATEGORIES" aria-label="Change category" @change="changeCategory" />
+          </div>
+          <div class="more-field">
+            <span class="more-field-label">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+              Folder
+            </span>
+            <AppSelect
+              :id="'row-folder-' + link.id"
+              :model-value="link.folderId || ''"
+              variant="inline"
+              :options="[{ value: '', label: 'Unfiled' }, ...folders]"
+              aria-label="Move to folder"
+              @change="changeFolder"
+            />
+          </div>
+          <button
+            type="button"
+            class="more-item"
+            :class="{ active: link.mustHave }"
+            :aria-pressed="String(!!link.mustHave)"
+            aria-label="Toggle Must Have"
+            @click="emit('toggle-must-have', link.id)"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2 20.8 12 12 20.8 3.2 12z" /></svg>
+            <span>Must Have</span>
+          </button>
+          <button type="button" class="more-item danger" @click="deleteLink">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+            <span>Delete</span>
+          </button>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <Teleport to="body">
+      <Transition name="fade-down">
+        <div v-if="editing" ref="editPopoverEl" class="edit-popover anchored-popover">
+          <EditLinkForm :link="link" :folders="folders" @save="saveEdit" @cancel="cancelEdit" />
+        </div>
+      </Transition>
+    </Teleport>
   </article>
 </template>
 
@@ -174,15 +232,18 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px 12px;
-  padding: 10px 14px;
+  gap: 6px 10px;
+  padding: 8px 12px;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  transition: box-shadow .15s, border-color .15s;
+  transition: box-shadow var(--transition-fast), border-color var(--transition-fast);
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
-.link-row:hover { box-shadow: var(--elev-1); border-color: var(--accent-border); }
-.link-row.editing { align-items: stretch; border-color: var(--accent-border); }
+.link-row:hover { border-color: var(--accent-border); box-shadow: var(--shadow-sm); }
+.link-row.editing { border-color: var(--accent-border); }
 .row-main {
   display: flex;
   align-items: center;
@@ -192,10 +253,14 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
   text-decoration: none;
   color: inherit;
 }
+/* List rows carry chips + the full action set; when the row is narrow the
+   actions drop to their own line instead of squeezing the metadata column.
+   Compact rows stay single-line (scoped out). */
+.link-row:not(.compact) .row-main { flex: 1 1 280px; }
 .row-favicon {
   width: 34px;
   height: 34px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: var(--muted-bg);
   color: var(--muted);
   display: grid;
@@ -205,8 +270,8 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
 .row-favicon svg { width: 16px; height: 16px; }
 .row-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .row-title {
-  font-weight: 700;
-  font-size: 14px;
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-md);
   color: var(--text-h);
   white-space: nowrap;
   overflow: hidden;
@@ -217,124 +282,62 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--muted);
   min-width: 0;
 }
 .row-domain { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.row-chips { display: inline-flex; gap: 6px; align-items: center; min-width: 0; overflow: hidden; }
+.row-chips { display: inline-flex; gap: 4px var(--space-2); align-items: center; min-width: 0; flex-wrap: wrap; }
+/* Metadata reads as quiet text, not as stacked pills (the row stays one object) */
 .chip {
-  background: var(--muted-bg);
-  color: var(--text-h);
-  font-size: 11px;
-  padding: 1px 7px;
-  border-radius: 999px;
+  color: var(--text);
+  font-size: var(--text-xs);
   white-space: nowrap;
 }
-.chip-cat { background: var(--accent-bg); color: var(--accent); }
 .chip-date, .chip-tags { color: var(--muted); }
-.row-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
-.row-toggle {
-  width: 32px;
-  height: 32px;
-  border-radius: var(--radius-sm);
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  display: grid;
-  place-items: center;
-  transition: color .15s, background .15s, border-color .15s, transform .1s ease;
-}
-.row-toggle svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; }
-.row-toggle:hover { color: var(--text-h); background: var(--muted-bg); border-color: var(--border); }
-.row-toggle:active { transform: scale(0.92); }
-/* Active states emphasize the filled icon in the accent color over a solid
-   button surface; hover adds a subtle accent tint (stronger than the neutral
-   hover) without a filled background. Hit area is unchanged. */
-.row-toggle.active { background: transparent; border-color: transparent; color: var(--accent); }
-.row-toggle.active:hover { background: var(--accent-bg); }
-.row-toggle.active svg { fill: currentColor; stroke: currentColor; }
-.row-select {
-  font-size: 12px;
-  padding: 6px 8px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--text-h);
-  max-width: 130px;
-}
-.icon-btn {
-  width: 32px;
-  height: 32px;
-  border-radius: var(--radius-sm);
-  border: 1px solid transparent;
-  background: transparent;
-  cursor: pointer;
-  display: grid;
-  place-items: center;
-  color: var(--muted);
-  transition: color .15s, background .15s, border-color .15s, transform .1s ease;
-}
-.icon-btn:hover { color: var(--text-h); background: var(--muted-bg); border-color: var(--border); }
-.icon-btn:active { transform: scale(0.92); }
-.icon-btn svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.icon-btn.delete:hover { background: var(--error-bg); border-color: var(--border); color: var(--error); }
+/* Quick-action trigger: three round dots in the shared stroke-icon language. */
+svg.more-dots { fill: currentColor; stroke: none; }
+.row-actions { display: flex; align-items: center; gap: 5px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; min-width: 0; }
+/* Status toggles and item actions (.row-toggle / .icon-btn, incl. the accent
+   active state and the destructive hover) are defined once in the global
+   control language (src/app-overrides.css), so List/Compact rows and Card items
+   share one action treatment. Compact keeps only its density overrides below. */
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
-
-/* Inline edit block (same fields as LinkCard) */
-.row-edit { flex: 1 1 100%; display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px dashed var(--border); }
-.edit-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.grow2 { grid-column: span 2; }
-.edit-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: var(--text-h); min-width: 0; }
-.edit-actions { display: flex; gap: 8px; justify-content: flex-end; }
-.input {
-  padding: 8px 10px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--text-h);
-  font-size: 13px;
-  outline: none;
-  width: 100%;
-  box-sizing: border-box;
-  transition: border-color .15s, box-shadow .15s;
-}
-.input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
-.btn.sm { padding: 6px 10px; font-size: 13px; }
 
 /* COMPACT: denser scanning rows, meta chips off, smaller chrome */
 .link-row.compact {
-  padding: 5px 10px;
-  gap: 4px 10px;
+  padding: 4px 8px;
+  gap: 3px 8px;
   border-radius: var(--radius-sm);
 }
-.compact .row-favicon { width: 26px; height: 26px; }
-.compact .row-favicon svg { width: 13px; height: 13px; }
-.compact .row-title { font-size: 13px; }
-.compact .row-meta { font-size: 11px; }
+.compact .row-favicon { width: 24px; height: 24px; }
+.compact .row-favicon svg { width: 12px; height: 12px; }
+.compact .row-title { font-size: var(--text-xs); }
+.compact .row-meta { font-size: 10px; }
 .compact .row-chips { display: none; }
-.compact .row-toggle { width: 28px; height: 28px; }
-.compact .row-toggle svg { width: 13px; height: 13px; }
-.compact .row-select { font-size: 11px; padding: 4px 6px; max-width: 110px; }
-.compact .icon-btn { width: 28px; height: 28px; }
-.compact .icon-btn svg { width: 13px; height: 13px; }
+.compact .row-toggle { width: 24px; height: 24px; }
+.compact .row-toggle svg { width: 12px; height: 12px; }
+.compact .icon-btn { width: 24px; height: 24px; }
+.compact .icon-btn svg { width: 12px; height: 12px; }
 
 @media (max-width: 768px) {
-  .row-toggle, .icon-btn { width: 40px; height: 40px; }
-  .compact .row-toggle, .compact .icon-btn { width: 34px; height: 34px; }
+  .compact .row-toggle, .compact .icon-btn { width: 26px; height: 26px; }
 }
 @media (max-width: 480px) {
   .row-favicon { display: none; }
-  .edit-grid { grid-template-columns: 1fr; }
-  .grow2 { grid-column: span 1; }
   /* Mobile List: full-width title/domain line, then ONE action line of
-     status toggles + edit/delete. The row-level Category/Folder selects
-     step aside to the inline Edit form (same fields, one tap away via the
-     always-visible Edit button); category/folder stay glanceable as chips
-     right under the domain. Compact (scan mode) is untouched. */
-  .link-row:not(.compact) .row-select { display: none; }
+     status toggles + edit + the quick-action menu. Category and Folder are
+     changed from that menu (the same fields, one tap away), so the row keeps
+     a single glanceable metadata line. Compact (scan mode) is untouched. */
   .link-row:not(.compact) .chip-date,
   .link-row:not(.compact) .chip-tags { display: none; }
+}
+@media (max-width: 400px) {
+  /* Very narrow compact rows: keep the action row inside the card. */
+  .compact .row-actions { gap: 3px; }
+  .compact .row-toggle,
+  .compact .icon-btn { width: 22px; height: 22px; }
+  .compact .row-toggle svg,
+  .compact .icon-btn svg { width: 11px; height: 11px; }
 }
 </style>

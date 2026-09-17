@@ -6,10 +6,10 @@
 // timestamp we have.
 
 export const SORT_OPTIONS = [
-  { value: 'newest', label: 'Newest first' },
-  { value: 'oldest', label: 'Oldest first' },
-  { value: 'title-az', label: 'Title A–Z' },
-  { value: 'title-za', label: 'Title Z–A' }
+  { value: 'newest', label: 'Newest' },
+  { value: 'oldest', label: 'Oldest' },
+  { value: 'title-az', label: 'A–Z' },
+  { value: 'title-za', label: 'Z–A' }
 ]
 
 export const DEFAULT_SORT = 'newest'

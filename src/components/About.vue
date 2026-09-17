@@ -20,19 +20,18 @@
 
 <style scoped>
 .about-card {
-  background: var(--card);
-  border-radius: var(--radius);
-  padding: 16px;
+  background: transparent;
+  padding: 0;
 }
 .about-card h4 {
   margin: 0 0 8px;
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--text-h);
 }
 .about-card p {
   margin: 0;
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
   color: var(--text);
 }
 .about-card p.about-sub {
@@ -41,15 +40,15 @@
 .about-card ul {
   margin: 10px 0 0;
   padding-left: 18px;
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
   color: var(--text);
 }
 .about-card li + li {
   margin-top: 4px;
 }
 .about-card code {
-  font-size: 12px;
+  font-size: var(--text-xs);
   background: var(--muted-bg);
   padding: 2px 6px;
   border-radius: 6px;
