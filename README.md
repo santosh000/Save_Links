@@ -24,7 +24,7 @@
 
 Save_Links is a browser-based bookmark manager that keeps your data on your device first:
 
-- **Local-first** - links, folders, settings and your profile are stored in your browser's **IndexedDB**. Local use never uploads anything.
+- **Local-first** - your saved links, folders, settings and profile are stored in your browser's **IndexedDB**. Save_Links does not upload your saved collection to the cloud unless you explicitly use cloud synchronization.
 - **No account required** - the app is fully usable without signing in.
 - **Works offline** - after one online visit the app shell is cached by a service worker, and adding, editing and deleting links keeps working without a connection.
 - **Optional cloud synchronization** - sign in with Google or GitHub to synchronize links and folders across your browsers.
@@ -57,13 +57,13 @@ An overview of the main features - saved links, folders, appearance settings, se
 
 ## Local-first and privacy
 
-- **Local use** stores all data locally in your browser's IndexedDB. No data leaves your device.
+- **Local use** stores your saved links, folders, settings and profile locally in your browser's IndexedDB. The saved collection is not uploaded unless you explicitly use cloud synchronization.
 - **Authenticated cloud synchronization** sends supported synchronized data (links and folders) to the cloud so it can be accessed across your browsers. It is **optional** - you can use Save_Links completely without an account.
 - **Cloud synchronization is not a backup.** It is a synchronization service. For backups, use the application's export/backup functionality.
 - **No analytics or telemetry.** Save_Links does not collect usage data.
-- The production site is only where the app comes from; it is not a backend, and no data is uploaded to it during local use.
+- **The production application** is served by Cloudflare Workers and also provides the optional authentication and cloud-synchronization API. Local-only use does not require an account or cloud synchronization.
 - **Offline.** After a first visit online, the app shell is cached by your browser, and Save_Links keeps working without a connection, including adding, editing, and deleting links.
-- **One optional external request.** When you save a URL, your browser may ask that website for its title, description, and preview image. Some websites block this, in which case the link is saved with just what you entered.
+- **One optional external request.** When you save a URL, Save_Links may retrieve metadata from that page to fill in its title, description, and preview image. This makes a request related to the URL you are saving; some websites block it, in which case the link is saved with just what you entered.
 - **Backups are your safety net.** Clearing your browser's data removes your saved links, so export a backup first if you want to move or protect them.
 
 ## Cloud synchronization and authentication
@@ -130,7 +130,7 @@ Sorting works together with search, filters, and folders — it reorders only th
 ## Stable vs development
 
 - **Stable** - the latest **released** version. The current stable release is **v2.2.1**, hosted on **Cloudflare Workers** at **https://save-links.ucancallmesan.workers.dev** - just open the address; there is nothing to install.
-- **Development** - the latest unreleased code on the `master` branch, for testing upcoming work or contributing. It may contain unfinished features, bugs, or breaking changes, and there is currently **no permanent public development URL** - developers run it locally (see [Development](#development)).
+- **Development** - the `master` branch contains the latest development state, for testing upcoming work or contributing. After a release, new work added to `master` may contain unfinished features, bugs, or breaking changes, and there is currently **no permanent public development URL** - developers and testers run it locally (see [Development](#development)).
 - `master` is not a release; new work lands there between releases.
 
 ## Development
