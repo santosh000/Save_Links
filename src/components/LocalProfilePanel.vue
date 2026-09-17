@@ -133,7 +133,7 @@ function save() {
 }
 .lp-title {
   margin: 0;
-  font-size: 19px;
+  font-size: var(--text-lg);
   color: var(--text-h);
 }
 .lp-close {

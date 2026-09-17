@@ -36,7 +36,7 @@ function openEditor() {
   padding: 14px;
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius);
   position: relative;
 }
 .avatar {
@@ -59,9 +59,7 @@ function openEditor() {
   position: absolute;
   top: 10px;
   right: 10px;
-  font-size: 10px;
-  letter-spacing: .08em;
-  text-transform: uppercase;
+  font-size: var(--text-xs);
   background: var(--accent-bg);
   color: var(--accent);
   border: 1px solid var(--accent-border);
