@@ -129,7 +129,7 @@ Sorting works together with search, filters, and folders — it reorders only th
 
 ## Stable vs development
 
-- **Stable** - the latest **released** version. The current stable release is **v2.2.0**, hosted on **Cloudflare Workers** at **https://save-links.ucancallmesan.workers.dev** - just open the address; there is nothing to install.
+- **Stable** - the latest **released** version. The current stable release is **v2.2.1**, hosted on **Cloudflare Workers** at **https://save-links.ucancallmesan.workers.dev** - just open the address; there is nothing to install.
 - **Development** - the latest unreleased code on the `master` branch, for testing upcoming work or contributing. It may contain unfinished features, bugs, or breaking changes, and there is currently **no permanent public development URL** - developers run it locally (see [Development](#development)).
 - `master` is not a release; new work lands there between releases.
 
