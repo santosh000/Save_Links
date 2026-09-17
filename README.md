@@ -5,89 +5,60 @@
 <h1 align="center">Save_Links</h1>
 
 <p align="center">
-  A fast, local-first bookmark manager. Save links, clean common tracking parameters, catch duplicates, and fill in titles and preview images when a site provides them — all in your browser.
+  A fast, local-first bookmark manager for saving, organizing, searching and syncing links - right in your browser.
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/showcase.png" alt="Save_Links bookmark manager" width="100%" />
+  <img src="docs/screenshots/hero.png" alt="Save Links bookmark manager desktop and mobile interface" width="100%" />
 </p>
 
-## Stable vs Development Builds
+<p align="center">
+  <a href="https://save-links.ucancallmesan.workers.dev"><b>Open the app</b></a>
+  &nbsp;·&nbsp;
+  <a href="#development">Run it locally</a>
+  &nbsp;·&nbsp;
+  <a href="#roadmap">Roadmap</a>
+</p>
 
-Save_Links is under active development: new work lands on the `master` branch between releases.
+## What is Save_Links?
 
-| | Stable | Development |
-| --- | --- | --- |
-| Recommended for | everyday, reliable use | previewing and testing the latest work |
-| Contains | verified, released features | the latest work in progress |
-| May contain | — | unfinished features, bugs, or breaking changes |
+Save_Links is a browser-based bookmark manager that keeps your data on your device first:
 
-- **Stable** — the latest **released** version. Use it if you simply want to use Save_Links. The current stable release is v2.2.0, available at **https://save-links.ucancallmesan.workers.dev** — just open the address; there is nothing to install.
-- **Development** — the latest **unreleased** code on the repository's `master` branch. Use it if you want to test upcoming work or contribute to the project. It may contain unfinished features, bugs, or breaking changes, and there is currently **no permanent public development URL** — developers and testers run it locally (see [Development](#development)). Temporary Cloudflare preview deployments may be created when specifically needed for testing; they are not permanent and are not created automatically.
-
-Save_Links is hosted on Cloudflare Workers. The stable version is available at save-links.ucancallmesan.workers.dev.
-
-## What Save Links Does
-
-Save_Links is a bookmark manager that lives in your browser. Your links stay on your device in IndexedDB. The app works offline and local use never requires an account or cloud connectivity.
-
-Cloud synchronization is available for authenticated users. Users can sign in with Google or GitHub to synchronize supported links and folders across browsers.
-
-Save_Links is a Progressive Web App, so once you have opened it online it also works offline: links can still be added, edited, and deleted without a connection. Data saved by very old versions of the app is migrated automatically on first launch, so nothing is lost.
+- **Local-first** - links, folders, settings and your profile are stored in your browser's **IndexedDB**. Local use never uploads anything.
+- **No account required** - the app is fully usable without signing in.
+- **Works offline** - after one online visit the app shell is cached by a service worker, and adding, editing and deleting links keeps working without a connection.
+- **Optional cloud synchronization** - sign in with Google or GitHub to synchronize links and folders across your browsers.
+- **Installable PWA** - install it from the browser and use it like a desktop or mobile app.
 
 ## Features
 
-- **Save links** — paste a URL and save a bookmark in seconds
-- **Automatic metadata** — title, description, and preview image are filled in when the site provides them; saving is never blocked
-- **Duplicate detection** — if the cleaned URL is already saved, you can replace the existing link, add another copy, or cancel
-- **Automatic categories** — known sites (GitHub, YouTube, X/Twitter, Amazon, and others) are tagged automatically; everything else falls into "Other"
-- **Folders** — keep related links together, with live counts; folders can be renamed, deleted, or reorganized at any time
-- **Favorites, Important, Must Have** — mark links for quick access or priority
-- **Search** — full-text search across every saved link
-- **Filters** — combine filters by flag (important, must have, favorite), category, folder, and status
-- **Sorting** — order your saved links by Newest first, Oldest first, Title A–Z, or Title Z–A
-- **Appearance** — light, dark, or system theme with a choice of four accent colors; your preference is remembered
-- **Installable app** — Save_Links can be installed on your device like a native app
-- **Responsive layouts** — clean desktop, tablet, and mobile layouts; on smaller screens the folders and filters/tools panels open one at a time
-- **Sticky Saved Links toolbar** — search, filters, sorting, quick add, and view mode stay within reach while you scroll
-- **Card, list, or compact views** — switch how saved links are presented with one tap
-- **Inline editing** — update a link's details directly in place
-- **Saves instantly** — every change is written immediately to your browser's storage, so a page reload always shows the latest state
-- **Google or GitHub authentication** — sign in to enable optional cloud synchronization
-- **Cross-browser synchronization** — synchronized links and folders appear across all authenticated browsers
+- **Save links** with automatic metadata (title, description, preview image) when the site provides it, and full manual editing.
+- **URL cleaning** - common tracking parameters are removed before saving.
+- **Duplicate detection** - saving an existing link offers Replace existing / Add another / Cancel.
+- **Folders** with live counts and an Unfiled group; move links between folders from the card menu.
+- **Favorites, Important and Must Have** - per-link status flags; Favorites and Important are one-click card controls, Must Have lives in the card's quick-action menu.
+- **Search** across titles, URLs, descriptions and tags, with the **Ctrl/⌘+K** shortcut.
+- **Filters** by category, status and folder, shown as clearable chips.
+- **Sorting** - Newest, Oldest, Title A-Z and Title Z-A.
+- **Card, List and Compact** views.
+- **Inline editing** from the card or row, without leaving the list.
+- **Responsive UI** for desktop, tablet and mobile, including a compact mobile shell with a four-item bottom navigation.
+- **Light, Dark and System** appearance, plus accent color schemes (None, Ocean, Forest, Lavender, Warm Amber).
+- **Backup and restore** with JSON export/import.
+- **Google and GitHub sign-in** with optional **cloud synchronization**, including **Sync & Merge** for existing local data and a **Keep Local** option.
 
-## Local-first
+## Feature showcase
 
-Save_Links is local-first. Your links stay on your device in IndexedDB. The app works offline and local use never requires an account or cloud connectivity. You can use Save_Links completely without ever creating an account or signing in.
+An overview of the main features - saved links, folders, appearance settings, search and filtering, link actions, and the mobile layout.
 
-## Cloud synchronization
+<p align="center">
+  <img src="docs/screenshots/feature-showcase.png" alt="Save Links feature showcase: saved links, folders, appearance settings, search, link actions and the mobile layout" width="100%" />
+</p>
 
-Cloud synchronization is optional. Users can sign in with Google or GitHub to synchronize supported links and folders across browsers.
-
-- Create, update, and delete operations are synchronized across authenticated browsers.
-- Local links can be merged after login using **Sync & Merge**.
-- **Keep Local** is available to preserve local data during the login/merge flow.
-- Synchronization runs automatically in the background (every 30 seconds when the tab is visible and online).
-- **Cloud synchronization is not a backup.** Users should use the application's export/backup functionality when they need a backup.
-
-## Sync & Merge
-
-When you sign in with existing local data, Save_Links prompts you to choose how to handle it:
-
-- **Sync & Merge** — converts your local links and folders into authenticated mutations and pushes them to the cloud. They will then synchronize across all your authenticated browsers.
-- **Keep Local** — keeps your local data on this device only, marks it as "kept local" so it won't prompt again, and does not upload it to the cloud.
-
-## Authentication
-
-Currently, Save_Links supports **Google (primary) and GitHub sign-in** to enable optional cloud synchronization.
-
-**Email login is not yet supported.**
-
-## Privacy
+## Local-first and privacy
 
 - **Local use** stores all data locally in your browser's IndexedDB. No data leaves your device.
-- **Authenticated cloud synchronization** sends supported synchronized data (links and folders) to the cloud so it can be accessed across your browsers.
-- Cloud synchronization is **optional** — you can use Save_Links completely without an account.
+- **Authenticated cloud synchronization** sends supported synchronized data (links and folders) to the cloud so it can be accessed across your browsers. It is **optional** - you can use Save_Links completely without an account.
 - **Cloud synchronization is not a backup.** It is a synchronization service. For backups, use the application's export/backup functionality.
 - **No analytics or telemetry.** Save_Links does not collect usage data.
 - The production site is only where the app comes from; it is not a backend, and no data is uploaded to it during local use.
@@ -95,19 +66,33 @@ Currently, Save_Links supports **Google (primary) and GitHub sign-in** to enable
 - **One optional external request.** When you save a URL, your browser may ask that website for its title, description, and preview image. Some websites block this, in which case the link is saved with just what you entered.
 - **Backups are your safety net.** Clearing your browser's data removes your saved links, so export a backup first if you want to move or protect them.
 
-## Authentication and Security
+## Cloud synchronization and authentication
 
 Sign-in and cloud synchronization are live in the production application at **https://save-links.ucancallmesan.workers.dev**:
 
-- **Google OAuth** — `/auth/google/login`, `/auth/google/callback`
-- **GitHub OAuth** — `/auth/github/login`, `/auth/github/callback`
-- **Session management** — `/api/me`, `/auth/logout`
-- **API boundary** — `/api/me` (read), `POST /api/session/refresh` (rotate session)
-- **Security** — PKCE, signed single-use OAuth state, approved-origin allowlist, session token hashing, HttpOnly cookies, rate limiting on authentication and API endpoints
+- **Google OAuth** - primary provider; `/auth/google/login`, `/auth/google/callback`
+- **GitHub OAuth** - `/auth/github/login`, `/auth/github/callback`
+- **Session management** - `/api/me`, `/auth/logout`
+- **API boundary** - `/api/me` (read), `POST /api/session/refresh` (rotate session)
+- **Sync & Merge** - after signing in, existing local data can be merged with your account
+- **Keep Local** - keeps your local data on this device only, marks it as "kept local" so it won't prompt again, and does not upload it to the cloud
 
-The local application works completely without authentication.
+The local application works completely without authentication. **Email login is not yet supported.**
 
-## URL Cleaning
+### Security
+
+- PKCE, signed single-use OAuth state, and an approved-origin allowlist
+- Session token hashing, HttpOnly cookies, and session rotation
+- Rate limiting on authentication and API endpoints
+
+## Backup and restore
+
+All your data can be exported to a JSON file and imported again later - which is also how you move your links between browsers or machines. Backups made by older versions of Save_Links can still be imported.
+
+**Cloud synchronization is not a backup.** Use export/import for backups.
+
+## Feature details
+### URL Cleaning
 
 When you save a link, common tracking parameters are removed while normal functional parameters are kept. One example:
 
@@ -117,7 +102,7 @@ https://example.com/article?id=123&utm_source=newsletter&utm_campaign=spring
 Saved:
 https://example.com/article?id=123
 
-## Duplicate Links
+### Duplicate Links
 
 If the cleaned URL you are saving is already in your collection, Save_Links lets you choose:
 
@@ -127,11 +112,11 @@ If the cleaned URL you are saving is already in your collection, Save_Links lets
 
 The original URL you entered is still shown, while the saved navigation URL is the cleaned one.
 
-## Metadata
+### Metadata
 
 Save_Links saves your link immediately, so metadata never delays saving. Title, description, and preview image are filled in when a site provides usable information, and retrieval happens in the background when needed. Some websites do not allow their page information to be read, so the title, description, or preview image may not always be available. The link is still saved either way, and you can edit any of these fields yourself.
 
-## Sorting
+### Sorting
 
 You can reorder the list of saved links to suit how you like to work:
 
@@ -142,19 +127,11 @@ You can reorder the list of saved links to suit how you like to work:
 
 Sorting works together with search, filters, and folders — it reorders only the links currently shown, and it never changes where your links are stored.
 
-## Backup and Restore
+## Stable vs development
 
-All your data can be exported to a JSON file and imported again later — which is also how you move your links between browsers or machines. Backups made by older versions of Save_Links can still be imported.
-
-**Cloud synchronization is not a backup.** Use export/import for backups.
-
-## App Preview
-
-Save links quickly with automatic metadata and keep everything organized in one place.
-
-<p align="center">
-  <img src="docs/screenshots/save-link-form.png" alt="Save_Links save link form" width="100%" />
-</p>
+- **Stable** - the latest **released** version. The current stable release is **v2.2.0**, hosted on **Cloudflare Workers** at **https://save-links.ucancallmesan.workers.dev** - just open the address; there is nothing to install.
+- **Development** - the latest unreleased code on the `master` branch, for testing upcoming work or contributing. It may contain unfinished features, bugs, or breaking changes, and there is currently **no permanent public development URL** - developers run it locally (see [Development](#development)).
+- `master` is not a release; new work lands there between releases.
 
 ## Development
 
@@ -177,10 +154,10 @@ The dev server is available at `http://localhost:5173` by default.
 
 ### Other useful commands
 
-- `npm test` — run the unit tests
-- `npm run test:e2e` — run the end-to-end browser tests
-- `npm run build` — create a production build in `dist/`
-- `npm run preview` — preview the production build locally
+- `npm test` - run the unit tests
+- `npm run test:e2e` - run the end-to-end browser tests
+- `npm run build` - create a production build in `dist/`
+- `npm run preview` - preview the production build locally
 
 ### Tech stack
 
@@ -190,11 +167,7 @@ Authentication and cloud synchronization use **Cloudflare Workers**, **D1 (SQLit
 
 ## Development with OpenCode
 
-Save_Links is developed with OpenCode as an AI-assisted development tool.
-
-Project-specific development instructions, architecture notes, and workflow guidance are maintained in `.opencode/`.
-
-Changes are validated with automated unit, end-to-end, and build checks.
+Save_Links is developed with OpenCode as an AI-assisted development tool. Project-specific development instructions, architecture notes, and workflow guidance are maintained in `.opencode/`. Changes are validated with automated unit, end-to-end, and build checks.
 
 ## Roadmap
 
