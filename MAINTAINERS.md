@@ -72,6 +72,8 @@ The data layer is unit-tested against real SQLite (`worker/db/store.test.js` run
 
 **Production D1:** the remote database `save-links-db` already exists (its real `database_id` is set in `wrangler.jsonc`), and migrations 0001–0004 are applied. New migrations are applied with `npx wrangler d1 migrations apply save-links-db --remote`.
 
+Daily housekeeping is wired through one Cron Trigger (`wrangler.jsonc` → `triggers.crons`): `worker/index.js`'s `scheduled()` handler deletes expired sessions and reclaims tombstones past the 30-day retention window (`TOMBSTONE_RETENTION_MS`). Deploying the Worker manages the trigger (Wrangler replaces the configured triggers on deploy).
+
 ### OAuth (Google primary + GitHub): /auth/google/*, /auth/github/*, /auth/me, /auth/logout
 
 Routes live in `worker/auth.js` (`worker/oauth/` holds the Google + GitHub clients and the signed OAuth-state cookie). Routing reaches them because `wrangler.jsonc` sets `assets.run_worker_first: ["/auth/*", "/api/*"]` — with the current `compatibility_date`, navigation requests otherwise never invoke the Worker script and would fall through to the SPA fallback. Methods are enforced per route in `worker/index.js`: `GET` for login/callback/me, `POST` for logout; anything else gets `405` + `Allow`. `/auth/me` and `/auth/logout` need no OAuth secrets — they consume only the session cookie + D1 — so authentication stays optional and the local app never depends on them.

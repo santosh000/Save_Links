@@ -25,6 +25,7 @@
 // applies only to static-asset responses, not to script responses).
 import { handleOAuthLogin, handleOAuthCallback, handleAuthMe, handleAuthLogout } from './auth.js'
 import { handleApiMe, handleApiSessionRefresh, handleApiSyncMutation, handleApiSyncMutations, handleApiSyncObjects } from './api.js'
+import { deleteExpiredSessions, purgeExpiredTombstones } from './db/store.js'
 
 const AUTH_ROUTES = new Map([
   ['/auth/github/login', { allow: ['GET'], handler: (req, env) => handleOAuthLogin(req, env, { provider: 'github' }) }],
@@ -76,5 +77,17 @@ export default {
       })
     }
     return env.ASSETS.fetch(request)
+  },
+
+  // Daily maintenance (Decision #18): delete expired sessions, then reclaim
+  // tombstones past the 30-day retention window. One scheduled execution runs
+  // both cleanups with the same controller timestamp; the functions are
+  // time-bounded and idempotent, so repeated runs are safe. Errors are NOT
+  // swallowed: if a cleanup fails it propagates so the Cron invocation is
+  // recorded as failed, and the next daily run retries both.
+  async scheduled(controller, env) {
+    const now = controller.scheduledTime
+    await deleteExpiredSessions(env.DB, { now })
+    await purgeExpiredTombstones(env.DB, { now })
   },
 }

@@ -54,6 +54,22 @@
 			"database_id": "39997a61-6efe-4628-9054-1c61c173f83f"
 		}
 	],
+	// Daily maintenance (Decision #18): one Cron Trigger drives worker/index.js
+	// scheduled(), which deletes expired sessions and reclaims tombstones past
+	// the 30-day retention window. Daily at 03:00 UTC.
+	"triggers": {
+		"crons": [
+			"0 3 * * *"
+		]
+	},
+	// Workers Observability (temporary — Decision #18 production verification):
+	// full invocation logs so the daily Cron scheduled() execution is visible in
+	// the Cloudflare dashboard. Platform-level logs only; no application
+	// telemetry is added (README "No analytics or telemetry" is unchanged).
+	"observability": {
+		"enabled": true,
+		"head_sampling_rate": 1
+	},
 	// OAuth sign-in (worker/oauth/*): Google is the primary provider, GitHub
 	// also supported; the Google callback additionally verifies Google's
 	// signed id_token server-side. All secrets are deployed as Wrangler

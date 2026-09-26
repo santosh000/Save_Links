@@ -9,8 +9,8 @@ working state `5fe38b4`): `.opencode/architecture.md`, `.opencode/project.md`,
 `SECURITY.md`, `AGENTS.md`, `worker/auth.js`, `worker/api.js`, `worker/index.js`,
 `worker/db/store.js`, `worker/db/store.test.js` (read-only), `worker/oauth/*`,
 `migrations/0001..0003`, `src/domain/link.js`, `src/storage/indexeddb.js`,
-`src/storage/contract.js`, `src/storage/repository.js`, `src/auth/*` (session,
-contract, memory-adapter, accountService, authValidation), `src/composables/useLinks.js`,
+`src/storage/repository.js`, `src/auth/*` (session, accountService,
+authValidation), `src/composables/useLinks.js`,
 `useFolders.js`, `useProfile.js`, `useSettings.js`, `src/utils/backup.js`, the
 preserved sync scaffold (`src/sync/*`, `useSync.js`, `SyncPanel.vue`,
 `AccountPanel.vue`, `LocalProfilePanel.vue`), and `src/App.vue`.
@@ -884,9 +884,11 @@ per-request opt-in toggle, not by default). Server error bodies remain generic
 - **Bounded payloads:** one object per push (≤512 KiB), paged pull (≤500/page).
 - **No full-database upload:** per-object outbox emits, bounded.
 - **No unnecessary background execution:** no worker cron for sync, no
-  always-running tasks. The only background housekeeping is the existing
-  opportunistic expiry sweeps (OAuth states, sessions, tombstones) which are
-  index-driven and already present.
+  always-running tasks. The only background housekeeping is expiry cleanup:
+  the OAuth-state sweep runs opportunistically on login, and expired sessions
+  plus tombstones past the 30-day retention window are reclaimed once daily by
+  the Worker `scheduled()` handler (one Cron Trigger in `wrangler.jsonc`); all
+  are index-driven.
 - **Idempotent requests** keep retries cheap and exact.
 - **Scale guard (`ponytail:` note):** if a single account's object count grows
   very large, a per-account object-count ceiling and slightly larger page
