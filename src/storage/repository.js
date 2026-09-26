@@ -1,7 +1,7 @@
 // The application's single repository instance (IndexedDB adapter).
 //
-// The composables depend on the repository contract (src/storage/contract.js),
-// never on IndexedDB directly. One shared instance keeps every composition
+// The composables depend on this shared repository instance, never on
+// IndexedDB directly. One shared instance keeps every composition
 // root (and the boot sequence in src/main.js) talking to the same connection,
 // so state written by one composable is a single database write away from any
 // other — no cache-coherency problems between separations of concern.

@@ -1,4 +1,4 @@
-// IndexedDB adapter behind the repository contract (src/storage/contract.js).
+// IndexedDB adapter behind the repository instance in src/storage/repository.js.
 // The composables do NOT import this directly yet; the localStorage path stays
 // the live storage until the migration task switches the app over.
 //

@@ -1,6 +1,4 @@
 import { createApp } from 'vue'
-import 'bootstrap/dist/css/bootstrap.min.css'
-import 'bootstrap-icons/font/bootstrap-icons.css'
 import './app-overrides.css'
 import App from './App.vue'
 import { repository } from './storage/repository.js'

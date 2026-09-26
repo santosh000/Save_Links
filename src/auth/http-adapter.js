@@ -1,6 +1,6 @@
 // Real HTTP AuthAdapter for Phase A — replaces the Phase 2A in-memory test
 // double with the existing Cloudflare Worker OAuth + session endpoints.
-// Implements the contract in src/auth/contract.js.
+// Implements the adapter contract consumed by src/auth/session.js.
 //
 // Boundary rules preserved (AGENTS.md / SECURITY.md / .opencode/architecture.md):
 //   - The browser sends its HttpOnly session cookie automatically on same-origin

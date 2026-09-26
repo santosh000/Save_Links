@@ -1,6 +1,59 @@
 import { describe, it, expect, vi } from 'vitest'
 import { createSession, session, initSession } from './session.js'
-import { createMemoryAdapter } from './memory-adapter.js'
+
+// Test double for the AuthAdapter contract: simulates anonymous/authenticated
+// sessions, login, logout, refresh and initialization failure without any
+// network, storage or cookies. Test-local by design (the production tree ships
+// the real HTTP adapter via src/auth/session.js).
+/**
+ * @param {Object} [options]
+ * @param {Object|null} [options.initialUser]  resolved by init() (default null = anonymous)
+ * @param {boolean} [options.failInit]         make init() reject
+ * @param {boolean} [options.failLogin]        make login() reject
+ * @param {boolean} [options.failLogout]       make logout() reject
+ * @param {boolean} [options.failRefresh]      make refresh() reject (infrastructure failure)
+ * @param {boolean} [options.expireOnRefresh]  make refresh() reject with code 'SESSION_EXPIRED'
+ * @param {Object} [options.loginUser]         user returned by login()
+ */
+function createMemoryAdapter(options = {}) {
+  const {
+    initialUser = null,
+    failInit = false,
+    failLogin = false,
+    failLogout = false,
+    failRefresh = false,
+    expireOnRefresh = false,
+    loginUser = { id: 'memory-user', name: 'Memory User', email: null },
+  } = options
+
+  let user = initialUser
+
+  return {
+    init() {
+      if (failInit) return Promise.reject(new Error('Memory adapter: initialization failed'))
+      return Promise.resolve(user)
+    },
+    login() {
+      if (failLogin) return Promise.reject(new Error('Memory adapter: login failed'))
+      user = user || { ...loginUser }
+      return Promise.resolve(user)
+    },
+    logout() {
+      if (failLogout) return Promise.reject(new Error('Memory adapter: logout failed'))
+      user = null
+      return Promise.resolve()
+    },
+    refresh() {
+      if (expireOnRefresh) {
+        const err = new Error('Memory adapter: session expired')
+        err.code = 'SESSION_EXPIRED'
+        return Promise.reject(err)
+      }
+      if (failRefresh) return Promise.reject(new Error('Memory adapter: refresh failed'))
+      return Promise.resolve()
+    },
+  }
+}
 
 const ALICE = { id: 'user-1', name: 'Alice', email: 'alice@example.com' }
 

@@ -1,10 +1,32 @@
 // Session abstraction — owns authentication state for the application and
 // nothing else. It does NOT touch IndexedDB, links, folders, profile,
-// settings, migration, backup or sync: it talks only to an AuthAdapter through
-// the contract in src/auth/contract.js. The application observes this
+// settings, migration, backup or sync: it talks only to an injected
+// AuthAdapter (init/login/logout/refresh). The application observes this
 // abstraction; it never observes a provider.
 
 import { createHttpAdapter } from './http-adapter.js'
+
+/**
+ * Authenticated identity — the provider-neutral identity information the
+ * application needs. Never contains tokens, credentials or provider specifics.
+ * @typedef {Object} AuthUser
+ * @property {string} id
+ * @property {string} name
+ * @property {string|null} [email]
+ */
+
+/**
+ * Authentication status of the application session.
+ * @typedef {'unknown'|'anonymous'|'authenticating'|'authenticated'} AuthStatus
+ */
+
+/**
+ * Application session state (the application's view of the session).
+ * @typedef {Object} AuthState
+ * @property {AuthStatus} status
+ * @property {AuthUser|null} user
+ * @property {string|null} error
+ */
 
 function messageOf(err) {
   return err instanceof Error ? err.message : String(err ?? 'unknown error')
@@ -12,10 +34,10 @@ function messageOf(err) {
 
 /**
  * Create an isolated session abstraction around an AuthAdapter.
- * @param {import('./contract.js').AuthAdapter} adapter
+ * @param {Object} adapter - object implementing init()/login()/logout()/refresh()
  */
 export function createSession(adapter) {
-  /** @type {import('./contract.js').AuthState} */
+  /** @type {AuthState} */
   const state = { status: 'unknown', user: null, error: null }
   const listeners = new Set()
   let initPromise = null
