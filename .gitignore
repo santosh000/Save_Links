@@ -46,3 +46,6 @@ Desktop.ini
 build/
 out/
 coverage/
+
+# Local-only third-party OpenCode skills (Emil Kowalski; never commit)
+.opencode/skills/
