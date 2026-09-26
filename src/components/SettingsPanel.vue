@@ -73,7 +73,9 @@ const schemes = [
   color: var(--muted); cursor: pointer;
   transition: border-color var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
 }
+@media (hover: hover) and (pointer: fine){
 .theme-opt:hover { border-color: var(--accent); background: var(--muted-bg); color: var(--text-h); }
+}
 .theme-opt.active { border-color: var(--accent); background: var(--accent-bg); color: var(--accent); }
 .theme-opt:has(input:focus-visible) { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 2px; }
 .theme-opt input[type="radio"] {

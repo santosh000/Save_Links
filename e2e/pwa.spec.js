@@ -65,7 +65,7 @@ test.describe('PWA foundation (production build)', () => {
     await expect(linkRowByTitle(page, 'Offline Seed')).toBeVisible()
 
     // 3. Local CRUD while offline (metadata fetch fails gracefully - save still works).
-    await page.getByRole('button', { name: 'Save a link', exact: true }).click()
+    await page.locator('.content-head .add-toggle').click()
     await page.locator('#save-url').fill('https://example.com/offline-new')
     await page.locator('#save-title').fill('Offline New')
     await page.getByRole('button', { name: 'Save link' }).click()

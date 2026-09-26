@@ -38,8 +38,8 @@ function save() {
   <div class="edit-form">
     <label class="edit-field"><span>Title</span><input v-model="draftTitle" class="input edit-input" /></label>
     <label class="edit-field"><span>Description</span><textarea v-model="draftDesc" rows="2" class="input edit-input"></textarea></label>
-    <label class="edit-field"><span>Image URL</span><input v-model="draftImage" placeholder="https://..." class="input edit-input" /></label>
-    <label class="edit-field"><span>Tags (comma separated)</span><input v-model="draftTags" class="input edit-input" /></label>
+    <label class="edit-field"><span>Image URL</span><input v-model="draftImage" type="url" inputmode="url" autocapitalize="none" autocorrect="off" placeholder="https://..." class="input edit-input" /></label>
+    <label class="edit-field"><span>Tags (comma separated)</span><input v-model="draftTags" autocapitalize="none" autocorrect="off" class="input edit-input" /></label>
     <label class="edit-field"><span>Category</span>
       <AppSelect v-model="draftCategory" variant="field" :options="CATEGORIES" aria-label="Edit category" />
     </label>

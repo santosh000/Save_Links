@@ -283,7 +283,9 @@ function platformIcon() {
   padding: 0;
   margin: 0;
 }
+@media (hover: hover) and (pointer: fine){
 .card:hover { border-color: var(--accent-border); box-shadow: var(--shadow-sm); }
+}
 /* explicit editing state: accent border while the anchored edit popover is open
    (same token as LinkRow's .link-row.editing) */
 .card.editing { border-color: var(--accent-border); }
@@ -330,7 +332,9 @@ svg.more-dots { fill: currentColor; stroke: none; }
   overflow: hidden;
   min-width: 0;
 }
+@media (hover: hover) and (pointer: fine){
 .title:hover { color: var(--accent); }
+}
 /* URL: one visual line. The complete value stays in the DOM (and in the
    anchor's accessible name + title attribute); only the painted tail is masked
    so a long URL fades into the surface. The mask gradient is an alpha channel
@@ -358,7 +362,9 @@ svg.more-dots { fill: currentColor; stroke: none; }
   white-space: nowrap;
   text-decoration: none;
 }
+@media (hover: hover) and (pointer: fine){
 .url:hover { color: var(--accent); text-decoration: underline; }
+}
 /* The normalized value is a secondary detail: it stays on the same line and
    truncates itself rather than crowding the URL out. */
 .normalized-hint {
@@ -412,12 +418,16 @@ svg.more-dots { fill: currentColor; stroke: none; }
   cursor: pointer;
   transition: color var(--transition-fast), background var(--transition-fast), transform .1s ease;
 }
+@media (hover: hover) and (pointer: fine){
 .pill:hover { color: var(--text-h); background: var(--muted-bg); }
+}
 .pill:active { transform: scale(0.97); }
 .pill:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 1px; }
 .pill-icon { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; }
 .pill.active { background: transparent; color: var(--accent); font-weight: var(--weight-semibold); }
+@media (hover: hover) and (pointer: fine){
 .pill.active:hover { background: var(--accent-bg); }
+}
 .pill.active .pill-icon { fill: currentColor; stroke: currentColor; }
 /* Item actions (.icon-btn, incl. the destructive hover) are defined once in the
    global control language (src/app-overrides.css), so Card and List items use

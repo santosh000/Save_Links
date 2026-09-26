@@ -93,6 +93,7 @@ function onKeydown(e) {
   display: grid;
   place-items: center;
   padding: 16px;
+  padding-bottom: calc(16px + var(--safe-area-bottom));
 }
 .dialog {
   background: var(--card);
@@ -102,7 +103,9 @@ function onKeydown(e) {
   width: 100%;
   max-width: 420px;
   max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px - var(--safe-area-bottom));
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 20px;
 }
 .dialog-title { margin: 0 0 8px; font-size: var(--text-lg); color: var(--text-h); }

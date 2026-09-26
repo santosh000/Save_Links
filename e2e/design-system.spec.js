@@ -153,7 +153,7 @@ test('all three dropdown variants are token-driven and consistent', async ({ pag
   await page.keyboard.press('Escape')
 
   // field (Add link form): inset surface, fills its field
-  await page.getByRole('button', { name: 'Save a link', exact: true }).click()
+  await page.locator('.content-head .add-toggle').click()
   await expect(page.locator('#save-category')).toBeAttached()
   const fieldBg = parseRgb(await css(page, '.asel--field .asel-trigger', 'background-color'))
   const mutedBg = parseRgb(await page.evaluate(() => {

@@ -242,7 +242,9 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
   max-width: 100%;
   box-sizing: border-box;
 }
+@media (hover: hover) and (pointer: fine){
 .link-row:hover { border-color: var(--accent-border); box-shadow: var(--shadow-sm); }
+}
 .link-row.editing { border-color: var(--accent-border); }
 .row-main {
   display: flex;
@@ -277,7 +279,9 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
   overflow: hidden;
   text-overflow: ellipsis;
 }
+@media (hover: hover) and (pointer: fine){
 .link-row:hover .row-title { color: var(--accent); }
+}
 .row-meta {
   display: flex;
   align-items: center;

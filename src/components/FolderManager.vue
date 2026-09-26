@@ -114,7 +114,7 @@ function handleDelete(id) {
         </template>
       </li>
     </ul>
-    <!-- Empty state: same recipe as the Saved Links empty state, sized for the panel -->
+    <!-- Empty state: same recipe as the Links empty state, sized for the panel -->
     <div v-if="folders.length===0" class="empty-state">
       <div class="empty-icon" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
@@ -151,7 +151,9 @@ function handleDelete(id) {
   border-end-end-radius: var(--radius-sm);
   padding:6px 8px;
 }
+@media (hover: hover) and (pointer: fine){
 .folder-item:hover { background: var(--muted-bg); }
+}
 .folder-item.active { border-inline-start-color: var(--accent); }
 .folder-item.active .folder-name { color: var(--accent); }
 /* editing: the name row is hidden, so the input owns the line; Save/Cancel wrap
@@ -169,7 +171,7 @@ function handleDelete(id) {
    folder row and a link item look like the same product. */
 .error { color: var(--error); font-size: var(--text-xs); margin-top:8px; }
 .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
-/* Empty state mirrors the Saved Links recipe (icon + heading + supporting text)
+/* Empty state mirrors the Links recipe (icon + heading + supporting text)
    with compact spacing for this panel. */
 .empty-state { padding: var(--space-4) var(--space-2); text-align: center; }
 .empty-icon {

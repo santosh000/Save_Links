@@ -17,7 +17,7 @@
    10. Pagination
    11. Form Elements
    12. Buttons
-   13. App Components (toast, modal, fade, focus, utilities)
+   13. App Components (toast, modal, focus, utilities)
    14. Motion & Accessibility
    15. Select / dropdown (AppSelect.vue)
    16. Anchored Popovers
@@ -113,7 +113,6 @@
     /* Radii */
     --radius-sm: 10px;
     --radius: 14px;
-    --radius-lg: 18px;
     --radius-full: 999px;
 
     /* Spacing scale */
@@ -241,14 +240,154 @@
 /* ---------------------------------------------------------------------
    3. Base & Typography
 --------------------------------------------------------------------- */
+/* Mobile platform baseline: no tap flash, no iOS font inflation in landscape,
+   and no pull-to-refresh / rubber-band on the app shell (inner scrollers keep
+   their own overscroll containment). Pinch zoom is intentionally still enabled. */
+html{
+    -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%;
+    overscroll-behavior: none;
+}
+
+/* Minimal base reset — the subset of the former Bootstrap reboot the app
+   actually relied on (box-sizing, body spacing/line-height, heading/p/list
+   defaults, native controls, fieldset/legend, search-field normalization).
+   No Bootstrap colours, utilities or component styles. */
+*,
+*::before,
+*::after{
+    box-sizing: border-box;
+}
+
+h1, h2, h3, h4, h5, h6{
+    margin-top: 0;
+    margin-bottom: 0.5rem;
+    line-height: 1.2;
+}
+/* The empty-state h3 is the only heading without a local size; every other
+   heading is sized by its component. Keep its former fluid scale. */
+h3{
+    font-size: calc(1.3rem + 0.6vw);
+}
+@media (min-width: 1200px){
+    h3{
+        font-size: 1.75rem;
+    }
+}
+
+p{
+    margin-top: 0;
+    margin-bottom: 1rem;
+}
+
+ol, ul{
+    padding-left: 2rem;
+}
+ol, ul, dl{
+    margin-top: 0;
+    margin-bottom: 1rem;
+}
+dt{
+    font-weight: 700;
+}
+
+label{
+    display: inline-block;
+}
+
+button{
+    border-radius: 0;
+}
+button:focus:not(:focus-visible){
+    outline: 0;
+}
+
+input, button, select, optgroup, textarea{
+    margin: 0;
+    font-family: inherit;
+    font-size: inherit;
+    line-height: inherit;
+}
+button, select{
+    text-transform: none;
+}
+button, [type="button"], [type="reset"], [type="submit"]{
+    -webkit-appearance: button;
+}
+::-moz-focus-inner{
+    padding: 0;
+    border-style: none;
+}
+textarea{
+    resize: vertical;
+}
+
+fieldset{
+    min-width: 0;
+    padding: 0;
+    margin: 0;
+    border: 0;
+}
+legend{
+    float: left;
+    width: 100%;
+    padding: 0;
+    margin-bottom: 0.5rem;
+    line-height: inherit;
+}
+legend + *{
+    clear: left;
+}
+
+img, svg{
+    vertical-align: middle;
+}
+
+/* Sprite-backed icons (the former Bootstrap Icons): sized from the
+   surrounding font-size, like the icon font they replace. */
+.bi{
+    width: 1em;
+    height: 1em;
+    display: inline-block;
+    vertical-align: -0.125em;
+    fill: currentColor;
+    flex-shrink: 0;
+}
+
+[type="search"]{
+    -webkit-appearance: textfield;
+    outline-offset: -2px;
+}
+[type="search"]::-webkit-search-cancel-button{
+    cursor: pointer;
+    filter: grayscale(1);
+}
+::-webkit-search-decoration{
+    -webkit-appearance: none;
+}
+
 body{
+    margin: 0;
     background-color: var(--bg);
     color: var(--text-h);
     font-family: var(--font-sans);
     font-size: 0.925rem;
     font-weight: var(--weight-medium);
+    line-height: 1.5;
     -webkit-font-smoothing: antialiased;
     letter-spacing: -0.01em;
+    overscroll-behavior: none;
+}
+
+/* While a dialog/panel backdrop is mounted the document behind it must not
+   scroll or rubber-band (the dialog's own scroller handles its overflow).
+   CSS-only, so there is no lock state to release and overlapping panels just
+   work; scoped to coarse pointers so desktop keeps its normal scrollbar. */
+@media (pointer: coarse){
+html:has(.dialog-backdrop, .account-backdrop, .import-preview-backdrop, .lp-backdrop),
+body:has(.dialog-backdrop, .account-backdrop, .import-preview-backdrop, .lp-backdrop){
+    overflow: hidden;
+}
 }
 
 h1, h2, h3, h4, h5, h6, .h1, .h2, .h3, .h4{
@@ -261,13 +400,25 @@ a{
     color: var(--accent);
     text-decoration: none;
     transition: all var(--transition-slow);
+    touch-action: manipulation;
 }
+@media (hover: hover) and (pointer: fine){
 a:hover{
     color: var(--accent-hover);
 }
+}
 
-/* Shared interaction language for every control */
-button, select, [role="button"]{ cursor: pointer; }
+/* Shared interaction language for every control. touch-action removes the
+   double-tap-zoom wait without suppressing any scroll gesture. */
+button, select, [role="button"]{ cursor: pointer; touch-action: manipulation; }
+
+/* Controls do not read as selectable text on long press. Content (titles,
+   URLs, descriptions, error messages) stays fully selectable. */
+button, [role="button"], .more-item, .page-link{
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+}
 button:disabled, select:disabled, input:disabled, textarea:disabled{
     cursor: not-allowed;
     opacity: var(--opacity-disabled);
@@ -316,6 +467,13 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
     transition: all var(--transition-slow);
 }
 
+/* Sidebar scroller: the menu area takes the remaining height and scrolls
+   inside the fixed drawer. */
+.sidebar-menu-scroll{
+    flex-grow: 1;
+    overflow-y: auto;
+}
+
 .sidebar-brand{
     display: flex;
     align-items: center;
@@ -328,13 +486,15 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
     text-decoration: none;
 }
 
+@media (hover: hover) and (pointer: fine){
 .sidebar-brand:hover{
     color: var(--sidebar-text-strong);
+}
 }
 
 /* The brand mark is identity, not a hover toy: the accent icon stays, the
    decorative rotation is gone. */
-.sidebar-brand i{
+.sidebar-brand .bi{
     color: var(--accent);
     font-size: var(--text-2xl);
 }
@@ -383,7 +543,7 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
     transition: color var(--transition-normal), background-color var(--transition-normal), border-color var(--transition-normal);
 }
 
-.sidebar-menu-link i{
+.sidebar-menu-link .bi{
     font-size: var(--text-xl);
     transition: color var(--transition-normal);
 }
@@ -394,19 +554,21 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
     color: var(--sidebar-text);
 }
 
-.sidebar-wrapper .sidebar-menu-link i{
+.sidebar-wrapper .sidebar-menu-link .bi{
     color: inherit;
 }
 
 /* Hover: the active scheme accent on text + icon (never white). The
    .sidebar-wrapper prefix keeps this above the generic dark-mode a:hover. */
+@media (hover: hover) and (pointer: fine){
 .sidebar-wrapper .sidebar-menu-link:hover{
     color: var(--accent);
     background-color: var(--sidebar-hover-bg);
 }
 
-.sidebar-wrapper .sidebar-menu-link:hover i{
+.sidebar-wrapper .sidebar-menu-link:hover .bi{
     color: var(--accent);
+}
 }
 
 /* Active: accent indicator + accent icon + strong label. No filled active
@@ -417,7 +579,7 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
     font-weight: var(--weight-semibold);
 }
 
-.sidebar-wrapper .sidebar-menu-link.active i{
+.sidebar-wrapper .sidebar-menu-link.active .bi{
     color: var(--accent);
 }
 
@@ -454,7 +616,7 @@ body.sidebar-minimized .sidebar-menu-link{
     padding: var(--space-3);
 }
 
-body.sidebar-minimized .sidebar-menu-link i{
+body.sidebar-minimized .sidebar-menu-link .bi{
     font-size: var(--text-2xl);
 }
 
@@ -538,6 +700,14 @@ body.sidebar-minimized .sidebar-menu-link i{
     color: var(--text-h);
     outline: none;
     transition: all var(--transition-normal);
+}
+
+/* The app ships its own clear control (.navbar-search-btn with aria-label
+   "Clear search"); suppress the WebKit-native search cancel button so the
+   field never renders two "×" controls. Scoped to this input only. */
+.navbar-search-input::-webkit-search-cancel-button{
+    -webkit-appearance: none;
+    display: none;
 }
 
 /* Focus follows the shared field recipe: the border becomes the accent base
@@ -639,9 +809,11 @@ body.sidebar-minimized .sidebar-menu-link i{
     display: none;
 }
 
+@media (hover: hover) and (pointer: fine){
 .navbar-action-btn:hover, .sidebar-toggle-btn:hover, .btn-desktop-toggle:hover, .navbar-search-toggle:hover{
     background-color: var(--muted-bg);
     color: var(--text-h);
+}
 }
 
 .navbar-action-btn:focus-visible, .sidebar-toggle-btn:focus-visible, .btn-desktop-toggle:focus-visible, .navbar-search-toggle:focus-visible{
@@ -653,10 +825,29 @@ body.sidebar-minimized .sidebar-menu-link i{
     position: relative;
 }
 
+/* The fullscreen utility sits before the account control with the smallest
+   space step. */
+#btn-fullscreen{
+    margin-right: var(--space-1);
+}
+
 /* Mobile Sidebar Toggle Button (shown below the desktop breakpoint).
    Size/visuals come from the shared top-bar icon-button rule above. */
 .sidebar-toggle-btn{
     display: none;
+    margin-right: var(--space-2);
+}
+
+/* Desktop sidebar minimize toggle: hidden while the drawer is off-canvas
+   (< 1200px), shown beside the brand once the sidebar is part of the layout. */
+.btn-desktop-toggle{
+    display: none;
+    margin-right: var(--space-4);
+}
+@media (min-width: 1200px){
+    .btn-desktop-toggle{
+        display: flex;
+    }
 }
 
 /* ---------------------------------------------------------------------
@@ -697,9 +888,11 @@ body.sidebar-minimized .sidebar-menu-link i{
     transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 
+@media (hover: hover) and (pointer: fine){
 .btn-date-picker:hover{
     background-color: var(--muted-bg);
     color: var(--text-h);
+}
 }
 
 /* ---------------------------------------------------------------------
@@ -847,14 +1040,23 @@ body.sidebar-minimized .sidebar-menu-link i{
     transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 
-.bottom-nav-item i{
+.bottom-nav-item .bi{
     font-size: 1.15rem;
     line-height: 1;
 }
 
+/* Press feedback on the bar itself: immediate on finger-down, on the same
+   quiet inset surface the hover state uses (no scale on a full-width item). */
+.bottom-nav-item:active{
+    background-color: var(--muted-bg);
+    color: var(--text-h);
+}
+
+@media (hover: hover) and (pointer: fine){
 .bottom-nav-item:hover{
     background-color: var(--muted-bg);
     color: var(--text-h);
+}
 }
 
 .bottom-nav-item:focus-visible{
@@ -886,6 +1088,16 @@ body.sidebar-minimized .sidebar-menu-link i{
     color: var(--muted);
 }
 
+/* Pagination list: a compact flex row of quiet controls (the page-link
+   treatment below carries the styling). */
+.table-footer-control .pagination{
+    display: flex;
+    gap: var(--space-1);
+    margin-bottom: 0;
+    padding-left: 0;
+    list-style: none;
+}
+
 /* Pagination: quiet page controls on the shared control tokens (no filled
    accent block — the current page is a state, marked the same way every other
    state in the app is marked). */
@@ -904,9 +1116,11 @@ body.sidebar-minimized .sidebar-menu-link i{
     transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 
+@media (hover: hover) and (pointer: fine){
 .table-footer-control .pagination .page-link:hover{
     background-color: var(--muted-bg);
     color: var(--text-h);
+}
 }
 
 .table-footer-control .pagination .page-item.active .page-link{
@@ -921,10 +1135,9 @@ body.sidebar-minimized .sidebar-menu-link i{
     pointer-events: none;
 }
 
-/* Bootstrap's own .page-link:focus paints an off-palette blue halo and a fixed
-   light-grey background (its --bs-* variables are not mapped to our theme), so
-   the focused page control looked wrong — most visibly in dark mode. Neutralise
-   that and use the shared focus outline, like every other control. */
+/* A clicked page control keeps the quiet treatment (no tinted focus background
+   or default focus box-shadow); the shared focus-visible outline marks it for
+   keyboard use, like every other control. */
 .table-footer-control .pagination .page-link:focus{
     background-color: transparent;
     color: var(--text-h);
@@ -1052,10 +1265,6 @@ textarea.input{ resize: vertical; }
   opacity: 0;
 }
 
-/* ---- Fade ---- */
-.fade-enter-active, .fade-leave-active{ transition: opacity var(--transition-normal); }
-.fade-enter-from, .fade-leave-to{ opacity: 0; }
-
 /* ---- Focus-visible ---- */
 :focus-visible{
   outline: var(--focus-ring-width) solid var(--focus-ring);
@@ -1077,20 +1286,12 @@ textarea.input{ resize: vertical; }
   outline: none;
 }
 
-/* Bootstrap resets the focus outline on `.btn` (`.btn:focus-visible{outline:0}`).
-   That rule has the same specificity as the global one above but is imported
-   first, so it won and keyboard focus on every .btn was invisible. A button's
-   fill is its own edge, so it keeps the shared outline (as do .icon-btn,
-   .row-toggle and the chrome buttons). Bootstrap's own focus box-shadow is not
-   applied here (no --bs-btn-focus-shadow-rgb is defined), so nothing doubles. */
+/* A button's fill is its own edge, so it keeps the shared outline (as do
+   .icon-btn, .row-toggle and the chrome buttons). */
 .btn:focus-visible{
   outline: var(--focus-ring-width) solid var(--focus-ring);
   outline-offset: var(--focus-ring-offset);
 }
-
-/* Text utilities: Bootstrap .text-muted is not driven by data-appearance,
-   so it is mapped to the shared muted text token once, globally. */
-.text-muted{ color: var(--muted) !important; }
 
 /* ---------------------------------------------------------------------
    14. Motion & Accessibility
@@ -1144,7 +1345,7 @@ textarea.input{ resize: vertical; }
   border-color: var(--accent);
   color: var(--on-accent);
 }
-.btn.primary:hover, .btn.primary:focus-visible{
+.btn.primary:focus-visible{
   background-color: var(--accent-hover);
   border-color: var(--accent-hover);
   color: var(--on-accent);
@@ -1154,7 +1355,7 @@ textarea.input{ resize: vertical; }
   border-color: var(--border);
   color: var(--text-h);
 }
-.btn.secondary:hover, .btn.secondary:focus-visible{
+.btn.secondary:focus-visible{
   background-color: var(--muted-bg);
   color: var(--text-h);
 }
@@ -1162,7 +1363,7 @@ textarea.input{ resize: vertical; }
   background-color: transparent;
   color: var(--text-h);
 }
-.btn.ghost:hover, .btn.ghost:focus-visible{
+.btn.ghost:focus-visible{
   background-color: var(--muted-bg);
   color: var(--text-h);
 }
@@ -1171,10 +1372,32 @@ textarea.input{ resize: vertical; }
   border-color: var(--error);
   color: var(--on-error);
 }
-.btn.danger:hover, .btn.danger:focus-visible{
+.btn.danger:focus-visible{
   background-color: color-mix(in srgb, var(--error) 88%, #000);
   border-color: color-mix(in srgb, var(--error) 88%, #000);
   color: var(--on-error);
+}
+/* Pointer hover for the variants; keyboard focus keeps its own rules above,
+   so focus styling is never capability-gated. */
+@media (hover: hover) and (pointer: fine){
+.btn.primary:hover{
+  background-color: var(--accent-hover);
+  border-color: var(--accent-hover);
+  color: var(--on-accent);
+}
+.btn.secondary:hover{
+  background-color: var(--muted-bg);
+  color: var(--text-h);
+}
+.btn.ghost:hover{
+  background-color: var(--muted-bg);
+  color: var(--text-h);
+}
+.btn.danger:hover{
+  background-color: color-mix(in srgb, var(--error) 88%, #000);
+  border-color: color-mix(in srgb, var(--error) 88%, #000);
+  color: var(--on-error);
+}
 }
 .btn.block{ display: flex; width: 100%; }
 
@@ -1196,14 +1419,16 @@ textarea.input{ resize: vertical; }
   cursor: pointer;
   transition: color var(--transition-fast), background-color var(--transition-fast), border-color var(--transition-fast), transform .1s ease;
 }
-.icon-btn:hover, .row-toggle:hover{ background-color: var(--muted-bg); color: var(--text-h); }
 .icon-btn:active, .row-toggle:active{ transform: scale(0.92); }
 .icon-btn:focus-visible, .row-toggle:focus-visible{ outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 1px; }
 .icon-btn svg, .row-toggle svg{ width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.icon-btn.delete:hover{ background-color: var(--error-bg); color: var(--error); }
 /* Status toggle: the accent marks the active state on the icon only. */
 .row-toggle.active{ color: var(--accent); }
+@media (hover: hover) and (pointer: fine){
+.icon-btn:hover, .row-toggle:hover{ background-color: var(--muted-bg); color: var(--text-h); }
+.icon-btn.delete:hover{ background-color: var(--error-bg); color: var(--error); }
 .row-toggle.active:hover{ background-color: var(--accent-bg); }
+}
 .row-toggle.active svg{ fill: currentColor; stroke: currentColor; }
 
 /* ---------------------------------------------------------------------
@@ -1270,7 +1495,9 @@ textarea.input{ resize: vertical; }
     font-size: var(--text-sm);
     font-weight: var(--weight-medium);
 }
+@media (hover: hover) and (pointer: fine){
 .asel--field .asel-trigger:hover { border-color: var(--accent-border); }
+}
 /* Shared focus recipe for form controls: the border becomes the accent base
    and the single indicator is the shared focus-visible outline. The tinted
    halo was removed because outline + accent border + halo read as a double,
@@ -1283,8 +1510,8 @@ textarea.input{ resize: vertical; }
 /* header — quiet toolbar control (sort / filter) */
 .asel--header { flex: 0 1 auto; min-width: 96px; }
 .asel--header .asel-trigger {
-    min-height: var(--control-height-sm);
-    padding: 7px 6px;
+    height: var(--control-height-sm);
+    padding: 0 var(--space-2);
     border-radius: var(--radius-sm);
     border: 1px solid transparent;
     background-color: transparent;
@@ -1292,7 +1519,9 @@ textarea.input{ resize: vertical; }
     font-size: var(--text-sm);
     font-weight: var(--weight-medium);
 }
+@media (hover: hover) and (pointer: fine){
 .asel--header .asel-trigger:hover { background-color: var(--muted-bg); color: var(--text-h); }
+}
 .asel--header .asel-trigger:focus-visible,
 .asel--header .asel-trigger[aria-expanded="true"] {
     border-color: var(--accent);
@@ -1311,7 +1540,9 @@ textarea.input{ resize: vertical; }
     font-size: var(--text-xs);
     font-weight: var(--weight-medium);
 }
+@media (hover: hover) and (pointer: fine){
 .asel--inline .asel-trigger:hover { background-color: var(--muted-bg); color: var(--text-h); }
+}
 .asel--inline .asel-trigger:focus-visible,
 .asel--inline .asel-trigger[aria-expanded="true"] {
     border-color: var(--accent);
@@ -1439,18 +1670,31 @@ textarea.input{ resize: vertical; }
     transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 
-.more-item i{
+.more-item .bi{
     font-size: var(--text-lg);
     color: var(--muted);
 }
 
+/* Press feedback on menu rows: immediate on finger-down, on the same quiet
+   surface as the pointer-only hover state. */
+.more-item:active{
+    background-color: var(--muted-bg);
+    color: var(--text-h);
+}
+
+.more-item:active .bi{
+    color: var(--text-h);
+}
+
+@media (hover: hover) and (pointer: fine){
 .more-item:hover{
     background-color: var(--muted-bg);
     color: var(--text-h);
 }
 
-.more-item:hover i{
+.more-item:hover .bi{
     color: var(--text-h);
+}
 }
 
 .more-item:focus-visible{
@@ -1460,14 +1704,14 @@ textarea.input{ resize: vertical; }
 
 /* The destination behind the closed menu stays marked while it is current. */
 .more-item.active,
-.more-item.active i{
+.more-item.active .bi{
     color: var(--accent);
 }
 
 /* Status toggle rows in an item menu (Must Have): accent colour plus the same
    filled-icon cue the card's status pill uses, so the active state never
    depends on colour alone. */
-.more-item.active svg{
+.more-item.active svg:not(.bi){
     fill: currentColor;
     stroke: currentColor;
 }
@@ -1476,9 +1720,10 @@ textarea.input{ resize: vertical; }
    the mobile More menu, plus a labelled field row for the contextual
    Category / Folder selects and the destructive row treatment.
    Icons use the app's shared outline recipe (stroke + currentColor), so they
-   follow the row's semantic colour in light and dark alike. */
-.more-item svg,
-.more-field svg{
+   follow the row's semantic colour in light and dark alike. Sprite icons
+   (.bi) keep their own fill treatment. */
+.more-item svg:not(.bi),
+.more-field svg:not(.bi){
     width: 14px;
     height: 14px;
     flex-shrink: 0;
@@ -1517,7 +1762,29 @@ textarea.input{ resize: vertical; }
     color: var(--error);
 }
 
+.more-item.danger:active{
+    background-color: var(--error-bg);
+    color: var(--error);
+}
+
+@media (hover: hover) and (pointer: fine){
 .more-item.danger:hover{
     background-color: var(--error-bg);
     color: var(--error);
+}
+}
+
+/* Typing surfaces on touch devices: a 16px minimum so iOS does not zoom the
+   page on focus. Capability-based, not viewport-based — a mouse-driven tablet
+   keeps its compact type. The Add/Edit forms' own mobile treatment above
+   stays as-is; this covers the remaining surfaces (mobile search, folder name,
+   local profile) that have no such override. */
+@media (pointer: coarse){
+input,
+textarea,
+select,
+.navbar-search-input,
+.input{
+    font-size: 16px;
+}
 }

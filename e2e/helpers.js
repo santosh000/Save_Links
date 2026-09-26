@@ -45,7 +45,7 @@ export async function clickExportAndCaptureBackup(page) {
 
 export async function openView(page, view) {
   const titles = {
-    links: 'Saved links',
+    links: 'Links',
     folders: 'Folders',
     backup: 'Backup & restore',
     settings: 'Settings',
@@ -97,11 +97,11 @@ export async function openView(page, view) {
 export async function ensureAddLinkOpen(page, { more = false } = {}) {
   await openView(page, 'links')
   if (!(await page.locator('#save-url').isVisible().catch(() => false))) {
-    // The toolbar "Save a link" control is desktop/tablet only; the mobile shell
+    // The toolbar "Add link" control is desktop/tablet only; the mobile shell
     // opens the same form from the bottom navigation's Add item.
     const mobileAdd = page.getByRole('navigation', { name: 'Primary' }).getByRole('button', { name: 'Add', exact: true })
     if (await mobileAdd.isVisible().catch(() => false)) await mobileAdd.click()
-    else await page.getByRole('button', { name: 'Save a link', exact: true }).click()
+    else await page.locator('.content-head .add-toggle').click()
   }
   if (more) {
     const moreBtn = page.getByRole('button', { name: 'More options', exact: true })

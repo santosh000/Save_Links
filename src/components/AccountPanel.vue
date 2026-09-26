@@ -184,6 +184,7 @@ async function handleSignOut() {
   display: grid;
   place-items: center;
   padding: 16px;
+  padding-bottom: calc(16px + var(--safe-area-bottom));
 }
 .account-panel {
   background: var(--card);
@@ -193,7 +194,9 @@ async function handleSignOut() {
   width: 100%;
   max-width: 480px;
   max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px - var(--safe-area-bottom));
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 28px;
 }
 .account-panel h3 { margin: 0 0 18px; font-size: 20px; color: var(--text-h); }
@@ -214,7 +217,9 @@ async function handleSignOut() {
   cursor: pointer;
   transition: color var(--transition-fast), background var(--transition-fast);
 }
+@media (hover: hover) and (pointer: fine){
 .switch-line:hover { color: var(--text-h); background: var(--muted-bg); }
+}
 .switch-line:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 2px; }
 
 .acct-detail { margin: 0 0 16px; }
@@ -223,7 +228,9 @@ async function handleSignOut() {
 .acct-row dd { margin: 0; font-size: var(--text-md); color: var(--text-h); overflow-wrap: anywhere; }
 .acct-actions { display: flex; gap: var(--space-2); margin-top: 8px; flex-wrap: wrap; }
 .acct-actions .danger { background: var(--error); color: var(--on-error); border-color: var(--error); }
+@media (hover: hover) and (pointer: fine){
 .acct-actions .danger:hover { background: var(--error); color: var(--on-error); border-color: var(--error); filter: brightness(0.92); }
+}
 
 .status { margin: 16px 0 0; font-size: var(--text-sm); color: var(--text); line-height: var(--leading-normal); background: var(--muted-bg); border-radius: var(--radius-sm); padding: 10px 12px; }
 
@@ -267,7 +274,9 @@ async function handleSignOut() {
   flex-shrink: 0;
   transition: all var(--transition-fast);
 }
+@media (hover: hover) and (pointer: fine){
 .local-profile-edit:hover { background: var(--accent-bg); color: var(--accent); }
+}
 .local-profile-edit:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 2px; }
 .local-profile-edit svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; }
 
@@ -316,5 +325,10 @@ async function handleSignOut() {
 
 @media (max-width: 520px) {
   .account-panel { padding: 20px; }
+  /* Narrow phones: the two provider buttons can no longer split the row
+     without squeezing their content out of the buttons, so they stack
+     full-width. Desktop and tablet keep the side-by-side row. */
+  .signed-out-actions { flex-direction: column; }
+  .signed-out-actions .btn { flex: 0 0 auto; width: 100%; }
 }
 </style>

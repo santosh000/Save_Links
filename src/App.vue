@@ -97,7 +97,7 @@ const filterStatus = ref('')
 const filterFolder = ref('')
 const sortBy = ref(DEFAULT_SORT)
 
-// Saved Links presentation: 'card' | 'list' | 'compact'.
+// Links presentation: 'card' | 'list' | 'compact'.
 // Persisted to plain localStorage (NOT the synced settings blob).
 const VIEW_MODES = ['card', 'list', 'compact']
 const VIEW_MODE_LABELS = { card: 'Card', list: 'List', compact: 'Compact' }
@@ -214,19 +214,15 @@ const initials = computed(() =>
 
 // Page header computed props
 const pageTitle = computed(() => ({
-  links: 'Saved links',
+  links: 'Links',
   folders: 'Folders',
   backup: 'Backup & restore',
   settings: 'Settings',
   about: 'About',
-}[currentView.value] || 'Saved links'))
+}[currentView.value] || 'Links'))
 
 const pageSubtitle = computed(() => {
   if (currentView.value === 'links') return `${filteredLinks.value.length} of ${total.value} links shown`
-  if (currentView.value === 'folders') return 'Organize your links into folders'
-  if (currentView.value === 'backup') return 'Export and import your data'
-  if (currentView.value === 'settings') return 'Customize how Save Links looks and behaves'
-  if (currentView.value === 'about') return `Save Links v${appVersion}`
   return ''
 })
 
@@ -687,21 +683,21 @@ onBeforeUnmount(() => {
         <span>Save Links</span>
       </a>
 
-      <div class="flex-grow-1 overflow-y-auto">
+      <div class="sidebar-menu-scroll">
         <!-- Group: Menu -->
         <div class="sidebar-menu-section">
           <div class="sidebar-menu-title">Menu</div>
           <ul class="sidebar-menu-list">
             <li class="sidebar-menu-item">
               <a href="#" class="sidebar-menu-link" :class="{ active: currentView === 'links' }" @click.prevent="go('links')">
-                <i class="bi bi-bookmarks"></i>
-                <span>Saved links</span>
+                <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-bookmarks'"></use></svg>
+                <span>Links</span>
                 <span class="sidebar-menu-badge">{{ total }}</span>
               </a>
             </li>
             <li class="sidebar-menu-item">
               <a href="#" class="sidebar-menu-link" :class="{ active: currentView === 'folders' }" @click.prevent="go('folders')">
-                <i class="bi bi-folder2"></i>
+                <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-folder2'"></use></svg>
                 <span>Folders</span>
                 <span v-if="folders.length" class="sidebar-menu-badge">{{ folders.length }}</span>
               </a>
@@ -715,19 +711,19 @@ onBeforeUnmount(() => {
           <ul class="sidebar-menu-list">
             <li class="sidebar-menu-item">
               <a href="#" class="sidebar-menu-link" :class="{ active: currentView === 'backup' }" @click.prevent="go('backup')">
-                <i class="bi bi-arrow-repeat"></i>
+                <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-arrow-repeat'"></use></svg>
                 <span>Backup & restore</span>
               </a>
             </li>
             <li class="sidebar-menu-item">
               <a href="#" class="sidebar-menu-link" :class="{ active: currentView === 'settings' }" @click.prevent="go('settings')">
-                <i class="bi bi-gear"></i>
+                <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-gear'"></use></svg>
                 <span>Settings</span>
               </a>
             </li>
             <li class="sidebar-menu-item">
               <a href="#" class="sidebar-menu-link" :class="{ active: currentView === 'about' }" @click.prevent="go('about')">
-                <i class="bi bi-info-circle"></i>
+                <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-info-circle'"></use></svg>
                 <span>About</span>
               </a>
             </li>
@@ -746,29 +742,29 @@ onBeforeUnmount(() => {
             <img src="/logo.png" alt="" width="26" height="26" />
             <span>Save Links</span>
           </a>
-          <button type="button" class="btn-desktop-toggle d-none d-xl-flex align-items-center justify-content-center me-3" id="desktop-sidebar-toggle" aria-label="Minimize sidebar" @click="toggleSidebarMinimized">
-            <i class="bi bi-chevron-bar-left" :class="{ 'bi-chevron-bar-right': sidebarMinimized }"></i>
+          <button type="button" class="btn-desktop-toggle" id="desktop-sidebar-toggle" aria-label="Minimize sidebar" @click="toggleSidebarMinimized">
+            <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="`/icons.svg#${sidebarMinimized ? 'bi-chevron-bar-right' : 'bi-chevron-bar-left'}`"></use></svg>
           </button>
-          <button type="button" class="sidebar-toggle-btn me-2" id="sidebar-toggle" aria-label="Toggle navigation" @click="sidebarOpen = !sidebarOpen">
-            <i class="bi bi-list"></i>
+          <button type="button" class="sidebar-toggle-btn" id="sidebar-toggle" aria-label="Toggle navigation" @click="sidebarOpen = !sidebarOpen">
+            <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-list'"></use></svg>
           </button>
         </div>
 
         <!-- Mid navbar: search pill -->
         <div class="navbar-search-wrapper" id="main-search">
-          <input ref="searchInputEl" type="search" class="navbar-search-input" placeholder="Search links…" aria-label="Search links" aria-keyshortcuts="Control+K Meta+K" :value="search" @input="search = $event.target.value" @keydown.esc.prevent="closeSearch(true)" @blur="onSearchBlur" />
-          <button v-if="search" type="button" class="navbar-search-btn" aria-label="Clear search" @click="search = ''"><i class="bi bi-x-lg"></i></button>
-          <button v-else type="button" class="navbar-search-btn" :aria-label="searchOpen ? 'Close search' : null" :aria-hidden="searchOpen ? null : 'true'" :tabindex="searchOpen ? null : '-1'" @click="searchOpen && closeSearch(true)"><i class="bi" :class="searchOpen ? 'bi-x-lg' : 'bi-search'"></i></button>
+          <input ref="searchInputEl" type="search" class="navbar-search-input" placeholder="Search links…" aria-label="Search links" aria-keyshortcuts="Control+K Meta+K" enterkeyhint="search" :value="search" @input="search = $event.target.value" @keydown.esc.prevent="closeSearch(true)" @blur="onSearchBlur" />
+          <button v-if="search" type="button" class="navbar-search-btn" aria-label="Clear search" @click="search = ''"><svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-x-lg'"></use></svg></button>
+          <button v-else type="button" class="navbar-search-btn" :aria-label="searchOpen ? 'Close search' : null" :aria-hidden="searchOpen ? null : 'true'" :tabindex="searchOpen ? null : '-1'" @click="searchOpen && closeSearch(true)"><svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="`/icons.svg#${searchOpen ? 'bi-x-lg' : 'bi-search'}`"></use></svg></button>
           <kbd class="navbar-search-kbd" aria-hidden="true">{{ searchShortcutLabel }}</kbd>
         </div>
 
         <!-- Right actions -->
         <div class="navbar-actions">
           <button ref="searchToggleEl" type="button" class="navbar-search-toggle" aria-label="Search" aria-controls="main-search" :aria-expanded="String(searchOpen)" @click="openSearch">
-            <i class="bi bi-search"></i>
+            <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-search'"></use></svg>
           </button>
-          <button type="button" class="navbar-action-btn me-1" id="btn-fullscreen" aria-label="Toggle Fullscreen" @click="toggleFullscreen">
-            <i class="bi bi-arrows-fullscreen"></i>
+          <button type="button" class="navbar-action-btn" id="btn-fullscreen" aria-label="Toggle Fullscreen" @click="toggleFullscreen">
+            <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-arrows-fullscreen'"></use></svg>
           </button>
           <button
             type="button"
@@ -793,22 +789,22 @@ onBeforeUnmount(() => {
       <div class="page-header">
         <div>
           <h1 class="page-title">{{ pageTitle }}</h1>
-          <p class="page-subtitle">{{ pageSubtitle }}</p>
+          <p v-if="pageSubtitle" class="page-subtitle">{{ pageSubtitle }}</p>
         </div>
         <button type="button" class="btn-date-picker" @click="openAddLink($event.currentTarget)">
-          <i class="bi bi-plus-lg"></i>
+          <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-plus-lg'"></use></svg>
           <span>Add link</span>
         </button>
       </div>
 
       <!-- Main Content -->
-      <main class="flex-grow-1">
+      <main>
 
-        <!-- ===== VIEW: Saved Links ===== -->
+        <!-- ===== VIEW: Links ===== -->
         <section v-if="currentView === 'links'" class="links-view">
           <!-- One unified panel: toolbar header, link content, pagination footer -->
           <div class="links-panel">
-          <!-- Toolbar: "Save a Link" on the left, view/sort/filter/export on the right -->
+          <!-- Toolbar: "Add link" on the left, view/sort/filter/export on the right -->
           <div class="content-head">
             <AddLink ref="addLinkEl" :folders="folders" @add="handleAdd" />
             <template v-if="hasLinks">
@@ -853,8 +849,8 @@ onBeforeUnmount(() => {
                   @click="sortFilterOpen = !sortFilterOpen"
                   @keydown.esc="closeSortFilter(true)"
                 >
-                  <i class="bi bi-sliders" aria-hidden="true"></i>
-                  <span>Sort &amp; Filter</span>
+          <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-sliders'"></use></svg>
+          <span>Sort &amp; Filter</span>
                 </button>
                 <div
                   id="sort-filter-panel"
@@ -899,8 +895,8 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
                 <button type="button" class="toolbar-add toolbar-export" aria-label="Export links" @click="go('backup')">
-                  <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i>
-                  <span>Export</span>
+          <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-box-arrow-up-right'"></use></svg>
+          <span>Export</span>
                 </button>
               </div>
               <div v-if="activeFilterChips.length" class="filter-chips" role="group" aria-label="Active filters">
@@ -917,7 +913,7 @@ onBeforeUnmount(() => {
 
           <!-- Link content -->
           <div class="links-content">
-          <!-- Old Saved Links content section (hybrid: old link presentation + current pagination) -->
+          <!-- Old Links content section (hybrid: old link presentation + current pagination) -->
           <template v-if="hasLinks">
             <!-- Empty state: no matches -->
             <div v-if="filteredLinks.length === 0" class="empty-state">
@@ -988,15 +984,15 @@ onBeforeUnmount(() => {
           <div class="table-footer-control">
             <span class="table-pagination-info">{{ paginationText }}</span>
             <nav v-if="totalPages > 1" aria-label="Page navigation">
-              <ul class="pagination mb-0 gap-1">
+              <ul class="pagination">
                 <li class="page-item" :class="{ disabled: currentPage === 1 }">
-                  <a class="page-link border-0" href="#" aria-label="Previous page" @click.prevent="currentPage = Math.max(1, currentPage - 1)"><i class="bi bi-chevron-left"></i></a>
+                  <a class="page-link" href="#" aria-label="Previous page" @click.prevent="currentPage = Math.max(1, currentPage - 1)"><svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-chevron-left'"></use></svg></a>
                 </li>
                 <li v-for="p in totalPages" :key="p" class="page-item" :class="{ active: p === currentPage }">
-                  <a class="page-link border-0" href="#" :aria-label="'Page ' + p" :aria-current="p === currentPage ? 'page' : undefined" @click.prevent="currentPage = p">{{ p }}</a>
+                  <a class="page-link" href="#" :aria-label="'Page ' + p" :aria-current="p === currentPage ? 'page' : undefined" @click.prevent="currentPage = p">{{ p }}</a>
                 </li>
                 <li class="page-item" :class="{ disabled: currentPage === totalPages }">
-                  <a class="page-link border-0" href="#" aria-label="Next page" @click.prevent="currentPage = Math.min(totalPages, currentPage + 1)"><i class="bi bi-chevron-right"></i></a>
+                  <a class="page-link" href="#" aria-label="Next page" @click.prevent="currentPage = Math.min(totalPages, currentPage + 1)"><svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-chevron-right'"></use></svg></a>
                 </li>
               </ul>
             </nav>
@@ -1028,9 +1024,9 @@ onBeforeUnmount(() => {
         </section>
 
         <!-- ===== VIEW: About ===== -->
-        <section v-else-if="currentView === 'about'" class="card">
-          <About />
-        </section>
+      <section v-else-if="currentView === 'about'" class="card">
+        <About :version="appVersion" />
+      </section>
 
       </main>
 
@@ -1052,8 +1048,8 @@ onBeforeUnmount(() => {
         :aria-current="currentView === 'links' ? 'page' : null"
         @click="go('links')"
       >
-        <i class="bi bi-bookmarks" aria-hidden="true"></i>
-        <span>Links</span>
+          <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-bookmarks'"></use></svg>
+          <span>Links</span>
       </button>
       <button
         type="button"
@@ -1062,12 +1058,12 @@ onBeforeUnmount(() => {
         :aria-current="currentView === 'folders' ? 'page' : null"
         @click="go('folders')"
       >
-        <i class="bi bi-folder2" aria-hidden="true"></i>
-        <span>Folders</span>
+          <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-folder2'"></use></svg>
+          <span>Folders</span>
       </button>
       <button type="button" class="bottom-nav-item" @click="openAddLink($event.currentTarget)">
-        <i class="bi bi-plus-lg" aria-hidden="true"></i>
-        <span>Add</span>
+          <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-plus-lg'"></use></svg>
+          <span>Add</span>
       </button>
       <button
         type="button"
@@ -1079,8 +1075,8 @@ onBeforeUnmount(() => {
         @click="toggleMore"
         @keydown.esc="closeMoreFromKey"
       >
-        <i class="bi bi-three-dots" aria-hidden="true"></i>
-        <span>More</span>
+          <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-three-dots'"></use></svg>
+          <span>More</span>
       </button>
     </nav>
 
@@ -1090,15 +1086,15 @@ onBeforeUnmount(() => {
       <Transition name="fade-down">
         <div v-if="moreOpen" id="more-menu" ref="moreMenuEl" class="more-menu anchored-popover" @keydown.esc="closeMoreFromKey">
           <button type="button" class="more-item" :class="{ active: currentView === 'settings' }" @click="go('settings')">
-            <i class="bi bi-gear" aria-hidden="true"></i>
+            <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-gear'"></use></svg>
             <span>Settings</span>
           </button>
           <button type="button" class="more-item" :class="{ active: currentView === 'backup' }" @click="go('backup')">
-            <i class="bi bi-arrow-repeat" aria-hidden="true"></i>
+            <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-arrow-repeat'"></use></svg>
             <span>Backup &amp; restore</span>
           </button>
           <button type="button" class="more-item" :class="{ active: currentView === 'about' }" @click="go('about')">
-            <i class="bi bi-info-circle" aria-hidden="true"></i>
+            <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-info-circle'"></use></svg>
             <span>About</span>
           </button>
         </div>
@@ -1143,14 +1139,20 @@ onBeforeUnmount(() => {
 
 /* Intentional reading width: page header, content and footer stay centered on
    very wide monitors instead of stretching edge to edge. */
-.main-wrapper > .page-header,
-.main-wrapper > main,
-.main-wrapper > .footer {
-  width: 100%;
-  max-width: 1560px;
-  margin-left: auto;
-  margin-right: auto;
-}
+  .main-wrapper > .page-header,
+  .main-wrapper > main,
+  .main-wrapper > .footer {
+    width: 100%;
+    max-width: 1560px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  /* The content column takes the remaining shell height so the footer stays
+     at the bottom of short pages. */
+  .main-wrapper > main {
+    flex: 1 1 auto;
+  }
 
 /* Footer: subtle shell chrome (not a floating card) */
 .footer {
@@ -1179,7 +1181,9 @@ onBeforeUnmount(() => {
   transition: background var(--transition-fast);
   color: var(--text-h);
 }
+@media (hover: hover) and (pointer: fine){
 .identity-btn:hover { background: var(--muted-bg); }
+}
 .identity-btn:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 2px; }
 .identity-avatar {
   width: var(--control-height-sm);
@@ -1204,7 +1208,7 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 
-/* Unified Saved Links panel: toolbar header + link content + pagination footer
+/* Unified Links panel: toolbar header + link content + pagination footer
    in ONE surface. The items inside carry the only chrome, so the panel itself
    stays a flat bordered surface (no second elevation layer to nest with). */
 .links-panel {
@@ -1240,7 +1244,7 @@ onBeforeUnmount(() => {
   padding: 10px 14px;
   margin: 0;
 }
-/* Toolbar layout: Save a Link on the left, view/sort/filter/export on the right.
+/* Toolbar layout: Add link on the left, view/sort/filter/export on the right.
    The AddLink root inherits this component's scope, so drop its own card chrome
    and keep only the compact toggle inside the toolbar. Inner nodes need :deep(). */
 .content-head :deep(.add-card) {
@@ -1300,7 +1304,9 @@ onBeforeUnmount(() => {
 /* No separators between segments: the inset track groups them, and only the
    active mode carries a fill (a separator line is what makes a segmented
    control look like a framework button group). */
+@media (hover: hover) and (pointer: fine){
 .view-btn:hover { color: var(--text-h); }
+}
 .view-btn:active { transform: scale(0.97); }
 .view-btn:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: -2px; }
 .view-btn.active { background: var(--accent-bg); color: var(--accent); font-weight: var(--weight-semibold); }
@@ -1339,9 +1345,11 @@ onBeforeUnmount(() => {
   place-items: center;
   transition: color var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast), transform .1s ease;
 }
+@media (hover: hover) and (pointer: fine){
 .toolbar-add:hover { color: var(--text-h); background: var(--muted-bg); }
+}
 .toolbar-add:active { transform: scale(0.94); }
-.toolbar-add svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
+  .toolbar-add svg:not(.bi) { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
 /* Export is a labelled control (outgoing icon + text), not a download-only icon button */
 .toolbar-export {
   width: auto;
@@ -1354,7 +1362,7 @@ onBeforeUnmount(() => {
   font-weight: var(--weight-medium);
   color: var(--muted);
 }
-.toolbar-export i { font-size: var(--text-lg); line-height: 1; }
+  .toolbar-export .bi { font-size: var(--text-lg); line-height: 1; }
 
 /* Active-filter chips */
 .filter-chips {
@@ -1393,7 +1401,9 @@ onBeforeUnmount(() => {
   place-items: center;
   padding: 0;
 }
+@media (hover: hover) and (pointer: fine){
 .chip-clear:hover { background: var(--accent); color: var(--on-accent); }
+}
 .chip-clear svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
 .chip-clear-all {
   font-size: var(--text-xs);
@@ -1406,7 +1416,9 @@ onBeforeUnmount(() => {
   cursor: pointer;
   transition: color var(--transition-fast);
 }
+@media (hover: hover) and (pointer: fine){
 .chip-clear-all:hover { color: var(--text-h); }
+}
 
 /* Old link list layouts */
 .grid {
@@ -1463,6 +1475,19 @@ onBeforeUnmount(() => {
   .row-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
+/* Content header: the page title and its dynamic count share one row at every
+   width - title at the start, count ending at the row's right edge. */
+.page-header > div {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  column-gap: var(--space-3);
+  row-gap: var(--space-1);
+}
+
 @media (max-width: 768px) {
   .identity-info { display: none; }
   .identity-btn { padding: 4px 6px 4px 4px; gap: 0; }
@@ -1509,15 +1534,11 @@ onBeforeUnmount(() => {
   .navbar-custom.is-searching .navbar-search-toggle {
     display: none;
   }
-  .mobile-brand span {
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
   .navbar-search-input {
     padding: 0.5rem 1rem;
     padding-right: 2.25rem;
   }
-  /* Compact Saved Links heading: the title and its dynamic count share one
+  /* Compact Links heading: the title and its dynamic count share one
      baseline row (title left, count ending at the content edge), with the
      surrounding rhythm tightened to a section-header spacing. The copy wraps
      gracefully when it needs the width. */
@@ -1543,13 +1564,18 @@ onBeforeUnmount(() => {
   }
 
   /* Mobile toolbar: the bottom bar's Add item is the single Add entry point
-     (same AddLink form), so the panel's duplicate "Save a link" is hidden here.
+     (same AddLink form), so the panel's duplicate "Add link" is hidden here.
      Export stays reachable through More → Backup & restore. Both controls keep
      their desktop/tablet behavior. */
   .content-head :deep(.add-card) {
     display: none;
   }
   .toolbar-export {
+    display: none;
+  }
+  /* The mobile shell's bottom navigation owns the bottom edge of the screen, so
+     the desktop application footer is not shown at this breakpoint. */
+  .footer {
     display: none;
   }
   /* With the Add control hidden the control group is the only toolbar child, so
@@ -1579,10 +1605,6 @@ onBeforeUnmount(() => {
     font-weight: var(--weight-medium);
     cursor: pointer;
     transition: background-color var(--transition-fast), color var(--transition-fast);
-  }
-  .sort-filter-toggle:hover {
-    background: var(--muted-bg);
-    color: var(--text-h);
   }
   .sort-filter-toggle:focus-visible {
     outline: var(--focus-ring-width) solid var(--focus-ring);
@@ -1624,6 +1646,15 @@ onBeforeUnmount(() => {
      toolbar's horizontal flex sizing must not stretch them vertically. */
   .toolbar-filters :deep(.asel--header) {
     flex: 0 0 auto;
+  }
+}
+
+/* Pointer hover for the mobile sort/filter trigger (its base styles live in
+   the max-width: 768px block above). */
+@media (max-width: 768px) and (hover: hover) and (pointer: fine) {
+  .sort-filter-toggle:hover {
+    background: var(--muted-bg);
+    color: var(--text-h);
   }
 }
 

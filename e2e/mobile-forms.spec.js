@@ -12,7 +12,7 @@ const editPopover = (page) => page.locator('.edit-popover')
 async function openAdd(page) {
   const bottomAdd = bottomNav(page).getByRole('button', { name: 'Add', exact: true })
   if (await bottomAdd.isVisible().catch(() => false)) await bottomAdd.click()
-  else await page.getByRole('button', { name: 'Save a link', exact: true }).click()
+    else await page.locator('.content-head .add-toggle').click()
   await expect(addForm(page)).toBeVisible()
 }
 

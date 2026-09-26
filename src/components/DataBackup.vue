@@ -310,6 +310,7 @@ function handleImportClick() {
   display: grid;
   place-items: center;
   padding: 16px;
+  padding-bottom: calc(16px + var(--safe-area-bottom));
 }
 .import-preview-modal {
   background: var(--card);
@@ -319,7 +320,9 @@ function handleImportClick() {
   width: 100%;
   max-width: 460px;
   max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px - var(--safe-area-bottom));
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 24px 28px;
 }
 .import-preview-modal h3 {
@@ -380,9 +383,11 @@ function handleImportClick() {
   background: var(--bg);
   transition: all var(--transition-fast);
 }
+@media (hover: hover) and (pointer: fine){
 .import-preview-radio label:hover {
   border-color: var(--accent-border);
   background: var(--muted-bg);
+}
 }
 .import-preview-radio input[type="radio"] {
   accent-color: var(--accent);

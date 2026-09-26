@@ -80,7 +80,7 @@ test.describe('Mobile & tablet navigation shell', () => {
     await expect(page.locator('.page-subtitle')).toHaveText(/^\d+ of \d+ links shown$/)
 
     // The bottom bar's Add is the single mobile Add entry point: the panel's
-    // duplicate "Save a link" and the Export control are hidden here.
+    // duplicate "Add link" and the Export control are hidden here.
     await expect(page.locator('.content-head .add-card')).toBeHidden()
     await expect(page.locator('.toolbar-export')).toBeHidden()
     await navItem(page, 'Add').click()
@@ -112,7 +112,7 @@ test.describe('Mobile & tablet navigation shell', () => {
     await page.setViewportSize(MOBILE)
 
     await navItem(page, 'Links').click()
-    await expect(page.locator('.page-title')).toHaveText('Saved links')
+    await expect(page.locator('.page-title')).toHaveText('Links')
     await expect(page.locator('.bottom-nav-item[aria-current="page"]')).toHaveText('Links')
 
     await navItem(page, 'Folders').click()
@@ -128,7 +128,7 @@ test.describe('Mobile & tablet navigation shell', () => {
     // and opens the existing form (never a second form or a new view).
     await navItem(page, 'Folders').click()
     await navItem(page, 'Add').click()
-    await expect(page.locator('.page-title')).toHaveText('Saved links')
+    await expect(page.locator('.page-title')).toHaveText('Links')
     await expect(page.locator('#add-form')).toHaveCount(1)
     await expect(page.locator('#add-form')).toBeVisible()
     await expect(page.locator('#save-url')).toBeFocused()
@@ -212,12 +212,14 @@ test.describe('Mobile & tablet navigation shell', () => {
     }
     expect(overflowAt).toEqual([])
 
-    // The fixed bar must not sit on top of the page content's end.
+    // The fixed bar must not sit on top of the page content's end. The mobile
+    // shell hides the desktop footer, so the last visible content element (the
+    // panel's pagination footer) stands in as the page's end at this width.
     await page.setViewportSize(MOBILE)
     await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
     const bar = await page.locator('.bottom-nav').boundingBox()
-    const footer = await page.locator('.footer').boundingBox()
-    expect(footer.y + footer.height).toBeLessThanOrEqual(bar.y + 1)
+    const lastContent = await page.locator('.table-footer-control').boundingBox()
+    expect(lastContent.y + lastContent.height).toBeLessThanOrEqual(bar.y + 1)
 
     // ...and neither does a toast (it clears the bar instead of covering it).
     await saveLink(page, { url: 'https://example.com/toast', title: 'Toast Link' })

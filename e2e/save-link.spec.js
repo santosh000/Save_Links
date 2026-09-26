@@ -10,10 +10,10 @@ test.describe('Save Links E2E', () => {
     await page.goto('/')
     // Brand in sidebar
     await expect(page.locator('.sidebar-brand')).toContainText('Save Links')
-    // Save link form accessible
-    await page.getByRole('button', { name: 'Save a link', exact: true }).click()
-    await expect(page.getByRole('heading', { name: 'Save a link' })).toBeVisible()
-    await expect(page.getByPlaceholder('https://example.com/article')).toBeVisible()
+  // Save link form accessible
+  await page.locator('.content-head .add-toggle').click()
+  await expect(page.locator('#add-form')).toBeVisible()
+  await expect(page.getByPlaceholder('https://example.com/article')).toBeVisible()
     // Folders view reachable (the Statistics view was removed)
     await openView(page, 'folders')
     await expect(page.locator('.page-title')).toHaveText('Folders')
@@ -340,11 +340,11 @@ test.describe('Save Links E2E', () => {
     await page.setViewportSize({ width: 1280, height: 800 })
     await page.goto('/')
     await expect(page.locator('.sidebar-wrapper')).toBeVisible()
-    const toggle = page.getByRole('button', { name: 'Save a link', exact: true })
+    const toggle = page.locator('.content-head .add-toggle')
     await expect(toggle).toBeVisible()
-    await toggle.click()
-    await expect(page.getByRole('heading', { name: 'Save a link' })).toBeVisible()
-    await expect(page.locator('#save-url')).toBeVisible()
+  await toggle.click()
+  await expect(page.locator('#add-form')).toBeVisible()
+  await expect(page.locator('#save-url')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Save link' })).toBeVisible()
     await openView(page, 'folders')
     await expect(page.locator('.folder-sidebar')).toBeVisible()
@@ -354,9 +354,9 @@ test.describe('Save Links E2E', () => {
     await page.reload()
     const utilToggle = page.getByRole('button', { name: 'Toggle filters and tools' })
     await expect(utilToggle).toBeHidden() // no filters drawer in new shell
-    await ensureAddLinkOpen(page) // the mobile shell opens the Add form from the bottom navigation
-    await expect(page.getByRole('heading', { name: 'Save a link' })).toBeVisible()
-    await expect(page.locator('#save-url')).toBeVisible()
+  await ensureAddLinkOpen(page) // the mobile shell opens the Add form from the bottom navigation
+  await expect(page.locator('#add-form')).toBeVisible()
+  await expect(page.locator('#save-url')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Save link' })).toBeVisible()
     // the current views are separate surfaces (no links list on another view)
     await openView(page, 'folders')

@@ -36,13 +36,13 @@ test.describe('Folders view + sidebar navigation', () => {
     await expect(page.locator('.folder-item', { hasText: 'Work' }).locator('.folder-count')).toHaveText('1')
     await expect(page.locator('.folder-item', { hasText: 'Personal' }).locator('.folder-count')).toHaveText('1')
 
-    await expect(page.locator('.sidebar-menu-link', { hasText: 'Saved links' }).locator('.sidebar-menu-badge')).toContainText('3')
+    await expect(page.locator('.sidebar-menu-link', { hasText: 'Links' }).locator('.sidebar-menu-badge')).toContainText('3')
     await expect(page.locator('.sidebar-menu-link', { hasText: 'Folders' }).locator('.sidebar-menu-badge')).toContainText('2')
   })
 
   test('View navigation marks the current sidebar item and updates the page title', async ({ page }) => {
     await page.goto('/')
-    for (const [view, label] of [['folders', 'Folders'], ['backup', 'Backup & restore'], ['settings', 'Settings'], ['about', 'About'], ['links', 'Saved links']]) {
+    for (const [view, label] of [['folders', 'Folders'], ['backup', 'Backup & restore'], ['settings', 'Settings'], ['about', 'About'], ['links', 'Links']]) {
       await openView(page, view)
       await expect(page.locator('.page-title')).toHaveText(label)
       await expect(page.locator('.sidebar-menu-link.active', { hasText: label })).toBeVisible()
@@ -94,14 +94,14 @@ test.describe('Folders view + sidebar navigation', () => {
     await expect(page.locator('.page-title')).toHaveText('Folders')
     await expect(page.locator('.folder-item', { hasText: 'Mobile' })).toBeVisible()
 
-    // Selecting the folder lands on Saved links filtered to it
+    // Selecting the folder lands on Links filtered to it
     await page.locator('.folder-item .folder-row', { hasText: 'Mobile' }).click()
-    await expect(page.locator('.page-title')).toHaveText('Saved links')
+    await expect(page.locator('.page-title')).toHaveText('Links')
     await expect(visibleLinkRows(page)).toHaveCount(1)
     await expect(visibleLinkRows(page).first()).toContainText('Mobile Link')
 
     // Back at desktop width the permanent sidebar is visible again
     await page.setViewportSize({ width: 1280, height: 800 })
-    await expect(page.locator('.sidebar-menu-link', { hasText: 'Saved links' })).toBeInViewport()
+    await expect(page.locator('.sidebar-menu-link', { hasText: 'Links' })).toBeInViewport()
   })
 })

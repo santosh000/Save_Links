@@ -279,7 +279,7 @@ test.describe('Card quick-action menu (Step 2C-2)', () => {
     // the native path does not also report a copy
     await expect(page.locator('.sl-toast')).toHaveCount(0)
     // and it never navigates away from the current view
-    await expect(page.locator('.page-title')).toHaveText('Saved links')
+    await expect(page.locator('.page-title')).toHaveText('Links')
   })
 
   test('share falls back to copying the link when the environment has no share sheet', async ({ page }) => {

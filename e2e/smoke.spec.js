@@ -22,7 +22,7 @@ test.describe('Application smoke', () => {
 
     // Shell mounts: sidebar brand + the default view header
     await expect(page.locator('.sidebar-brand')).toContainText('Save Links')
-    await expect(page.locator('.page-title')).toHaveText('Saved links')
+    await expect(page.locator('.page-title')).toHaveText('Links')
 
     // A link can be saved and renders in the current representation. The title is
     // given explicitly so the smoke test does not depend on the metadata network

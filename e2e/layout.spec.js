@@ -23,10 +23,10 @@ test.describe('Application layout', () => {
     await page.goto('/')
 
     await expect(page.locator('.sidebar-brand')).toContainText('Save Links')
-    for (const label of ['Saved links', 'Folders', 'Backup & restore', 'Settings', 'About']) {
+    for (const label of ['Links', 'Folders', 'Backup & restore', 'Settings', 'About']) {
       await expect(page.locator('.sidebar-menu-link', { hasText: label })).toBeVisible()
     }
-    await expect(page.locator('.page-title')).toHaveText('Saved links')
+    await expect(page.locator('.page-title')).toHaveText('Links')
 
     await ensureAddLinkOpen(page)
     await page.locator('#save-url').fill('https://example.com/layout-test')
@@ -90,8 +90,8 @@ test.describe('Application layout', () => {
     await expect(page.locator('.page-title')).toHaveText('About')
     await expect(page.locator('.about-card')).toBeVisible()
 
-    await openView(page, 'links')
-    await expect(page.locator('.page-title')).toHaveText('Saved links')
+  await openView(page, 'links')
+  await expect(page.locator('.page-title')).toHaveText('Links')
   })
 
   test('Tablet drawer (<1200px): sidebar off-canvas, hamburger toggles, no overflow', async ({ page }) => {

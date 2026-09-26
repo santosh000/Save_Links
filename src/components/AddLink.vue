@@ -41,7 +41,7 @@ useAnchoredPopover({
 })
 
 // Opens/toggles the popover anchored to the trigger that was used. Both the
-// toolbar "Save a link" toggle and the header "+ Add link" button call this,
+// toolbar "Add link" toggle and the header "+ Add link" button call this,
 // so there is one form/state and only the anchor element differs.
 function toggleFrom(el) {
   const anchor = el || anchorEl.value || toolbarTriggerEl.value
@@ -159,7 +159,7 @@ defineExpose({ open, toggleFrom, close })
       <span class="add-toggle-icon" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
       </span>
-      <span class="add-toggle-label">Save a link</span>
+      <span class="add-toggle-label">Add link</span>
       <span class="add-toggle-hint" aria-hidden="true">Paste any URL — title, domain and preview auto-detect</span>
       <span class="add-toggle-caret" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" :class="{ flipped: open }"><path d="m6 9 6 6 6-6"/></svg>
@@ -169,12 +169,11 @@ defineExpose({ open, toggleFrom, close })
     <Teleport to="body">
       <Transition name="fade-down">
         <div v-if="open" id="add-form" ref="popoverEl" class="add-popover anchored-popover">
-          <h3 class="add-title">Save a link</h3>
-          <form @submit.prevent="onSubmit">
+          <form novalidate @submit.prevent="onSubmit">
             <div class="row row-3">
               <label class="field grow" for="save-url">
                 <span>URL *</span>
-                <input id="save-url" v-model="url" @paste="handlePaste" placeholder="https://example.com/article" class="input" />
+                <input id="save-url" v-model="url" @paste="handlePaste" type="url" inputmode="url" autocapitalize="none" autocorrect="off" enterkeyhint="done" placeholder="https://example.com/article" class="input" />
                 <span v-if="loadingMeta" class="meta-hint">Detecting metadata…</span>
                 <span v-else-if="url && getDomain(normalizeUrl(url))" class="meta-hint">{{ getDomain(normalizeUrl(url)) }} → {{ category }}</span>
               </label>
@@ -204,13 +203,13 @@ defineExpose({ open, toggleFrom, close })
                   </label>
                   <label class="field" for="save-image">
                     <span>Preview image URL (optional)</span>
-                    <input id="save-image" v-model="image" placeholder="https://..." class="input" />
+                    <input id="save-image" v-model="image" type="url" inputmode="url" autocapitalize="none" autocorrect="off" placeholder="https://..." class="input" />
                   </label>
                 </div>
                 <div class="row row-2">
                   <label class="field" for="save-tags">
                     <span>Tags (comma separated)</span>
-                    <input id="save-tags" v-model="tagsInput" placeholder="reading, inspiration" class="input" />
+                    <input id="save-tags" v-model="tagsInput" autocapitalize="none" autocorrect="off" placeholder="reading, inspiration" class="input" />
                   </label>
                   <div class="field">
                     <span>Status</span>
@@ -248,7 +247,7 @@ defineExpose({ open, toggleFrom, close })
   border-radius: var(--radius);
   padding: 10px 14px;
 }
-/* Toolbar "Save a link": the panel's primary action (solid primary button,
+/* Toolbar "Add link": the panel's primary action (solid primary button,
    same token as .btn.primary so it stays consistent in both themes). */
 .add-toggle {
   display: inline-flex;
@@ -266,7 +265,9 @@ defineExpose({ open, toggleFrom, close })
   text-align: left;
   transition: background-color var(--transition-fast), transform .1s ease;
 }
+@media (hover: hover) and (pointer: fine){
 .add-toggle:hover { background: var(--accent-hover); }
+}
 .add-toggle:active { transform: scale(0.98); }
 .add-toggle:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 2px; }
 .add-toggle-icon {
@@ -282,13 +283,14 @@ defineExpose({ open, toggleFrom, close })
   transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), transform .1s ease;
 }
 .add-toggle-icon svg { width: 12px; height: 12px; }
+@media (hover: hover) and (pointer: fine){
 .add-toggle:hover .add-toggle-icon { background: color-mix(in srgb, var(--on-accent) 28%, transparent); color: var(--on-accent); }
+}
 .add-toggle-label { font-weight: var(--weight-semibold); font-size: var(--text-md); }
 .add-toggle-hint { font-size: 12.5px; color: var(--muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .add-toggle-caret { color: currentColor; opacity: .8; display: inline-flex; }
 .add-toggle-caret svg { width: 14px; height: 14px; transition: transform var(--transition-fast); }
 .add-toggle-caret svg.flipped, .caret svg.flipped { transform: rotate(180deg); }
-.add-title { margin: 0 0 10px; font-size: var(--text-lg); color: var(--text-h); }
 .row { display: grid; gap: 10px; margin-bottom: 10px; }
 .row-3 { grid-template-columns: 2fr 1.2fr 1fr; }
 .row-2 { grid-template-columns: 1fr 1fr; }
@@ -313,7 +315,9 @@ defineExpose({ open, toggleFrom, close })
   cursor: pointer;
   transition: color var(--transition-fast), background var(--transition-fast);
 }
+@media (hover: hover) and (pointer: fine){
 .more-toggle:hover { background: var(--muted-bg); }
+}
 .more-toggle .caret { color: var(--muted); display: inline-flex; }
 .more-toggle .caret svg { width: 13px; height: 13px; transition: transform var(--transition-fast); }
 .more-toggle[aria-expanded="true"] { color: var(--accent); }

@@ -73,6 +73,7 @@ function save() {
               class="input lp-input"
               type="text"
               autocomplete="off"
+              autocapitalize="words"
               placeholder="Local User"
               maxlength="40"
             />
@@ -113,12 +114,15 @@ function save() {
   display: grid;
   place-items: center;
   padding: 16px;
+  padding-bottom: calc(16px + var(--safe-area-bottom));
 }
 .lp-panel {
   width: 100%;
   max-width: 460px;
   max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px - var(--safe-area-bottom));
   overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -148,7 +152,9 @@ function save() {
   place-items: center;
   flex-shrink: 0;
 }
+@media (hover: hover) and (pointer: fine){
 .lp-close:hover { background: var(--muted-bg); color: var(--text-h); }
+}
 .lp-close:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 1px; }
 .lp-close-icon { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
 .lp-sub { margin: 0 0 20px; font-size: var(--text-sm); color: var(--muted); }
