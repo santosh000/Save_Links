@@ -97,6 +97,6 @@
 	// deployments return 503 and start no OAuth flow. Local development sets it
 	// in .dev.vars (gitignored); deployed environments use their env block.
 	"vars": {
-		"APPROVED_ORIGINS": "https://save-links.ucancallmesan.workers.dev"
+		"APPROVED_ORIGINS": "https://save-links.ucancallmesan.workers.dev,https://savelinks.cc.cd"
 	}
 }
