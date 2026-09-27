@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://save-links.ucancallmesan.workers.dev"><b>Open the app</b></a>
+  <a href="https://savelinks.cc.cd"><b>Open the app</b></a>
   &nbsp;·&nbsp;
   <a href="#development">Run it locally</a>
   &nbsp;·&nbsp;
@@ -68,7 +68,7 @@ An overview of the main features - saved links, folders, appearance settings, se
 
 ## Cloud synchronization and authentication
 
-Sign-in and cloud synchronization are live in the production application at **https://save-links.ucancallmesan.workers.dev**:
+Sign-in and cloud synchronization are live in the production application at **https://savelinks.cc.cd**:
 
 - **Google OAuth** - primary provider; `/auth/google/login`, `/auth/google/callback`
 - **GitHub OAuth** - `/auth/github/login`, `/auth/github/callback`
@@ -129,7 +129,7 @@ Sorting works together with search, filters, and folders — it reorders only th
 
 ## Stable vs development
 
-- **Stable** - the latest **released** version. The current stable release is **v2.2.1**, hosted on **Cloudflare Workers** at **https://save-links.ucancallmesan.workers.dev** - just open the address; there is nothing to install.
+- **Stable** - the latest **released** version. The current stable release is **v2.2.1**, hosted on **Cloudflare Workers** at **https://savelinks.cc.cd** - just open the address; there is nothing to install. (The technical Worker hostname `save-links.ucancallmesan.workers.dev` remains available.)
 - **Development** - the `master` branch contains the latest development state, for testing upcoming work or contributing. After a release, new work added to `master` may contain unfinished features, bugs, or breaking changes, and there is currently **no permanent public development URL** - developers and testers run it locally (see [Development](#development)).
 - `master` is not a release; new work lands there between releases.
 

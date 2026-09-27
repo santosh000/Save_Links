@@ -42,7 +42,7 @@ General sequence:
 
 ## Deployment (Cloudflare Workers + Pages)
 
-**Production is the Worker deployment `save-links`** (`wrangler.jsonc` + `worker/index.js`): it serves the `dist/` build as static assets and handles the `/auth/*` and `/api/*` boundaries on one origin (`https://save-links.ucancallmesan.workers.dev`).
+**Production is the Worker deployment `save-links`** (`wrangler.jsonc` + `worker/index.js`): it serves the `dist/` build as static assets and handles the `/auth/*` and `/api/*` boundaries. The **canonical production URL is `https://savelinks.cc.cd`**; the technical Worker hostname `https://save-links.ucancallmesan.workers.dev` remains supported (both are approved production origins).
 
 - `npm run deploy:worker` — builds `dist/` and runs `wrangler deploy`: THE production deployment command. It deploys to whichever Cloudflare account `wrangler` is logged into (check with `npx wrangler whoami`); the Worker project name `save-links` is separate from the legacy static Pages project `savelinks`.
 
@@ -90,6 +90,8 @@ Routes live in `worker/auth.js` (`worker/oauth/` holds the Google + GitHub clien
 | `APPROVED_ORIGINS` | `.dev.vars` / `vars` (wrangler.jsonc or per-env, or dashboard Variables) | Comma-separated origins the deployment will accept for `/auth/*` and `/api/*` — e.g. `http://localhost:8787` locally, `https://<host>` per environment (see below) |
 
 `wrangler.jsonc` → `secrets.required` makes `wrangler deploy` fail loudly if any of the five secrets is missing — auth must never ship half-configured. Each provider's login/callback routes require that provider's client pair together with `STATE_HMAC_SECRET`; with a missing pair they respond 503 "<Provider> sign-in is not configured". `APPROVED_ORIGINS` is **plaintext configuration**, so it ships as a `vars` entry, not a secret (see the empty default in `wrangler.jsonc`); a deployment with it unset or empty responds 503 and starts no OAuth flow — fail closed on purpose. Origin is always derived from this list, never from `Host` / `X-Forwarded-Host` / `X-Forwarded-Proto`.
+
+**Current production allowed origins:** `https://save-links.ucancallmesan.workers.dev` and `https://savelinks.cc.cd`. The canonical user-facing URL is `https://savelinks.cc.cd`; the workers.dev hostname remains supported as the technical Worker hostname. Keep both listed while both are supported.
 
 **Local development:**
 

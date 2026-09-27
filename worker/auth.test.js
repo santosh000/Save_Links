@@ -21,8 +21,9 @@ const SECRETS = {
   STATE_HMAC_SECRET: 'test-state-hmac',
 }
 const NOW = 1_700_000_000_000
-// mirrors wrangler.jsonc vars: the allowlist the tests' plain-http dev origin
-// and https preview origin both appear on
+// self-contained test allowlist (not the production wrangler.jsonc values):
+// a plain-http dev origin and an arbitrary https origin, so the origin,
+// cookie and security logic is exercised independently of production hosts
 const APPROVED_ORIGINS = 'http://localhost:8787, https://savelinks.pages.dev'
 
 function makeEnv(overrides = {}) {
