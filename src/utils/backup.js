@@ -1,4 +1,5 @@
 import { normalizeLink as normalizeCanonicalLink, LINK_TYPES } from '../domain/link.js'
+import { repairFolderTree } from './folderTree.js'
 import { getStorageKey } from './environment.js'
 import { DEFAULT_APPEARANCE, DEFAULT_COLOR_SCHEME, sanitizeAppearance, sanitizeColorScheme } from './storage.js'
 
@@ -12,7 +13,9 @@ function sanitizeFolder(raw) {
   const name = typeof raw.name === 'string' ? raw.name.trim().slice(0, 50) : ''
   if (!id || !name) return null
   const createdAt = typeof raw.createdAt === 'string' ? raw.createdAt : new Date().toISOString()
-  return { id, name, createdAt }
+  // P4: nested folders — missing parentId becomes null (old backups import flat).
+  const parentId = typeof raw.parentId === 'string' && raw.parentId.trim() ? raw.parentId.trim() : null
+  return { id, name, createdAt, parentId }
 }
 
 function sanitizeFolders(arr) {
@@ -123,7 +126,9 @@ export function normalizeBackupData(data) {
   // Assumes data already validated (app/version/links array)
   const profile = data.profile && typeof data.profile === 'object' && !Array.isArray(data.profile) ? { ...data.profile } : {}
   // folders: v1 has none -> default [], sanitize
-  const folders = sanitizeFolders(data.folders || [])
+  // P4: repair the whole set so imported nested relationships can never create
+  // a corrupt tree (dangling parents/cycles/too-deep -> root).
+  const folders = repairFolderTree(sanitizeFolders(data.folders || []))
   const validFolderIds = new Set(folders.map(f => f.id))
   // settings: v1 defaults to system/none, v2 uses data.settings
   let appearance = DEFAULT_APPEARANCE

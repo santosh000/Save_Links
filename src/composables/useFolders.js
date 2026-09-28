@@ -5,6 +5,7 @@ import { onDataChanged } from '../storage/dataChanges.js'
 import { session } from '../auth/session.js'
 import { generateId } from '../domain/link.js'
 import { syncNow } from './useSync.js'
+import { validateParent, repairFolderTree } from '../utils/folderTree.js'
 
 // Internal flag to prevent watch from overwriting remote pull data
 let isReloadingFromRemote = false
@@ -19,6 +20,9 @@ function sanitizeFolder(raw) {
     id,
     name,
     createdAt,
+    // P4: nested folders — parentId defaults to null (top level). Whole-set
+    // repair (below) nulls dangling/cyclic/too-deep references.
+    parentId: typeof raw.parentId === 'string' && raw.parentId.trim() ? raw.parentId.trim() : null,
     // v2 sync fields — preserve if present (matches the IndexedDB adapter's
     // sanitizeFolder so reloaded folders keep their server revision — and the
     // kept_local marker, so a Keep Local choice survives a reload instead of
@@ -41,7 +45,9 @@ function sanitizeFolders(arr) {
     seen.add(f.id)
     out.push(f)
   }
-  return out
+  // P4: normalize the whole set so a persisted tree can never contain a
+  // dangling parent, a cycle or a level deeper than MAX_FOLDER_DEPTH.
+  return repairFolderTree(out)
 }
 
 // Queue outbox mutations for folders added/replaced by a backup import, then
@@ -158,13 +164,16 @@ export function useFolders() {
     return m
   })
 
-  function createFolder(name) {
+  function createFolder(name, parentId = null) {
     const trimmed = (name || '').trim().slice(0, 50)
     if (!trimmed) throw new Error('Folder name required')
-    // prevent duplicate name case-insensitive
+    // P4: the requested parent must exist and fit within the depth limit.
+    const parent = validateParent(folders.value, null, parentId)
+    if (!parent.ok) throw new Error(parent.reason)
+    // prevent duplicate name case-insensitive (existing rule, unchanged)
     const exists = folders.value.some(f => f.name.toLowerCase() === trimmed.toLowerCase())
     if (exists) throw new Error('Folder already exists')
-    const folder = { id: generateId(), name: trimmed, createdAt: new Date().toISOString(), revision: 0 }
+    const folder = { id: generateId(), name: trimmed, parentId: parent.parentId, createdAt: new Date().toISOString(), revision: 0 }
     folders.value.push(folder)
 
     // Create pending mutation for sync (if authenticated)
@@ -189,24 +198,17 @@ export function useFolders() {
     return folder
   }
 
-  function renameFolder(id, newName) {
-    const trimmed = (newName || '').trim().slice(0, 50)
-    if (!trimmed) throw new Error('Folder name required')
-    const idx = folders.value.findIndex(f => f.id === id)
+  // Shared write path for rename/move: one updated record, one pending
+  // mutation basing the claim on the store-acknowledged revision (see
+  // useLinks.updateLink — the reactive copy can lag after a merge).
+  function replaceFolder(updated) {
+    const idx = folders.value.findIndex(f => f.id === updated.id)
     if (idx === -1) throw new Error('Folder not found')
-    // duplicate check excluding self
-    const dup = folders.value.some(f => f.id !== id && f.name.toLowerCase() === trimmed.toLowerCase())
-    if (dup) throw new Error('Folder already exists')
-    const updated = { ...folders.value[idx], name: trimmed }
     folders.value.splice(idx, 1, updated)
 
-    // Create pending mutation for sync (if authenticated)
     const accountId = session.getState().user?.id
     if (accountId) {
       queueMicrotask(async () => {
-        // Base the claim on the store-acknowledged revision and keep the
-        // store's owned identity (see useLinks.updateLink — the reactive copy
-        // can lag the authoritative store after a merge/push-accepted).
         const storeCopy = (await repository.getAllFolders()).find(f => f.id === updated.id)
         const baseRevision = storeCopy ? storeCopy.revision : updated.revision
         const payload = storeCopy
@@ -224,6 +226,30 @@ export function useFolders() {
         syncNow().catch(err => console.warn('Auto-sync failed:', err))
       })
     }
+    return updated
+  }
+
+  function renameFolder(id, newName) {
+    const trimmed = (newName || '').trim().slice(0, 50)
+    if (!trimmed) throw new Error('Folder name required')
+    const idx = folders.value.findIndex(f => f.id === id)
+    if (idx === -1) throw new Error('Folder not found')
+    // duplicate check excluding self
+    const dup = folders.value.some(f => f.id !== id && f.name.toLowerCase() === trimmed.toLowerCase())
+    if (dup) throw new Error('Folder already exists')
+    return replaceFolder({ ...folders.value[idx], name: trimmed })
+  }
+
+  // P4: reparent a folder (null = root). Self/descendant parents and moves that
+  // would exceed the depth limit are rejected before any state changes — the UI
+  // already excludes those destinations, this is the runtime guard.
+  function moveFolder(id, parentId) {
+    const current = folders.value.find(f => f.id === id)
+    if (!current) throw new Error('Folder not found')
+    const result = validateParent(folders.value, id, parentId)
+    if (!result.ok) throw new Error(result.reason)
+    if ((current.parentId ?? null) === result.parentId) return current
+    return replaceFolder({ ...current, parentId: result.parentId })
   }
 
   function deleteFolder(id) {
@@ -269,6 +295,7 @@ export function useFolders() {
 
     const newFolders = []
     const replacedFolders = []
+    const idRemap = new Map() // backup folder id -> fresh local id
     const merged = [...existing]
 
     for (const imported of importedFolders) {
@@ -291,12 +318,27 @@ export function useFolders() {
         // be rejected and then pulled back as a delete. A fresh id can always
         // land and sync to every device.
         const newFolder = { ...imported, id: generateId() }
+        if (imported.id) idRemap.set(imported.id, newFolder.id)
         merged.push(newFolder)
         newFolders.push(newFolder)
       }
     }
 
-    folders.value = merged
+    // P4: nested parents that pointed at re-id'd imports must follow the new
+    // ids; sanitizeFolders then repairs whatever still cannot resolve (dangling
+    // name-matched parents, cycles, too-deep chains) to a safe tree.
+    const remapped = idRemap.size
+      ? merged.map((f) => (f.parentId && idRemap.has(f.parentId) ? { ...f, parentId: idRemap.get(f.parentId) } : f))
+      : merged
+    // Brand genuinely-new imports BEFORE the sanitize copy: sanitizeFolders
+    // returns fresh objects, and the queue helper brands the originals — the
+    // reactive records (which the watch persists) must already carry the
+    // account ownership so the store copy keeps it too.
+    const accountId = session.getState().user?.id
+    if (accountId) {
+      for (const f of newFolders) { f.revision = 0; f.account_id = accountId }
+    }
+    folders.value = sanitizeFolders(remapped)
     await queueImportedFolderMutations(newFolders, replacedFolders)
     return { newCount: newFolders.length, replacedCount: strategy === 'replace' ? (importedFolders.length - newFolders.length) : 0 }
   }
@@ -317,5 +359,5 @@ export function useFolders() {
     return folders.value.filter(f => !f.account_id && !f.kept_local)
   }
 
-  return { folders, folderMap, createFolder, renameFolder, deleteFolder, setFolders, mergeFolders, sanitizeFolders, getAnonymousFoldersCount, getAnonymousFolders }
+  return { folders, folderMap, createFolder, renameFolder, moveFolder, deleteFolder, setFolders, mergeFolders, sanitizeFolders, getAnonymousFoldersCount, getAnonymousFolders }
 }

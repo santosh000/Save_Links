@@ -173,6 +173,9 @@ export function sanitizeFolder(raw) {
     id,
     name,
     createdAt,
+    // P4: nested folders — parentId defaults to null (top level). Whole-set
+    // relationship repair lives in useFolders.sanitizeFolders.
+    parentId: typeof raw.parentId === 'string' && raw.parentId.trim() ? raw.parentId.trim() : null,
     // v2 sync fields — preserve if present, backfill with defaults if missing
     revision: typeof raw.revision === 'number' ? raw.revision : 0,
     account_id: typeof raw.account_id === 'string' ? raw.account_id.trim() : null,
