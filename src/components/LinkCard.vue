@@ -152,8 +152,41 @@ function platformIcon() {
 
 <template>
   <article class="card" :class="{ editing, selected }" @click="onInspectClick">
-    <a v-if="link.image && !imageFailed" :href="navUrl()" target="_blank" rel="noopener noreferrer" class="thumb-wrap">
-      <img :src="link.image" :alt="link.title" class="thumb" @error="imageFailed = true" loading="lazy" />
+    <a
+      :href="navUrl()"
+      target="_blank"
+      rel="noopener noreferrer"
+      class="thumb-wrap"
+      :class="{ 'thumb-empty': !(link.image && !imageFailed) }"
+      :aria-label="link.image && !imageFailed ? link.title : undefined"
+      :aria-hidden="link.image && !imageFailed ? undefined : 'true'"
+      :tabindex="link.image && !imageFailed ? undefined : '-1'"
+    >
+      <img v-if="link.image && !imageFailed" :src="link.image" :alt="link.title" class="thumb" @error="imageFailed = true" loading="lazy" />
+      <svg v-else class="thumb-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <template v-if="link.type === 'video'">
+          <polygon points="23 7 16 12 23 17 23 7" />
+          <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+        </template>
+        <template v-else-if="link.type === 'docs'">
+          <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+          <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+        </template>
+        <template v-else-if="link.type === 'repo'">
+          <polyline points="16 18 22 12 16 6" />
+          <polyline points="8 6 2 12 8 18" />
+        </template>
+        <template v-else-if="link.type === 'tutorial'">
+          <path d="M22 10 12 5 2 10l10 5 10-5z" />
+          <path d="M6 12v5c3 3 9 3 12 0v-5" />
+        </template>
+        <template v-else>
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+          <line x1="16" y1="13" x2="8" y2="13" />
+          <line x1="16" y1="17" x2="8" y2="17" />
+        </template>
+      </svg>
     </a>
     <div class="body">
       <a :href="navUrl()" target="_blank" rel="noopener noreferrer" class="title">{{ link.title }}</a>
@@ -322,6 +355,7 @@ function platformIcon() {
   padding: 0;
   margin: 0;
   cursor: pointer;
+  box-shadow: var(--shadow-sm);
 }
 @media (hover: hover) and (pointer: fine){
 .card:hover { border-color: var(--accent-border); box-shadow: var(--shadow-sm); }
@@ -329,7 +363,11 @@ function platformIcon() {
 /* explicit editing state: accent border while the anchored edit popover is open
    (same token as LinkRow's .link-row.editing) */
 .card.editing { border-color: var(--accent-border); }
-.card.selected { border-color: var(--accent); }
+/* Selection: accent border + soft ring, like the mockup's card.selected. */
+.card.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-bg), var(--shadow-sm);
+}
 /* Selection checkbox: native control, part of the actions row so it never
    overlaps the title/thumbnail and never triggers navigation. */
 .card-check { display: inline-flex; align-items: center; padding: 4px; }
@@ -344,9 +382,33 @@ function platformIcon() {
 @media (pointer: coarse) {
   .card-check { padding: 8px; }
 }
-.thumb-wrap { display: block; aspect-ratio: 16/7; overflow: hidden; background: var(--muted-bg); max-height: 140px; border-bottom: 1px solid var(--border-subtle); }
+/* Preview banner: the mockup's fixed-height card banner (100 / 120 / 130px),
+   type glyph on a soft accent wash when the link has no image. */
+.thumb-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100px;
+  overflow: hidden;
+  background: var(--muted-bg);
+  max-height: none;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.thumb-wrap.thumb-empty {
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 14%, var(--card)), var(--card));
+  color: var(--muted);
+}
 .thumb { width: 100%; height: 100%; object-fit: cover; display: block; }
-.body { padding: 12px; display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; flex: 1 1 auto; }
+.thumb-glyph { width: 34px; height: 34px; opacity: .6; }
+@media (min-width: 560px) {
+  .thumb-wrap { height: 120px; }
+  .thumb-glyph { width: 40px; height: 40px; }
+}
+@media (min-width: 1024px) {
+  .thumb-wrap { height: 130px; }
+}
+.body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 6px; min-width: 0; flex: 1 1 auto; }
 /* Metadata: one quiet line of supporting text. The title and URL lead the
    card; category, folder, domain, saved date and provenance follow as plain
    muted text (no badges, no chrome), wrapping only when the card is narrow. */
@@ -357,7 +419,7 @@ function platformIcon() {
   column-gap: var(--space-2);
   row-gap: var(--space-1);
   min-width: 0;
-  font-size: var(--text-xs);
+  font-size: 11px;
   color: var(--muted);
 }
 /* Each value stays on one line; a long folder name or domain truncates
@@ -376,11 +438,11 @@ function platformIcon() {
 /* Quick-action trigger: three round dots in the shared stroke-icon language. */
 svg.more-dots { fill: currentColor; stroke: none; }
 .title {
-  font-weight: var(--weight-semibold);
+  font-weight: var(--weight-medium);
   color: var(--text-h);
   text-decoration: none;
-  line-height: var(--leading-tight);
-  font-size: var(--text-lg);
+  line-height: 1.35;
+  font-size: 14px;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -401,7 +463,7 @@ svg.more-dots { fill: currentColor; stroke: none; }
   align-items: baseline;
   gap: var(--space-2);
   min-width: 0;
-  font-size: var(--text-xs);
+  font-size: 11.5px;
   line-height: 1.35;
 }
 .url-line {
@@ -431,19 +493,22 @@ svg.more-dots { fill: currentColor; stroke: none; }
   color: var(--muted);
 }
 .desc {
-  font-size: var(--text-xs);
+  font-size: 12px;
   color: var(--muted);
-  line-height: 1.4;
+  line-height: 1.45;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
   margin: 0;
 }
-.tags { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.tags { display: flex; flex-wrap: wrap; gap: 6px; }
 .tag {
-  font-size: var(--text-xs);
-  color: var(--muted);
+  font-size: 10.5px;
+  color: var(--accent);
+  background: var(--accent-bg);
+  padding: 2px 7px;
+  border-radius: 8px;
 }
 .actions {
   display: flex;

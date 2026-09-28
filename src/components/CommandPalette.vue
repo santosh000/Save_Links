@@ -132,34 +132,34 @@ function activeId() {
   flex-direction: column;
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-md);
+  border-radius: 14px;              /* mockup palette radius */
+  box-shadow: var(--shadow-lg);     /* mockup: floating palette uses lg */
   overflow: hidden;
 }
 .command-input {
   width: 100%;
-  padding: 14px 16px;
+  padding: 15px 16px;
   border: none;
   border-bottom: 1px solid var(--border);
   background: transparent;
   color: var(--text-h);
-  font-size: var(--text-md);
+  font-size: 15px;
   font-family: inherit;
   outline: none;
 }
-.command-input::placeholder { color: var(--muted); }
+.command-input::placeholder { color: var(--text-subtle); }
 .command-list { list-style: none; margin: 0; padding: 6px; overflow-y: auto; overscroll-behavior: contain; }
 .command-item {
   width: 100%;
   display: flex;
   align-items: baseline;
   gap: var(--space-2);
-  padding: 9px 10px;
+  padding: 11px 10px;
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--text);
-  font-size: var(--text-sm);
+  color: var(--text-h);
+  font-size: 13.5px;
   font-family: inherit;
   text-align: left;
   cursor: pointer;

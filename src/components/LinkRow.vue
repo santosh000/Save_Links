@@ -270,21 +270,30 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
   align-items: center;
   flex-wrap: wrap;
   gap: 6px 12px;
-  padding: 10px 12px;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  transition: box-shadow var(--transition-fast), border-color var(--transition-fast);
+  padding: 10px 14px;
+  min-height: 52px;
+  background: transparent;
+  border: none;
+  /* Reserved inline-start rail: the selected accent edge never shifts the row
+     (the mockup marks the open row with a 3px accent edge + soft fill). */
+  border-inline-start: 3px solid transparent;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
+  transition: background-color var(--transition-fast), border-color var(--transition-fast);
   min-width: 0;
   max-width: 100%;
   box-sizing: border-box;
   cursor: pointer;
 }
 @media (hover: hover) and (pointer: fine){
-.link-row:hover { border-color: var(--accent-border); box-shadow: var(--shadow-sm); }
+.link-row:hover { background-color: var(--muted-bg); }
 }
-.link-row.editing { border-color: var(--accent-border); }
-.link-row.selected { border-color: var(--accent); }
+.link-row.editing { background-color: var(--muted-bg); }
+/* Bulk-selection state: the mockup's soft accent fill + accent edge. */
+.link-row.selected {
+  background-color: var(--accent-bg);
+  border-inline-start-color: var(--accent);
+}
 /* Selection checkbox: a sibling of the row link (never inside the anchor), so
    selecting can never navigate. Padding keeps a comfortable hit area without
    growing the dense layouts. */
@@ -314,20 +323,20 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
    Compact rows stay single-line (scoped out). */
 .link-row:not(.compact) .row-main { flex: 1 1 280px; }
 .row-favicon {
-  width: 34px;
-  height: 34px;
-  border-radius: var(--radius-full);
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
   background: var(--muted-bg);
   color: var(--muted);
   display: grid;
   place-items: center;
   flex-shrink: 0;
 }
-.row-favicon svg { width: 16px; height: 16px; }
+.row-favicon svg { width: 12px; height: 12px; }
 .row-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .row-title {
-  font-weight: var(--weight-semibold);
-  font-size: var(--text-md);
+  font-weight: 400;
+  font-size: 14px;
   color: var(--text-h);
   white-space: nowrap;
   overflow: hidden;
@@ -340,7 +349,7 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: var(--text-xs);
+  font-size: 11.5px;
   color: var(--muted);
   min-width: 0;
 }
@@ -348,11 +357,13 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
 .row-chips { display: inline-flex; gap: 4px var(--space-2); align-items: center; min-width: 0; flex-wrap: wrap; }
 /* Metadata reads as quiet text, not as stacked pills (the row stays one object) */
 .chip {
-  color: var(--text);
-  font-size: var(--text-xs);
+  color: var(--muted);
+  font-size: 11.5px;
   white-space: nowrap;
 }
-.chip-date, .chip-tags { color: var(--muted); }
+.chip-date { color: var(--muted); }
+/* Tags carry the accent, like the mockup's .row-sub .tag. */
+.chip-tags { color: var(--accent); }
 /* Quick-action trigger: three round dots in the shared stroke-icon language. */
 svg.more-dots { fill: currentColor; stroke: none; }
 .row-actions { display: flex; align-items: center; gap: 5px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; min-width: 0; }
@@ -362,16 +373,16 @@ svg.more-dots { fill: currentColor; stroke: none; }
    share one action treatment. Compact keeps only its density overrides below. */
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 
-/* COMPACT: denser scanning rows, meta chips off, smaller chrome */
+/* COMPACT: the mockup's dense scanning row (same fields, tighter rhythm) */
 .link-row.compact {
-  padding: 4px 8px;
+  padding: 9px 14px;
+  min-height: 46px;
   gap: 3px 8px;
-  border-radius: var(--radius-sm);
 }
-.compact .row-favicon { width: 24px; height: 24px; }
-.compact .row-favicon svg { width: 12px; height: 12px; }
-.compact .row-title { font-size: var(--text-xs); }
-.compact .row-meta { font-size: 10px; }
+.compact .row-favicon { width: 20px; height: 20px; border-radius: 5px; }
+.compact .row-favicon svg { width: 11px; height: 11px; }
+.compact .row-title { font-size: 13px; }
+.compact .row-meta { font-size: 11px; }
 .compact .row-chips { display: none; }
 .compact .row-check { padding: 4px 2px; }
 .compact .row-toggle { width: 24px; height: 24px; }

@@ -84,17 +84,18 @@ function onMove(value) {
 .bulk-bar {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: 8px;
   flex-wrap: wrap;
   padding: 8px 14px;
-  background: var(--accent-bg);
-  border-bottom: 1px solid var(--border);
-  font-size: var(--text-sm);
+  background: var(--accent);
+  border-bottom: 1px solid var(--accent);
+  color: var(--on-accent);
+  font-size: 12.5px;
   min-width: 0;
 }
 .bulk-count {
   font-weight: var(--weight-semibold);
-  color: var(--accent);
+  color: var(--on-accent);
   white-space: nowrap;
 }
 .bulk-btn {
@@ -102,30 +103,37 @@ function onMove(value) {
   align-items: center;
   gap: 6px;
   min-height: var(--control-height-sm);
-  padding: 5px 10px;
+  padding: 5px 12px;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-h);
-  font-size: var(--text-sm);
+  background: rgba(255, 255, 255, .16);
+  color: var(--on-accent);
+  font-size: 12.5px;
   font-weight: var(--weight-medium);
   cursor: pointer;
   transition: background var(--transition-fast), color var(--transition-fast);
   white-space: nowrap;
 }
-.bulk-btn.disabled { color: var(--muted); cursor: default; }
+.bulk-btn.disabled { color: rgba(255, 255, 255, .6); background: transparent; cursor: default; }
 @media (hover: hover) and (pointer: fine) {
-  .bulk-btn:not(.disabled):hover { background: var(--muted-bg); }
+  .bulk-btn:not(.disabled):hover { background: rgba(255, 255, 255, .26); }
 }
 .bulk-btn:active { transform: scale(0.98); }
-.bulk-btn.danger { color: var(--error, var(--danger, #b91c1c)); }
+.bulk-btn.danger { color: var(--on-accent); }
 .bulk-btn:focus-visible,
 .bulk-clear:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline: var(--focus-ring-width) solid var(--on-accent);
   outline-offset: 1px;
 }
 .bulk-icon { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+/* The move picker inside the accent bar reads as a translucent control. */
 .bulk-move { display: flex; align-items: center; min-width: 0; }
+.bulk-move :deep(.asel--header .asel-trigger) {
+  background: rgba(255, 255, 255, .16);
+  border-color: transparent;
+  color: var(--on-accent);
+  height: 28px;
+}
 .bulk-clear {
   margin-left: auto;
   width: var(--control-height-sm);
@@ -135,11 +143,11 @@ function onMove(value) {
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--muted);
+  color: rgba(255, 255, 255, .85);
   cursor: pointer;
 }
 @media (hover: hover) and (pointer: fine) {
-  .bulk-clear:hover { background: var(--muted-bg); color: var(--text-h); }
+  .bulk-clear:hover { background: rgba(255, 255, 255, .2); color: var(--on-accent); }
 }
 
 /* Narrow screens: labels collapse to icons, controls stay tappable (≥32px)
