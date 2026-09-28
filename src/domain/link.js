@@ -19,6 +19,8 @@
 //   important: boolean,
 //   mustHave: boolean,
 //   favorite: boolean,
+//   pinned: boolean,          // P3: pin is distinct from favorite
+//   type: string,            // P3: 'article'|'video'|'docs'|'repo'|'tutorial'|'other'
 //   folderId: string|null,
 //   status: string|null,      // legacy derived flag: 'important'|'must-have'|'both'|null
 //   createdAt: string,        // ISO; preserved when present, else backfilled
@@ -31,6 +33,40 @@
 // polluted/crafted records). Non-object input returns null so callers can
 // decide whether to skip (backup) or filter (composable load).
 import { categorizeUrl, getDomain } from '../utils/categorize.js'
+
+// P3 link taxonomy: the only persisted type values. 'other' is the safe
+// fallback for old/unknown records. Labels are presentation-only.
+export const LINK_TYPES = ['article', 'video', 'docs', 'repo', 'tutorial', 'other']
+
+export const LINK_TYPE_LABELS = {
+  article: 'Article',
+  video: 'Video',
+  docs: 'Docs',
+  repo: 'Repo',
+  tutorial: 'Tutorial',
+  other: 'Other',
+}
+
+// Conservative creation-time detection (P3): only well-known hosts/paths.
+// Anything unrecognized stays 'other' — an explicitly chosen type always wins
+// in buildLinkSpec, this is only the fallback when no type was supplied.
+export function detectLinkType(rawUrl) {
+  try {
+    const u = new URL(rawUrl)
+    const host = u.hostname.toLowerCase()
+    const path = u.pathname.toLowerCase()
+    if (/(^|\.)(youtube\.com|youtu\.be)$/.test(host)) return 'video'
+    if (/(^|\.)(github\.com|gist\.github\.com)$/.test(host)) return 'repo'
+    if (/(^|\.)docs\./.test(host) || /(^|\/)(docs|documentation)(\/|$)/.test(path)) return 'docs'
+    return 'other'
+  } catch {
+    return 'other'
+  }
+}
+
+function sanitizeType(value) {
+  return LINK_TYPES.includes(value) ? value : 'other'
+}
 
 export function generateId() {
   // UUID v4 for new objects (RFC 4122 compliant)
@@ -86,6 +122,10 @@ export function normalizeLink(raw) {
     important,
     mustHave,
     favorite,
+    // P3 fields — additive with safe defaults so existing records normalize
+    // cleanly (missing pinned -> false, missing type -> 'other').
+    pinned: typeof raw.pinned === 'boolean' ? raw.pinned : false,
+    type: sanitizeType(raw.type),
     folderId: str(raw.folderId).trim() || null,
     status: important && mustHave ? 'both' : important ? 'important' : mustHave ? 'must-have' : null, // legacy compat, derived
     createdAt: str(raw.createdAt) || new Date().toISOString(),

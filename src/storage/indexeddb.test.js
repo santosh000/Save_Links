@@ -212,6 +212,23 @@ describe('indexeddb repository', () => {
       const ids = (await repo.getAllLinks()).map((l) => l.id)
       expect(ids).toEqual(['c'])
     })
+
+    it('persists P3 pinned/type and defaults them for old records', async () => {
+      const repo = makeRepo()
+      await repo.upsertLink(link('a', { pinned: true, type: 'video' }))
+      await repo.upsertLink(link('b')) // no P3 fields — legacy record shape
+      await repo.upsertLink(link('c', { type: 'podcast' })) // invalid type
+      const all = await repo.getAllLinks()
+      const a = all.find((l) => l.id === 'a')
+      const b = all.find((l) => l.id === 'b')
+      const c = all.find((l) => l.id === 'c')
+      expect(a.pinned).toBe(true)
+      expect(a.type).toBe('video')
+      expect(b.pinned).toBe(false)
+      expect(b.type).toBe('other')
+      expect(c.pinned).toBe(false)
+      expect(c.type).toBe('other')
+    })
   })
 
   describe('folder operations', () => {

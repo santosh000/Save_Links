@@ -1498,4 +1498,85 @@ const survivor = links.value.find((l) => l.id === createdObjectId)
       vi.unstubAllGlobals()
     })
   })
+
+  describe('P3 pin + type', () => {
+    const meta = (domain = 'example.com') => ({ title: 'T', description: '', image: '', domain })
+
+    it('addLink persists an explicit type, applies detection, and defaults pin', async () => {
+      const { useLinks } = await import('./useLinks.js')
+      const { addLink } = useLinks()
+
+      const explicit = await addLink({
+        originalUrl: 'https://example.com/docs/page', type: 'docs', pinned: true,
+        _prefetchedMeta: meta(), _prefetchedUrl: 'https://example.com/docs/page',
+      })
+      expect(explicit.type).toBe('docs')
+      expect(explicit.pinned).toBe(true)
+
+      const detected = await addLink({
+        originalUrl: 'https://youtube.com/watch?v=1',
+        _prefetchedMeta: meta('youtube.com'), _prefetchedUrl: 'https://youtube.com/watch?v=1',
+      })
+      expect(detected.type).toBe('video')
+      expect(detected.pinned).toBe(false)
+
+      const fallback = await addLink({
+        originalUrl: 'https://example.com/plain',
+        _prefetchedMeta: meta(), _prefetchedUrl: 'https://example.com/plain',
+      })
+      expect(fallback.type).toBe('other')
+    })
+
+    it('togglePin flips only the pin flag (independent of favorite)', async () => {
+      const { useLinks } = await import('./useLinks.js')
+      const { links, addLink, togglePin } = useLinks()
+      const l = await addLink({
+        originalUrl: 'https://example.com/pin',
+        _prefetchedMeta: meta(), _prefetchedUrl: 'https://example.com/pin',
+      })
+      const stored = () => links.value.find((x) => x.id === l.id)
+
+      togglePin(l.id)
+      await flush()
+      expect(stored().pinned).toBe(true)
+      expect(stored().favorite).toBe(false)
+
+      togglePin(l.id)
+      await flush()
+      expect(stored().pinned).toBe(false)
+    })
+
+    it('updateLink preserves pinned/type when patching other fields', async () => {
+      const { useLinks } = await import('./useLinks.js')
+      const { links, addLink, updateLink } = useLinks()
+      const l = await addLink({
+        originalUrl: 'https://example.com/keep', pinned: true, type: 'tutorial',
+        _prefetchedMeta: meta(), _prefetchedUrl: 'https://example.com/keep',
+      })
+      updateLink(l.id, { title: 'Renamed' })
+      await flush()
+      const stored = links.value.find((x) => x.id === l.id)
+      expect(stored.title).toBe('Renamed')
+      expect(stored.pinned).toBe(true)
+      expect(stored.type).toBe('tutorial')
+    })
+
+    it('mergeLinks replace keeps the existing pin/type', async () => {
+      const { useLinks } = await import('./useLinks.js')
+      const { links, addLink, mergeLinks } = useLinks()
+      const l = await addLink({
+        originalUrl: 'https://example.com/merge', pinned: true, type: 'repo',
+        _prefetchedMeta: meta(), _prefetchedUrl: 'https://example.com/merge',
+      })
+      const count = await mergeLinks([{
+        id: 'other', normalizedUrl: 'https://example.com/merge', url: 'https://example.com/merge',
+        title: 'Imported', pinned: false, type: 'other',
+      }], 'replace')
+      expect(count.replacedCount).toBe(1)
+      const stored = links.value.find((x) => x.id === l.id)
+      expect(stored.title).toBe('Imported')
+      expect(stored.pinned).toBe(true)
+      expect(stored.type).toBe('repo')
+    })
+  })
 })

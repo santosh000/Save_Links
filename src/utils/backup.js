@@ -1,4 +1,4 @@
-import { normalizeLink as normalizeCanonicalLink } from '../domain/link.js'
+import { normalizeLink as normalizeCanonicalLink, LINK_TYPES } from '../domain/link.js'
 import { getStorageKey } from './environment.js'
 import { DEFAULT_APPEARANCE, DEFAULT_COLOR_SCHEME, sanitizeAppearance, sanitizeColorScheme } from './storage.js'
 
@@ -46,6 +46,10 @@ export function createBackupPayload({ links, profile, folders, appearance, color
         important: !!l.important,
         mustHave: !!l.mustHave,
         favorite: !!l.favorite,
+        // P3 fields — exported explicitly so a round-trip preserves them.
+        // Old backups without them still import via normalizeLink defaults.
+        pinned: !!l.pinned,
+        type: LINK_TYPES.includes(l.type) ? l.type : 'other',
         folderId: typeof l.folderId === 'string' && l.folderId ? l.folderId : null,
         domain: l.domain,
         createdAt: l.createdAt,

@@ -75,6 +75,20 @@ describe('backup utils', () => {
       expect(payload.version).toBe(2)
     })
 
+    it('exports P3 pinned/type and sanitizes an unknown type', () => {
+      const payload = createBackupPayload({
+        links: [
+          { id: '1', normalizedUrl: 'https://example.com/a', url: 'https://example.com/a', title: 'A', pinned: true, type: 'video' },
+          { id: '2', normalizedUrl: 'https://example.com/b', url: 'https://example.com/b', title: 'B', type: 'podcast' },
+        ],
+        profile: {},
+      })
+      expect(payload.links[0].pinned).toBe(true)
+      expect(payload.links[0].type).toBe('video')
+      expect(payload.links[1].pinned).toBe(false)
+      expect(payload.links[1].type).toBe('other')
+    })
+
     it('exports from in-memory state (not raw localStorage)', () => {
       // put different data in localStorage (using environment-specific key)
       const ls2 = (typeof window !== 'undefined' && window.localStorage) ? window.localStorage : globalThis.localStorage
@@ -352,6 +366,29 @@ describe('backup utils', () => {
       const { links } = normalizeBackupData(data)
       expect(links[0].title.length).toBe(200)
       expect(links[0].description.length).toBe(400)
+    })
+
+    it('imports P3-less backups with pinned false / type other (old backup compatibility)', () => {
+      const data = {
+        app: 'Save_Link',
+        version: 2,
+        exportedAt: new Date().toISOString(),
+        profile: {},
+        links: [{ id: '1', url: 'https://example.com/a', title: 'A' }],
+      }
+      const { links } = normalizeBackupData(data)
+      expect(links[0].pinned).toBe(false)
+      expect(links[0].type).toBe('other')
+    })
+
+    it('round-trips pinned and type through export → import', () => {
+      const payload = createBackupPayload({
+        links: [{ id: '1', normalizedUrl: 'https://example.com/a', url: 'https://example.com/a', title: 'A', pinned: true, type: 'tutorial' }],
+        profile: {},
+      })
+      const { links } = normalizeBackupData(payload)
+      expect(links[0].pinned).toBe(true)
+      expect(links[0].type).toBe('tutorial')
     })
   })
 })
