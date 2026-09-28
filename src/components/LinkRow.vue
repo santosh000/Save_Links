@@ -15,9 +15,10 @@ const DATE_FMT = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'nume
 const props = defineProps({
   link: { type: Object, required: true },
   folders: { type: Array, default: () => [] },
-  mode: { type: String, default: 'list' } // 'list' | 'compact'
+  mode: { type: String, default: 'list' }, // 'list' | 'compact'
+  selected: { type: Boolean, default: false }
 })
-const emit = defineEmits(['toggle-important', 'toggle-must-have', 'toggle-favorite', 'set-status', 'delete', 'edit', 'set-folder', 'copy', 'share'])
+const emit = defineEmits(['toggle-important', 'toggle-must-have', 'toggle-favorite', 'set-status', 'delete', 'edit', 'set-folder', 'copy', 'share', 'select'])
 
 // Quick-action menu (Open / Copy link / Share / Category / Folder / Delete):
 // the same anchored-popover infrastructure and neutral menu surface as LinkCard
@@ -102,7 +103,15 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
 </script>
 
 <template>
-  <article class="link-row" :class="[mode, { editing }]">
+  <article class="link-row" :class="[mode, { editing, selected }]">
+    <label class="row-check">
+      <input
+        type="checkbox"
+        :checked="selected"
+        :aria-label="'Select ' + (link.title || 'link')"
+        @change="emit('select', link.id, $event.target.checked)"
+      />
+    </label>
     <a :href="navUrl()" target="_blank" rel="noopener noreferrer" class="row-main" :title="link.title">
       <span class="row-favicon" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.9 5.7 3.9 9S14.5 18.4 12 21c-2.5-2.6-3.9-5.7-3.9-9S9.5 5.6 12 3z"/></svg>
@@ -246,6 +255,22 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
 .link-row:hover { border-color: var(--accent-border); box-shadow: var(--shadow-sm); }
 }
 .link-row.editing { border-color: var(--accent-border); }
+.link-row.selected { border-color: var(--accent); }
+/* Selection checkbox: a sibling of the row link (never inside the anchor), so
+   selecting can never navigate. Padding keeps a comfortable hit area without
+   growing the dense layouts. */
+.row-check { display: inline-flex; align-items: center; padding: 6px 4px; }
+.row-check input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.row-check input:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 2px; }
+@media (pointer: coarse) {
+  .row-check { padding: 8px 4px; }
+}
 .row-main {
   display: flex;
   align-items: center;
@@ -319,6 +344,7 @@ svg.more-dots { fill: currentColor; stroke: none; }
 .compact .row-title { font-size: var(--text-xs); }
 .compact .row-meta { font-size: 10px; }
 .compact .row-chips { display: none; }
+.compact .row-check { padding: 4px 2px; }
 .compact .row-toggle { width: 24px; height: 24px; }
 .compact .row-toggle svg { width: 12px; height: 12px; }
 .compact .icon-btn { width: 24px; height: 24px; }

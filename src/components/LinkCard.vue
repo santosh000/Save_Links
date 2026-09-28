@@ -22,9 +22,10 @@ const SHORT_FMT = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'num
 
 const props = defineProps({
   link: { type: Object, required: true },
-  folders: { type: Array, default: () => [] }
+  folders: { type: Array, default: () => [] },
+  selected: { type: Boolean, default: false }
 })
-const emit = defineEmits(['toggle-important', 'toggle-must-have', 'toggle-favorite', 'set-status', 'delete', 'edit', 'set-folder', 'copy', 'share'])
+const emit = defineEmits(['toggle-important', 'toggle-must-have', 'toggle-favorite', 'set-status', 'delete', 'edit', 'set-folder', 'copy', 'share', 'select'])
 
 const imageFailed = ref(false)
 watch(() => props.link.image, () => { imageFailed.value = false })
@@ -134,7 +135,7 @@ function platformIcon() {
 </script>
 
 <template>
-  <article class="card" :class="{ editing }">
+  <article class="card" :class="{ editing, selected }">
     <a v-if="link.image && !imageFailed" :href="navUrl()" target="_blank" rel="noopener noreferrer" class="thumb-wrap">
       <img :src="link.image" :alt="link.title" class="thumb" @error="imageFailed = true" loading="lazy" />
     </a>
@@ -158,6 +159,14 @@ function platformIcon() {
         <span v-for="t in link.tags" :key="t" class="tag">#{{ t }}</span>
       </div>
       <div class="actions">
+        <label class="card-check">
+          <input
+            type="checkbox"
+            :checked="selected"
+            :aria-label="'Select ' + (link.title || 'link')"
+            @change="emit('select', link.id, $event.target.checked)"
+          />
+        </label>
         <div class="status-group">
           <button
             class="pill"
@@ -289,6 +298,21 @@ function platformIcon() {
 /* explicit editing state: accent border while the anchored edit popover is open
    (same token as LinkRow's .link-row.editing) */
 .card.editing { border-color: var(--accent-border); }
+.card.selected { border-color: var(--accent); }
+/* Selection checkbox: native control, part of the actions row so it never
+   overlaps the title/thumbnail and never triggers navigation. */
+.card-check { display: inline-flex; align-items: center; padding: 4px; }
+.card-check input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.card-check input:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 2px; }
+@media (pointer: coarse) {
+  .card-check { padding: 8px; }
+}
 .thumb-wrap { display: block; aspect-ratio: 16/7; overflow: hidden; background: var(--muted-bg); max-height: 140px; border-bottom: 1px solid var(--border-subtle); }
 .thumb { width: 100%; height: 100%; object-fit: cover; display: block; }
 .body { padding: 12px; display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; flex: 1 1 auto; }

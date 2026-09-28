@@ -14,13 +14,17 @@ test.describe('Search shortcut + keycap (Step 2C-5)', () => {
     await clearStorage(page)
   })
 
-  test('Ctrl+K focuses the existing search field', async ({ page }) => {
+  test('Ctrl+K opens the command palette; Search links focuses the field', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.goto('/')
     await expect(page.locator(SEARCH)).not.toBeFocused()
     await page.keyboard.press('Control+k')
+    const paletteInput = page.locator('.command-palette .command-input')
+    await expect(paletteInput).toBeFocused()
+    await expect(paletteInput).toHaveAttribute('aria-keyshortcuts', 'Control+K Meta+K')
+    // The first command is Search links: Enter reaches the existing field.
+    await page.keyboard.press('Enter')
     await expect(page.locator(SEARCH)).toBeFocused()
-    await expect(page.locator(SEARCH)).toHaveAttribute('aria-keyshortcuts', 'Control+K Meta+K')
   })
 
   test('Meta+K behaves the same way (macOS modifier)', async ({ page }) => {
@@ -31,7 +35,7 @@ test.describe('Search shortcut + keycap (Step 2C-5)', () => {
     await expect(page.locator(SEARCH)).toBeVisible()
     await expect(page.locator(SEARCH)).not.toBeFocused()
     await page.keyboard.press('Meta+k')
-    await expect(page.locator(SEARCH)).toBeFocused()
+    await expect(page.locator('.command-palette .command-input')).toBeFocused()
   })
 
   test('the shortcut is ignored while an editable control has focus', async ({ page }) => {
@@ -55,6 +59,7 @@ test.describe('Search shortcut + keycap (Step 2C-5)', () => {
     await expect(page.locator('.grid > .card')).toHaveCount(2)
 
     await page.keyboard.press('Control+k')
+    await page.keyboard.press('Enter') // Search links (first command)
     await page.locator(SEARCH).fill('alpha')
     await expect(page.locator('.grid > .card')).toHaveCount(1)
     await page.keyboard.press('Escape')

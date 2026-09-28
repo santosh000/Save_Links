@@ -24,6 +24,8 @@ import SettingsPanel from './components/SettingsPanel.vue'
 import LinkCard from './components/LinkCard.vue'
 import LinkRow from './components/LinkRow.vue'
 import AppSelect from './components/AppSelect.vue'
+import BulkActionBar from './components/BulkActionBar.vue'
+import CommandPalette from './components/CommandPalette.vue'
 import pkg from '../package.json'
 
 const appVersion = pkg.version
@@ -31,7 +33,7 @@ const appVersion = pkg.version
 const { links, total, importantCount, mustHaveCount, favoriteCount, byCategory, storageError, addLink, replaceLink, toggleImportant, toggleMustHave, toggleFavorite, setStatus, removeLink, updateLink, setLinks, moveLinksFromFolder, mergeLinks, getAnonymousLinksCount, getAnonymousLinks } = useLinks()
 const { profile, updateProfile } = useProfile()
 const { folders, createFolder, renameFolder, deleteFolder, setFolders, mergeFolders, getAnonymousFoldersCount, getAnonymousFolders } = useFolders()
-const { appearance, colorScheme, setAppearance, setColorScheme } = useSettings()
+const { appearance, colorScheme, resolvedAppearance, setAppearance, setColorScheme } = useSettings()
 
 const search = ref('')
 const searchQuery = ref('')
@@ -70,10 +72,11 @@ function onSearchBlur() {
   if (!search.value) closeSearch()
 }
 
-// Search keyboard shortcut (Ctrl+K / ⌘K): discoverability + a fast path into the
-// existing search. The keycap label follows the platform; the handler accepts
-// either modifier and reuses openSearch() (the one search-opening path). Events
-// from editable controls are ignored so native editing is never intercepted.
+// Keyboard shortcut (Ctrl+K / ⌘K): opens the command palette — a keyboard
+// layer over real actions. The palette's first command focuses the existing
+// search field, so search stays one keypress away. The keycap label follows
+// the platform; events from editable controls are ignored so native editing is
+// never intercepted.
 const searchShortcutLabel = detectPlatform() === 'macOS' ? '⌘ K' : 'Ctrl K'
 
 function isEditableTarget(el) {
@@ -82,16 +85,16 @@ function isEditableTarget(el) {
   return el.isContentEditable === true || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
 }
 
-function onSearchShortcutKeydown(e) {
+function onCommandShortcutKeydown(e) {
   if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return
   if (e.key !== 'k' && e.key !== 'K') return
   if (isEditableTarget(e.target)) return
   e.preventDefault()
-  openSearch()
+  commandOpen.value = true
 }
 
-onMounted(() => document.addEventListener('keydown', onSearchShortcutKeydown))
-onBeforeUnmount(() => document.removeEventListener('keydown', onSearchShortcutKeydown))
+onMounted(() => document.addEventListener('keydown', onCommandShortcutKeydown))
+onBeforeUnmount(() => document.removeEventListener('keydown', onCommandShortcutKeydown))
 const filterCategory = ref('')
 const filterStatus = ref('')
 const filterFolder = ref('')
@@ -485,7 +488,9 @@ function onDialogChoose(value) {
         if (filterFolder.value === cfg.id) filterFolder.value = ''
         showToast('Folder deleted')
       }
-    } else if (cfg.kind === 'anonymous-sync') handleAnonymousSyncChoice(value)
+    }
+    else if (cfg.kind === 'delete-selected') { if (value === 'confirm') bulkDeleteConfirmed() }
+    else if (cfg.kind === 'anonymous-sync') handleAnonymousSyncChoice(value)
   }
   closeDialog()
 }
@@ -648,6 +653,110 @@ function groupLabelAt(index) {
   return timeGroupLabel(links[index - 1].createdAt) === label ? '' : label
 }
 
+// ---- Selection (bulk actions) ----
+// Selection is owned here and stored as a Set of link IDs (never object
+// references). It is presentation state: it never mutates link records.
+const selectedIds = ref(new Set())
+const selectedCount = computed(() => selectedIds.value.size)
+const visibleIds = computed(() => paginatedLinks.value.map((l) => l.id))
+const allVisibleSelected = computed(() => visibleIds.value.length > 0 && visibleIds.value.every((id) => selectedIds.value.has(id)))
+const someVisibleSelected = computed(() => !allVisibleSelected.value && visibleIds.value.some((id) => selectedIds.value.has(id)))
+
+function isSelected(id) { return selectedIds.value.has(id) }
+function setSelected(id, checked) { if (checked) selectedIds.value.add(id); else selectedIds.value.delete(id) }
+function selectVisible() { for (const id of visibleIds.value) selectedIds.value.add(id) }
+function deselectVisible() { for (const id of visibleIds.value) selectedIds.value.delete(id) }
+function clearSelection() { selectedIds.value.clear() }
+function onSelectAllVisibleChange(e) { if (e.target.checked) selectVisible(); else deselectVisible() }
+
+// Keep the tri-state checkbox's indeterminate flag in sync (a DOM property,
+// not an attribute Vue can bind).
+const selectAllRef = ref(null)
+watch([allVisibleSelected, someVisibleSelected], async () => {
+  await nextTick()
+  if (selectAllRef.value) selectAllRef.value.indeterminate = someVisibleSelected.value
+})
+
+// Drop selected IDs that no longer exist (single delete, cloud reconcile).
+watch(links, (list) => {
+  if (!selectedIds.value.size) return
+  const ids = new Set(list.map((l) => l.id))
+  for (const id of [...selectedIds.value]) if (!ids.has(id)) selectedIds.value.delete(id)
+})
+
+function selectedLinks() { return links.value.filter((l) => selectedIds.value.has(l.id)) }
+
+function bulkToggleFavorite() {
+  const sel = selectedLinks()
+  if (!sel.length) return
+  const next = !sel.every((l) => l.favorite)
+  for (const l of sel) updateLink(l.id, { favorite: next })
+  showToast(next ? 'Added to favorites' : 'Removed from favorites')
+}
+
+function bulkMove(value) {
+  const folderId = value === '__unfiled' ? null : value
+  const sel = selectedLinks()
+  if (!sel.length) return
+  for (const l of sel) handleSetFolder(l.id, folderId)
+  clearSelection()
+}
+
+function requestBulkDelete() {
+  const n = selectedIds.value.size
+  if (!n) return
+  openDialog({
+    kind: 'delete-selected',
+    title: `Delete ${n} link${n === 1 ? '' : 's'}?`,
+    message: 'This cannot be undone.',
+    buttons: [
+      { label: 'Delete', variant: 'danger', value: 'confirm' },
+      { label: 'Cancel', variant: 'ghost', value: 'cancel', default: true },
+    ],
+  })
+}
+
+async function bulkDeleteConfirmed() {
+  const ids = [...selectedIds.value]
+  if (!ids.length) return
+  for (const id of ids) await removeLink(id)
+  clearSelection()
+  await nextTick()
+  if (currentPage.value > totalPages.value) currentPage.value = totalPages.value
+  showToast(ids.length === 1 ? 'Link deleted' : `${ids.length} links deleted`)
+}
+
+// ---- Command palette ----
+// Real actions only: every command maps to an existing SaveLink path. Search
+// is delegated to the existing navbar field (no second search implementation).
+const commandOpen = ref(false)
+const paletteCommands = [
+  { id: 'search', label: 'Search links', group: 'Actions', keywords: 'find query filter' },
+  { id: 'add', label: 'Add link', group: 'Actions', keywords: 'new save create' },
+  { id: 'show-links', label: 'Show all links', group: 'Navigate', keywords: 'clear filters home' },
+  { id: 'favorites', label: 'Show favorites', group: 'Navigate', keywords: 'starred' },
+  { id: 'folders', label: 'Show folders', group: 'Navigate', keywords: 'organize' },
+  { id: 'view-card', label: 'Switch to Card view', group: 'View', keywords: 'grid' },
+  { id: 'view-list', label: 'Switch to List view', group: 'View', keywords: 'rows' },
+  { id: 'view-compact', label: 'Switch to Compact view', group: 'View', keywords: 'dense scan' },
+  { id: 'theme', label: 'Toggle theme', group: 'View', keywords: 'dark light appearance' },
+]
+
+function runCommand(id) {
+  commandOpen.value = false
+  switch (id) {
+    case 'search': openSearch(); break
+    case 'add': openAddLink(document.querySelector('.content-head .add-toggle') || document.querySelector('.btn-date-picker')); break
+    case 'show-links': go('links'); clearFilters(); break
+    case 'favorites': go('links'); clearFilters(); filterStatus.value = 'favorite'; break
+    case 'folders': go('folders'); break
+    case 'view-card': go('links'); setViewMode('card'); break
+    case 'view-list': go('links'); setViewMode('list'); break
+    case 'view-compact': go('links'); setViewMode('compact'); break
+    case 'theme': setAppearance(resolvedAppearance.value === 'dark' ? 'light' : 'dark'); break
+  }
+}
+
 // Open link safely
 function openLink(link) {
   const url = link.normalizedUrl || link.url
@@ -798,7 +907,7 @@ onBeforeUnmount(() => {
 
         <!-- Mid navbar: search pill -->
         <div class="navbar-search-wrapper" id="main-search">
-          <input ref="searchInputEl" type="search" class="navbar-search-input" placeholder="Search links…" aria-label="Search links" aria-keyshortcuts="Control+K Meta+K" enterkeyhint="search" :value="search" @input="search = $event.target.value" @keydown.esc.prevent="closeSearch(true)" @blur="onSearchBlur" />
+          <input ref="searchInputEl" type="search" class="navbar-search-input" placeholder="Search links…" aria-label="Search links" enterkeyhint="search" :value="search" @input="search = $event.target.value" @keydown.esc.prevent="closeSearch(true)" @blur="onSearchBlur" />
           <button v-if="search" type="button" class="navbar-search-btn" aria-label="Clear search" @click="search = ''"><svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-x-lg'"></use></svg></button>
           <button v-else type="button" class="navbar-search-btn" :aria-label="searchOpen ? 'Close search' : null" :aria-hidden="searchOpen ? null : 'true'" :tabindex="searchOpen ? null : '-1'" @click="searchOpen && closeSearch(true)"><svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="`/icons.svg#${searchOpen ? 'bi-x-lg' : 'bi-search'}`"></use></svg></button>
           <kbd class="navbar-search-kbd" aria-hidden="true">{{ searchShortcutLabel }}</kbd>
@@ -958,10 +1067,34 @@ onBeforeUnmount(() => {
           </div>
 
           <!-- Results bar: real window + filter context (no invented counts) -->
-          <div v-if="hasLinks" class="library-results" aria-live="polite">
-            <span class="library-results-count">{{ paginationText }}</span>
+          <div v-if="hasLinks" class="library-results">
+            <label v-if="visibleIds.length" class="select-visible">
+              <input
+                ref="selectAllRef"
+                type="checkbox"
+                :checked="allVisibleSelected"
+                aria-label="Select all visible links"
+                @change="onSelectAllVisibleChange"
+              />
+            </label>
+            <span class="library-results-count" aria-live="polite">{{ paginationText }}</span>
             <span v-if="hasSearch || hasFilters" class="library-results-context">Filtered</span>
           </div>
+
+          <!-- Bulk actions: appears only when something is selected -->
+          <BulkActionBar
+            v-if="hasLinks && selectedCount > 0"
+            :selected-count="selectedCount"
+            :visible-count="visibleIds.length"
+            :all-visible-selected="allVisibleSelected"
+            :some-visible-selected="someVisibleSelected"
+            :folders="folders"
+            @select-all="selectVisible"
+            @clear="clearSelection"
+            @move="bulkMove"
+            @favorite="bulkToggleFavorite"
+            @delete="requestBulkDelete"
+          />
 
           <!-- Link content -->
           <div class="links-content">
@@ -989,6 +1122,8 @@ onBeforeUnmount(() => {
                   :key="link.id"
                   :link="link"
                   :folders="folders"
+                  :selected="isSelected(link.id)"
+                  @select="setSelected"
                   @toggle-important="toggleImportant"
                   @toggle-must-have="toggleMustHave"
                   @toggle-favorite="toggleFavorite"
@@ -1007,6 +1142,8 @@ onBeforeUnmount(() => {
                     :link="link"
                     :folders="folders"
                     :mode="viewMode"
+                    :selected="isSelected(link.id)"
+                    @select="setSelected"
                     @toggle-important="toggleImportant"
                     @toggle-must-have="toggleMustHave"
                     @toggle-favorite="toggleFavorite"
@@ -1154,7 +1291,14 @@ onBeforeUnmount(() => {
       </Transition>
     </Teleport>
 
-    <!-- ===== Panels & Dialog ===== -->
+      <!-- ===== Panels & Dialog ===== -->
+      <CommandPalette
+        :open="commandOpen"
+        :commands="paletteCommands"
+        @close="commandOpen = false"
+        @execute="runCommand"
+      />
+
     <AccountPanel
       :open="accountOpen"
       :local-profile="profile"
@@ -1302,6 +1446,16 @@ onBeforeUnmount(() => {
   color: var(--muted);
 }
 .library-results-count { color: var(--text-h); font-weight: var(--weight-medium); }
+/* Select-all-visible control: native checkbox (tri-state via .indeterminate). */
+.select-visible { display: inline-flex; align-items: center; }
+.select-visible input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.select-visible input:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 2px; }
 .library-results-context {
   margin-left: auto;
   padding: 1px 8px;
