@@ -289,9 +289,9 @@ function platformIcon() {
 /* explicit editing state: accent border while the anchored edit popover is open
    (same token as LinkRow's .link-row.editing) */
 .card.editing { border-color: var(--accent-border); }
-.thumb-wrap { display: block; aspect-ratio: 16/7; overflow: hidden; background: var(--muted-bg); max-height: 140px; }
+.thumb-wrap { display: block; aspect-ratio: 16/7; overflow: hidden; background: var(--muted-bg); max-height: 140px; border-bottom: 1px solid var(--border-subtle); }
 .thumb { width: 100%; height: 100%; object-fit: cover; display: block; }
-.body { padding: 10px 12px; display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; flex: 1 1 auto; }
+.body { padding: 12px; display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; flex: 1 1 auto; }
 /* Metadata: one quiet line of supporting text. The title and URL lead the
    card; category, folder, domain, saved date and provenance follow as plain
    muted text (no badges, no chrome), wrapping only when the card is narrow. */
@@ -325,7 +325,7 @@ svg.more-dots { fill: currentColor; stroke: none; }
   color: var(--text-h);
   text-decoration: none;
   line-height: var(--leading-tight);
-  font-size: var(--text-md);
+  font-size: var(--text-lg);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;

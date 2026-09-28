@@ -232,8 +232,8 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 6px 10px;
-  padding: 8px 12px;
+  gap: 6px 12px;
+  padding: 10px 12px;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
