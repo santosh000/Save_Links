@@ -142,6 +142,10 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
       </span>
     </a>
 
+    <!-- P9 (G5): compact rows replace the meta line with a right-aligned,
+         truncated domain column (mockup .row-domain-inline). -->
+    <span class="row-domain-inline">{{ domainText }}</span>
+
     <div class="row-actions">
       <button
         class="row-toggle"
@@ -354,6 +358,19 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
   min-width: 0;
 }
 .row-domain { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* P9 (G5): mockup compact parity — a right-aligned, truncated domain column
+   (max 120px, faint) shown only in compact, where the meta line is hidden. */
+.row-domain-inline {
+  display: none;
+  flex: 0 1 auto;
+  max-width: 120px;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--text-subtle);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .row-chips { display: inline-flex; gap: 4px var(--space-2); align-items: center; min-width: 0; flex-wrap: wrap; }
 /* Metadata reads as quiet text, not as stacked pills (the row stays one object) */
 .chip {
@@ -382,7 +399,8 @@ svg.more-dots { fill: currentColor; stroke: none; }
 .compact .row-favicon { width: 20px; height: 20px; border-radius: 5px; }
 .compact .row-favicon svg { width: 11px; height: 11px; }
 .compact .row-title { font-size: 13px; }
-.compact .row-meta { font-size: 11px; }
+.compact .row-meta { display: none; }
+.compact .row-domain-inline { display: block; }
 .compact .row-chips { display: none; }
 .compact .row-check { padding: 4px 2px; }
 .compact .row-toggle { width: 24px; height: 24px; }
