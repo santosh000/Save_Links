@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { clearStorage, saveLink, visibleLinkRows } from './helpers.js'
+import { clearStorage, saveLink, visibleLinkRows, ensureCardView } from './helpers.js'
 
 // P2 — command palette: a keyboard layer over real SaveLink actions.
 // Ctrl/Cmd+K opens it; search stays the existing navbar field (the palette's
@@ -100,6 +100,7 @@ test.describe('Command palette', () => {
     await page.goto('/')
     await saveLink(page, { url: 'https://example.com/a', title: 'Alpha' })
     await saveLink(page, { url: 'https://example.com/b', title: 'Beta' })
+    await ensureCardView(page) // P8: the library boots in Compact
     await page.locator('.grid > .card').filter({ hasText: 'Alpha' })
       .getByRole('button', { name: 'Toggle Favorite' }).click()
 

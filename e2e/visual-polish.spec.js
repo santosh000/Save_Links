@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { clearStorage, ensureAddLinkOpen, openView, saveLink } from './helpers.js'
+import { clearStorage, ensureAddLinkOpen, openView, saveLink, ensureCardView } from './helpers.js'
 
 // Step 2C-6 contract (visual polish):
 // 1. the sidebar active indicator is a straight rail (no curved leading edge)
@@ -299,6 +299,7 @@ test.describe('Interaction states (Step 2C-8)', () => {
     await page.goto('/')
     const t = await tokens(page)
     await saveLink(page, { url: 'https://example.com/alpha', title: 'Alpha Link' })
+    await ensureCardView(page) // P8: the library boots in Compact
     await page.waitForTimeout(2600)
 
     // card controls (do this before the Add popover opens — it would cover them)
@@ -379,6 +380,7 @@ test.describe('Interaction states (Step 2C-8)', () => {
 
     // pagination: the Bootstrap blue halo and its fixed light focus background are gone
     await openView(page, 'links')
+    await ensureCardView(page) // P8: the library boots in Compact
     await page.waitForTimeout(400)
     const pageLink = page.locator('.page-item:not(.active) .page-link').first()
     await kfocus(page, pageLink)

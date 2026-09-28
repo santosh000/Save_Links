@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { clearStorage, ensureAddLinkOpen, saveLink } from './helpers.js'
+import { clearStorage, ensureAddLinkOpen, saveLink, ensureCardView } from './helpers.js'
 
 // Step 2C-5 contract: the Search shortcut (Ctrl+K / ⌘K) reuses the existing
 // search-opening path, never fires from editable controls, and is discoverable
@@ -56,6 +56,7 @@ test.describe('Search shortcut + keycap (Step 2C-5)', () => {
     await page.goto('/')
     await saveLink(page, { url: 'https://example.com/alpha', title: 'Alpha Link' })
     await saveLink(page, { url: 'https://example.com/beta', title: 'Beta Link' })
+    await ensureCardView(page) // P8: the library boots in Compact
     await expect(page.locator('.grid > .card')).toHaveCount(2)
 
     await page.keyboard.press('Control+k')
@@ -122,6 +123,7 @@ test.describe('Search shortcut + keycap (Step 2C-5)', () => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.goto('/')
     await saveLink(page, { url: 'https://example.com/alpha', title: 'Alpha Link' })
+    await ensureCardView(page) // P8: the library boots in Compact
 
     const card = page.locator('.grid > .card').first()
     // removed: tooltips that only repeated a visible label or the accessible name

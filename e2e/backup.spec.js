@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { clearStorage, ensureAddLinkOpen, saveLink, visibleLinkRows, linkRowByTitle, installBackupCapture, clickExportAndCaptureBackup, openView } from './helpers.js'
+import { clearStorage, ensureAddLinkOpen, saveLink, visibleLinkRows, linkRowByTitle, installBackupCapture, clickExportAndCaptureBackup, openView, ensureCardView } from './helpers.js'
 
 test.describe('Backup E2E', () => {
   test.beforeEach(async ({ page }) => {
@@ -308,8 +308,9 @@ test.describe('Backup E2E', () => {
     await openView(page, 'links')
     await expect(visibleLinkRows(page)).toHaveCount(1)
     await expect(visibleLinkRows(page).first()).toContainText('Good Link')
-    // ensure app didn't crash
-    await expect(page.getByText('Save Links', { exact: false }).first()).toBeVisible()
+    // ensure app didn't crash (P8: the brand lives in the topbar; the sidebar
+    // head is hidden on the desktop grid)
+    await expect(page.locator('.navbar-custom .mobile-brand')).toBeVisible()
   })
 
   test('10. Persistence after import', async ({ page }) => {
@@ -425,6 +426,7 @@ test.describe('Backup E2E', () => {
     // empty store -> no duplicates -> immediate import (XSS payload NOT run)
     await expect(page.getByText(/Import complete/)).toBeVisible()
     await openView(page, 'links')
+    await ensureCardView(page) // P8: the description payload renders on the card
     const row = visibleLinkRows(page).first()
     // title should be rendered as text, not HTML
     await expect(row.getByText('<img src=x onerror=alert(1)>')).toBeVisible()

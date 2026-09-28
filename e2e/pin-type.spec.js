@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { clearStorage, ensureAddLinkOpen, openEditFormFor, saveLink, visibleLinkRows } from './helpers.js'
+import { clearStorage, ensureAddLinkOpen, openEditFormFor, saveLink, visibleLinkRows, ensureCardView } from './helpers.js'
 
 // P3 — persistent pin + link types: UI affordances, filters, bulk pin,
 // composition with search/pagination, and persistence across reloads.
@@ -50,6 +50,7 @@ async function seedTyped(page, count) {
     db.close()
   }, rows)
   await page.goto('/')
+  await ensureCardView(page) // P8: the library boots in Compact
   await expect(page.locator('.grid > .card').first()).toBeVisible()
 }
 
@@ -62,6 +63,7 @@ test.describe('Pin and link types', () => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.goto('/')
     await saveLink(page, { url: 'https://example.com/pin', title: 'Pinned Link' })
+    await ensureCardView(page) // P8: the library boots in Compact
 
     const pin = pinIn(page, card(page, 'Pinned Link'))
     await expect(pin).toHaveAttribute('aria-pressed', 'false')
@@ -117,6 +119,7 @@ test.describe('Pin and link types', () => {
     await page.getByRole('button', { name: 'Save link', exact: true }).click()
     await expect(page.locator('#add-form')).toHaveCount(0)
     await expect(page.getByText('Link saved')).toBeVisible()
+    await ensureCardView(page) // P8: the library boots in Compact
 
     const explicit = await openEditFormFor(page, 'Explicit Docs')
     await expect(explicit.form.getByRole('combobox', { name: 'Edit type' })).toContainText('Docs')
@@ -246,6 +249,7 @@ test.describe('Pin and link types', () => {
     await page.goto('/')
     await page.evaluate(() => { document.documentElement.setAttribute('data-appearance', 'dark') })
     await saveLink(page, { url: 'https://example.com/mobile', title: 'Mobile Pin' })
+    await ensureCardView(page) // P8: the library boots in Compact
 
     const pin = pinIn(page, card(page, 'Mobile Pin'))
     await expect(pin).toBeVisible()

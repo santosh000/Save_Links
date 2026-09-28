@@ -203,7 +203,9 @@ test.describe('Folders, Appearance, Color Schemes, Backup v2', () => {
     await openView(page, 'settings')
     await page.getByLabel('Dark theme').click()
     await openView(page, 'links')
-    await expect(page.getByRole('link', { name: 'Theme Persist', exact: true })).toBeVisible()
+    // P8: the default presentation is Compact, so the item is asserted through
+    // the view-agnostic row helper (same data, same filter pipeline).
+    await expect(visibleLinkRows(page).first()).toContainText('Theme Persist')
   })
 
   test('Color schemes all 4 and independence', async ({ page }) => {

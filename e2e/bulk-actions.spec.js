@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { clearStorage, createFolder, openEditFormFor, openView, saveLink, visibleLinkRows } from './helpers.js'
+import { clearStorage, createFolder, openEditFormFor, openView, saveLink, visibleLinkRows, ensureCardView } from './helpers.js'
 
 // P2 — bulk selection + bulk actions over the existing data model.
 // Selection is presentation state in App.vue; these tests exercise the real
@@ -58,6 +58,7 @@ test.describe('Bulk selection and actions', () => {
     await saveLink(page, { url: 'https://example.com/a', title: 'Alpha' })
     await saveLink(page, { url: 'https://example.com/b', title: 'Beta' })
     await saveLink(page, { url: 'https://example.com/c', title: 'Gamma' })
+    await ensureCardView(page) // P8: the library boots in Compact
 
     await expect(bulkBar(page)).toBeHidden()
 
@@ -96,6 +97,7 @@ test.describe('Bulk selection and actions', () => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await seedLinks(page, 12)
     await page.goto('/')
+    await ensureCardView(page) // P8: the library boots in Compact
     await expect(page.locator('.grid > .card')).toHaveCount(10)
 
     await selectAllBox(page).check()
@@ -124,6 +126,7 @@ test.describe('Bulk selection and actions', () => {
     await saveLink(page, { url: 'https://example.com/a', title: 'Alpha' })
     await saveLink(page, { url: 'https://example.com/b', title: 'Beta' })
     await saveLink(page, { url: 'https://example.com/c', title: 'Gamma' })
+    await ensureCardView(page) // P8: the library boots in Compact
 
     await openView(page, 'folders')
     await createFolder(page, 'Reading')
@@ -152,6 +155,7 @@ test.describe('Bulk selection and actions', () => {
     await page.goto('/')
     await saveLink(page, { url: 'https://example.com/a', title: 'Alpha' })
     await saveLink(page, { url: 'https://example.com/b', title: 'Beta' })
+    await ensureCardView(page) // P8: the library boots in Compact
 
     await cardCheck(page, 'Alpha').check()
     await cardCheck(page, 'Beta').check()
@@ -172,6 +176,7 @@ test.describe('Bulk selection and actions', () => {
     for (const [t, u] of [['Alpha', 'a'], ['Beta', 'b'], ['Gamma', 'c'], ['Delta', 'd']]) {
       await saveLink(page, { url: `https://example.com/${u}`, title: t })
     }
+    await ensureCardView(page) // P8: the library boots in Compact
 
     await cardCheck(page, 'Alpha').check()
     await cardCheck(page, 'Beta').check()
@@ -200,6 +205,7 @@ test.describe('Bulk selection and actions', () => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await seedLinks(page, 11)
     await page.goto('/')
+    await ensureCardView(page) // P8: the library boots in Compact
     await expect(page.locator('.grid > .card')).toHaveCount(10)
 
     await page.locator('.pagination .page-link[aria-label="Page 2"]').click()

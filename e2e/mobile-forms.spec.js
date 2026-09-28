@@ -1,18 +1,19 @@
 import { test, expect } from '@playwright/test'
-import { clearStorage, saveLink } from './helpers.js'
+import { clearStorage, saveLink, ensureCardView } from './helpers.js'
 
 // Step 2 — mobile presentation of the Add / Edit forms. Both keep the existing
 // anchoredPopover system, form components, fields, IDs and behaviour; only the
 // mobile presentation differs (centred Add form, viewport-capped height with
 // internal scrolling, consistent side margins).
-const bottomNav = (page) => page.getByRole('navigation', { name: 'Primary' })
 const addForm = (page) => page.locator('#add-form')
 const editPopover = (page) => page.locator('.edit-popover')
 
 async function openAdd(page) {
-  const bottomAdd = bottomNav(page).getByRole('button', { name: 'Add', exact: true })
-  if (await bottomAdd.isVisible().catch(() => false)) await bottomAdd.click()
-    else await page.locator('.content-head .add-toggle').click()
+  // P8 shell: below the desktop grid the floating action is the single Add
+  // entry point (same AddLink form); the desktop grid keeps the toolbar toggle.
+  const fab = page.locator('.fab')
+  if (await fab.isVisible().catch(() => false)) await fab.click()
+  else await page.locator('.content-head .add-toggle').click()
   await expect(addForm(page)).toBeVisible()
 }
 
@@ -148,6 +149,7 @@ test.describe('Mobile Add/Edit form presentation', () => {
       await clearStorage(page)
       await page.setViewportSize({ width, height: 844 })
       await saveLink(page, { url: 'https://example.com/edit-me', title: 'Edit Me Link' })
+      await ensureCardView(page) // P8: the library boots in Compact
 
       await openEdit(page)
       const box = await geometry(page, '.edit-popover')
@@ -166,6 +168,7 @@ test.describe('Mobile Add/Edit form presentation', () => {
   test('Edit at 320px cancels without saving and scrolls internally on a short window', async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 480 })
     await saveLink(page, { url: 'https://example.com/edit-cancel', title: 'Cancel Me Link' })
+    await ensureCardView(page) // P8: the library boots in Compact
 
     await openEdit(page)
     const box = await geometry(page, '.edit-popover')
@@ -184,13 +187,17 @@ test.describe('Mobile Add/Edit form presentation', () => {
       await clearStorage(page)
       await page.setViewportSize({ width, height: 900 })
       await saveLink(page, { url: 'https://example.com/desktop-forms', title: 'Desktop Forms Link' })
+      // P8: below the desktop grid the fixed bottom bar exists; the anchored
+      // popovers sit above it (z-popover > z-sticky), so bar overlap is allowed
+      // there — the popover itself must still stay inside the viewport.
+      const anchored = width < 1024 ? { allowBarIntrusion: true } : {}
 
       // Add: desktop/tablet width, anchored (not centred)
       await openAdd(page)
       const add = await geometry(page, '#add-form')
       expect(add.width).toBe(520)
       expect(Math.abs(add.left - add.right)).toBeGreaterThan(16)
-      expectInsideViewport(add, `add ${width}px`)
+      expectInsideViewport(add, `add ${width}px`, anchored)
       await addForm(page).getByRole('button', { name: 'Cancel', exact: true }).click()
 
       // Edit: desktop/tablet width, anchored (not centred)
@@ -198,7 +205,7 @@ test.describe('Mobile Add/Edit form presentation', () => {
       const edit = await geometry(page, '.edit-popover')
       expect(edit.width).toBe(340)
       expect(Math.abs(edit.left - edit.right)).toBeGreaterThan(16)
-      expectInsideViewport(edit, `edit ${width}px`)
+      expectInsideViewport(edit, `edit ${width}px`, anchored)
       await editPopover(page).getByRole('button', { name: 'Cancel', exact: true }).click()
       await expect(editPopover(page)).toHaveCount(0)
     }

@@ -232,10 +232,18 @@ test.describe('Large-library baseline (500–1,000 links)', () => {
     await clearStorage(page)
     const now = Date.now()
     const day = 24 * 60 * 60 * 1000
+    // Clock-independent seeds: anchoring to the start of today keeps the
+    // derived labels stable at any hour (a "now - 1h" seed lands on yesterday
+    // when the suite runs just after midnight).
+    const startOfToday = new Date(now)
+    startOfToday.setHours(0, 1, 0, 0)
+    const todayA = startOfToday.getTime() + 2 * 60 * 60 * 1000
+    const todayB = startOfToday.getTime() + 60 * 60 * 1000
+    const yesterdayA = startOfToday.getTime() - 23 * 60 * 60 * 1000
     const links = [
-      { title: 'Today A', createdAt: new Date(now - 60 * 60 * 1000).toISOString() },
-      { title: 'Today B', createdAt: new Date(now - 2 * 60 * 60 * 1000).toISOString() },
-      { title: 'Yesterday A', createdAt: new Date(now - day + 60 * 60 * 1000).toISOString() },
+      { title: 'Today A', createdAt: new Date(todayA).toISOString() },
+      { title: 'Today B', createdAt: new Date(todayB).toISOString() },
+      { title: 'Yesterday A', createdAt: new Date(yesterdayA).toISOString() },
       { title: 'Earlier A', createdAt: new Date(now - 30 * day).toISOString() },
     ].map((l, i) => {
       const url = `https://example.com/group-${i}`

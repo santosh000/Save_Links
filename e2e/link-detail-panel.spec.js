@@ -3,7 +3,7 @@
 import { test, expect } from '@playwright/test'
 import {
   clearStorage, openView, saveLink, visibleLinkRows, linkRowByTitle,
-  createFolder, expectNoHorizontalScroll,
+  createFolder, expectNoHorizontalScroll, ensureCardView,
 } from './helpers.js'
 
 const PAGE_SIZE = 10
@@ -90,6 +90,14 @@ async function setViewMode(page, label) {
 async function saveTwoLinks(page) {
   await saveLink(page, { url: 'https://github.com/pmndrs/zustand', title: 'Alpha Guide', description: 'State management walkthrough.', tags: 'react, state' })
   await saveLink(page, { url: 'https://example.com/beta', title: 'Beta Link', description: 'Second link for switching.' })
+  await ensureCardView(page) // P8: the library boots in Compact
+}
+
+// P8: >=1024 the detail column is structurally present, so "closed" means the
+// honest placeholder state rather than an unmounted panel.
+async function expectDetailClosed(page) {
+  await expect(page.locator('.detail-empty-title')).toBeVisible()
+  await expect(page.locator('.detail-title')).toHaveCount(0)
 }
 
 test.describe('Link detail panel — desktop rail', () => {
@@ -132,23 +140,23 @@ test.describe('Link detail panel — desktop rail', () => {
 
     // Keyboard-accessible path: More actions -> Details.
     await page.keyboard.press('Escape')
-    await expect(detail(page)).toHaveCount(0)
+    await expectDetailClosed(page)
     const alphaRow = row(page, 'Alpha Guide')
     await alphaRow.getByRole('button', { name: 'More actions' }).click()
     await page.locator('.more-menu').getByRole('button', { name: 'Details' }).click()
     await expect(detail(page).locator('.detail-title')).toHaveText('Alpha Guide')
   })
 
-  test('close button and Escape close the rail and release the reserved column', async ({ page }) => {
+  test('close button and Escape return the rail to its placeholder state', async ({ page }) => {
     await saveTwoLinks(page)
     await openDetailFromCard(page, 'Alpha Guide')
     await detail(page).locator('.detail-close').click()
-    await expect(detail(page)).toHaveCount(0)
+    await expectDetailClosed(page)
     await expect(page.locator('.main-wrapper')).not.toHaveClass(/has-detail/)
 
     await openDetailFromCard(page, 'Beta Link')
     await page.keyboard.press('Escape')
-    await expect(detail(page)).toHaveCount(0)
+    await expectDetailClosed(page)
     expect(await page.evaluate(() => document.activeElement === document.body || document.activeElement === null)).toBe(true)
   })
 
@@ -199,7 +207,7 @@ test.describe('Link detail panel — desktop rail', () => {
     await expect(panel.getByRole('button', { name: 'Toggle Favorite' })).toHaveAttribute('aria-pressed', 'false')
   })
 
-  test('delete from the panel confirms, removes the link and closes the panel', async ({ page }) => {
+  test('delete from the panel confirms, removes the link and returns the rail to placeholder', async ({ page }) => {
     await saveTwoLinks(page)
     await expect(visibleLinkRows(page)).toHaveCount(2)
     await openDetailFromCard(page, 'Beta Link')
@@ -209,7 +217,7 @@ test.describe('Link detail panel — desktop rail', () => {
     await expect(dialog).toContainText('Delete this link?')
     await dialog.getByRole('button', { name: 'Delete', exact: true }).click()
     await expect(page.locator('.sl-toast')).toContainText('Link deleted')
-    await expect(detail(page)).toHaveCount(0)
+    await expectDetailClosed(page)
     await expect(visibleLinkRows(page)).toHaveCount(1)
     await expect(visibleLinkRows(page).first()).toContainText('Alpha Guide')
   })
@@ -267,18 +275,18 @@ test.describe('Link detail panel — desktop rail', () => {
     await expect(detail(page)).toBeVisible() // palette Escape did not close the detail
     await page.locator('.detail-title').click()
     await page.keyboard.press('Escape')
-    await expect(detail(page)).toHaveCount(0)
+    await expectDetailClosed(page)
   })
 
-  test('desktop rail reflows the library: 360/380px rail, capped grid columns, no overlap', async ({ page }) => {
+  test('desktop rail geometry: 360/380px column, capped 3-up grid, no overlap', async ({ page }) => {
     await saveTwoLinks(page)
-    // A third link so the 3-column reflow can actually be counted.
+    // A third link so the 3-column grid can actually be counted.
     await saveLink(page, { url: 'https://example.com/gamma', title: 'Gamma Link', description: 'Third card.' })
     await page.setViewportSize({ width: 1200, height: 900 })
     await openDetailFromCard(page, 'Alpha Guide')
     let box = await detail(page).boundingBox()
     expect(Math.round(box.width)).toBe(360)
-    expect(await countGridColumns(page, '.grid > .card')).toBe(2)
+    expect(await countGridColumns(page, '.grid > .card')).toBe(3) // P8: capped at 3
     await page.keyboard.press('Escape')
 
     await page.setViewportSize({ width: 1440, height: 900 })
@@ -304,6 +312,7 @@ test.describe('Link detail panel — mobile / tablet sheet', () => {
     await page.setViewportSize({ width: 390, height: 844 })
     await clearStorage(page)
     await saveLink(page, { url: 'https://example.com/mobile', title: 'Mobile Link', description: 'Sheet test.' })
+    await ensureCardView(page) // P8: the library boots in Compact
     await card(page, 'Mobile Link').locator('.desc').click()
 
     const panel = detail(page)
@@ -349,6 +358,7 @@ test.describe('Link detail panel — mobile / tablet sheet', () => {
     await page.setViewportSize({ width: 900, height: 900 })
     await clearStorage(page)
     await saveLink(page, { url: 'https://example.com/tablet', title: 'Tablet Link', description: 'Tablet sheet.' })
+    await ensureCardView(page) // P8: the library boots in Compact
     await card(page, 'Tablet Link').locator('.desc').click()
     const panel = detail(page)
     await expect(panel).toBeVisible()
@@ -367,6 +377,7 @@ test.describe('Link detail panel — mobile / tablet sheet', () => {
     await page.getByLabel('Dark theme').click()
     await expect(page.locator('html')).toHaveAttribute('data-appearance', 'dark')
     await saveLink(page, { url: 'https://example.com/dark', title: 'Dark Link', description: 'Dark sheet.' })
+    await ensureCardView(page) // P8: the library boots in Compact
     await card(page, 'Dark Link').locator('.desc').click()
     await expect(detail(page).locator('.detail-title')).toHaveText('Dark Link')
     await expect(detail(page).locator('.detail-badge')).toBeVisible()
@@ -375,18 +386,23 @@ test.describe('Link detail panel — mobile / tablet sheet', () => {
 })
 
 test.describe('Link detail panel — responsive overflow sweep', () => {
-  test('no horizontal overflow with the panel open at every shell width', async ({ page }) => {
+  test('no horizontal overflow with the detail surface open at every shell width', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await clearStorage(page)
     await saveLink(page, { url: 'https://example.com/sweep', title: 'Sweep Link', description: 'Overflow sweep.' })
+    await ensureCardView(page) // P8: the library boots in Compact
     for (const width of [375, 390, 480, 640, 768, 820, 1024, 1200, 1280, 1440]) {
       await page.setViewportSize({ width, height: 900 })
-      await expect(detail(page)).toHaveCount(0)
+      // P8: >=1024 the rail is always present (placeholder); below it is a sheet.
+      if (width >= 1024) await expectDetailClosed(page)
+      else await expect(detail(page)).toHaveCount(0)
       await card(page, 'Sweep Link').locator('.desc').click()
       await expect(detail(page)).toBeVisible()
+      await expect(detail(page).locator('.detail-title')).toHaveText('Sweep Link')
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), `overflow at ${width}`).toBe(true)
       await page.keyboard.press('Escape')
-      await expect(detail(page)).toHaveCount(0)
+      if (width >= 1024) await expectDetailClosed(page)
+      else await expect(detail(page)).toHaveCount(0)
     }
   })
 })
@@ -398,6 +414,7 @@ test.describe('Link detail panel — large library', () => {
     await seedIndexedDB(page, seedLinks(1000))
     await page.goto('/')
     await expect(visibleLinkRows(page).first()).toBeVisible()
+    await ensureCardView(page) // P8: the library boots in Compact
     await expect(page.locator('.grid > .card')).toHaveCount(PAGE_SIZE)
 
     await page.locator('.grid > .card').first().locator('.desc').click()
@@ -433,7 +450,7 @@ test.describe('Link detail panel — console hygiene', () => {
     await detail(page).locator('#detail-move-folder + .asel-trigger').click()
     await page.locator('.asel-menu').getByRole('option').first().click()
     await detail(page).locator('.detail-close').click()
-    await expect(detail(page)).toHaveCount(0)
+    await expectDetailClosed(page)
     expect(errors).toEqual([])
   })
 })

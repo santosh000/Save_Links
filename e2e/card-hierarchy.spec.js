@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { clearStorage, openView, saveLink } from './helpers.js'
+import { clearStorage, openView, saveLink, ensureCardView } from './helpers.js'
 
 // Step 2C-1 contract: the Saved Link card leads with the title, keeps the URL
 // on one visual line (fading its painted tail, never its value), and keeps the
@@ -18,6 +18,7 @@ test.describe('Card information hierarchy (Step 2C-1)', () => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.goto('/')
     await saveLink(page, { url: 'https://example.com/alpha', title: 'Alpha Link' })
+    await ensureCardView(page) // P8: the library boots in Compact
 
     const card = page.locator('.grid > .card').first()
     await expect(card.locator('.title')).toHaveText('Alpha Link')
@@ -32,6 +33,7 @@ test.describe('Card information hierarchy (Step 2C-1)', () => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.goto('/')
     await saveLink(page, { url: 'https://example.com/alpha', title: 'Alpha Link' })
+    await ensureCardView(page) // P8: the library boots in Compact
 
     const meta = page.locator('.grid > .card .meta').first()
     await expect(meta).toBeVisible()
@@ -50,6 +52,7 @@ test.describe('Card information hierarchy (Step 2C-1)', () => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.goto('/')
     await saveLink(page, { url: LONG_URL, title: 'Long URL card' })
+    await ensureCardView(page) // P8: the library boots in Compact
 
     const url = page.locator('.grid > .card .url').first()
     await expect(url).toBeVisible()
@@ -84,6 +87,7 @@ test.describe('Card information hierarchy (Step 2C-1)', () => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.goto('/')
     await saveLink(page, { url: 'https://example.com/alpha', title: 'Alpha Link' })
+    await ensureCardView(page) // P8: the library boots in Compact
 
     const card = page.locator('.grid > .card').first()
     const favorite = card.getByRole('button', { name: 'Toggle Favorite' })
@@ -172,6 +176,7 @@ test.describe('Card quick-action menu (Step 2C-2)', () => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.goto('/')
     await saveLink(page, { url: 'https://example.com/alpha', title: 'Alpha Link' })
+    await ensureCardView(page) // P8: the library boots in Compact
 
     // create a folder to move the link into
     await openView(page, 'folders')
@@ -214,6 +219,7 @@ test.describe('Card quick-action menu (Step 2C-2)', () => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.goto('/')
     await saveLink(page, { url: 'https://example.com/alpha', title: 'Alpha Link' })
+    await ensureCardView(page) // P8: the library boots in Compact
 
     let { menu } = await openMenu(page)
     await menu.getByRole('button', { name: 'Delete' }).click()
@@ -304,6 +310,7 @@ test.describe('Card quick-action menu (Step 2C-2)', () => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.goto('/')
     await saveLink(page, { url: 'https://example.com/alpha', title: 'Alpha Link' })
+    await ensureCardView(page) // P8: the library boots in Compact
     const card = page.locator('.grid > .card').first()
     const favorite = card.getByRole('button', { name: 'Toggle Favorite' })
     await favorite.click()

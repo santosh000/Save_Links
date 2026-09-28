@@ -54,53 +54,64 @@ export async function openView(page, view) {
   const expectedTitle = titles[view]
   if (!expectedTitle) throw new Error(`Unknown view: ${view}`)
 
-  // Navigation is shell-aware: desktop/tablet use the sidebar (drawer below the
-  // desktop breakpoint), the mobile shell uses the bottom bar + its More menu.
-  const bottomNav = page.getByRole('navigation', { name: 'Primary' })
-  const bottomLabels = { links: 'Links', folders: 'Folders' }
-  // Deterministic shell signal: the documented breakpoints (mobile shell <=768,
-  // permanent sidebar >=1200) instead of a single race-prone visibility probe.
   const viewportWidth = await page.evaluate(() => window.innerWidth)
-  const usesBottomNav = viewportWidth <= 768
 
-  if (usesBottomNav) {
-    if (bottomLabels[view]) {
+  // P8 shell: below 1024 the primary destinations live in the bottom bar and
+  // the secondary ones in the navigation drawer; >=1024 is the static-sidebar
+  // desktop grid.
+  if (viewportWidth < 1024) {
+    const drawer = page.locator('.sidebar-wrapper')
+    const drawerOpen = await drawer.evaluate((el) => el.classList.contains('show')).catch(() => false)
+    // Already on the target view: clicking "All" would clear the active
+    // filters, so navigation is a no-op exactly like the old bar item.
+    if (view === 'links' && (await page.locator('.page-title').textContent()) === expectedTitle) return
+    const bottomNav = page.getByRole('navigation', { name: 'Primary' })
+    const bottomLabels = { links: 'All', folders: 'Folders' }
+    if (bottomLabels[view] && !drawerOpen) {
       await bottomNav.getByRole('button', { name: bottomLabels[view], exact: true }).click()
     } else {
-      await bottomNav.getByRole('button', { name: 'More', exact: true }).click()
-      await page.locator('#more-menu').getByRole('button', { name: expectedTitle, exact: true }).click()
-    }
-  } else {
-    const sidebar = page.locator('.sidebar-wrapper')
-    const isDesktop = viewportWidth >= 1200
-
-    // Below the desktop breakpoint the sidebar is an off-canvas drawer. A closed
-    // drawer is only translated off-screen (it still has a box), so the .show
-    // class - not element visibility - is the open signal. Open it when needed,
-    // then wait for the state before clicking the item.
-    const item = page.locator('.sidebar-menu-link').filter({ hasText: expectedTitle }).first()
-    if (!isDesktop) {
-      const isOpen = await sidebar.evaluate((el) => el.classList.contains('show')).catch(() => false)
-      if (!isOpen) {
-        await page.locator('#sidebar-toggle').click()
-        await expect(sidebar).toHaveClass(/\bshow\b/)
+      if (!drawerOpen) {
+        const toggle = page.locator('#sidebar-toggle')
+        if (await toggle.isVisible().catch(() => false)) await toggle.click()
+        else await bottomNav.getByRole('button', { name: 'More', exact: true }).click()
       }
+      await expect(drawer).toHaveClass(/\bshow\b/)
+      await page.locator('.sidebar-menu-link').filter({ hasText: expectedTitle }).first().click()
     }
-
-    await item.click()
+    await expect(page.locator('.page-title')).toHaveText(expectedTitle)
+    return
   }
 
+  await expect(page.locator('.sidebar-wrapper')).toBeVisible()
+  const item = page.locator('.sidebar-menu-link').filter({ hasText: expectedTitle }).first()
+  await item.click()
   // Wait for page header title to match
   await expect(page.locator('.page-title')).toHaveText(expectedTitle)
+}
+
+// P8: the library boots in Compact; specs that exercise the card grid opt in
+// explicitly (the same control a user would press).
+export async function setViewMode(page, mode) {
+  const labels = { card: 'Card', list: 'List', compact: 'Compact' }
+  const btn = page.locator('.view-btn').filter({ hasText: labels[mode] })
+  await btn.click()
+  await expect(btn).toHaveClass(/active/)
+}
+
+export async function ensureCardView(page) {
+  const card = page.locator('.view-btn').filter({ hasText: 'Card' })
+  if (!(await card.evaluate((el) => el.classList.contains('active')).catch(() => false))) {
+    await setViewMode(page, 'card')
+  }
 }
 
 export async function ensureAddLinkOpen(page, { more = false } = {}) {
   await openView(page, 'links')
   if (!(await page.locator('#save-url').isVisible().catch(() => false))) {
-    // The toolbar "Add link" control is desktop/tablet only; the mobile shell
-    // opens the same form from the bottom navigation's Add item.
-    const mobileAdd = page.getByRole('navigation', { name: 'Primary' }).getByRole('button', { name: 'Add', exact: true })
-    if (await mobileAdd.isVisible().catch(() => false)) await mobileAdd.click()
+    // P8: below the desktop grid the floating action is the single Add entry
+    // point; the desktop grid keeps the toolbar toggle.
+    const viewportWidth = await page.evaluate(() => window.innerWidth)
+    if (viewportWidth < 1024) await page.locator('.fab').click()
     else await page.locator('.content-head .add-toggle').click()
   }
   if (more) {

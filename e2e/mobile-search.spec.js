@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { clearStorage, saveLink } from './helpers.js'
+import { clearStorage, saveLink, ensureCardView } from './helpers.js'
 
 // Step 1A — collapsible mobile search. The search field itself, its state and the
 // filtering pipeline are unchanged; only its mobile presentation (collapsed behind
@@ -12,6 +12,7 @@ const noPageOverflow = (page) =>
 async function seedTwo(page) {
   await saveLink(page, { url: 'https://example.com/alpha', title: 'Alpha Link' })
   await saveLink(page, { url: 'https://example.com/beta', title: 'Beta Link' })
+  await ensureCardView(page) // P8: the library boots in Compact
 }
 
 test.describe('Collapsible mobile search', () => {

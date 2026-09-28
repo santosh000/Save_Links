@@ -71,8 +71,10 @@ test.describe('Link view responsive layout', () => {
     await setupLinks(page)
     await setViewMode(page, 'card')
 
+    // P8 mockup contract: the card grid caps at 3 per row (the old 4-up >=1280
+    // rule is gone); 2-up from 560, 1-up on phones.
     const expected = {
-      1440: 4, 1280: 4, 1200: 3, 1100: 3, 1024: 3, 900: 2, 768: 2,
+      1440: 3, 1280: 3, 1200: 3, 1100: 3, 1024: 3, 900: 2, 768: 2,
       640: 2, 480: 1, 430: 1, 390: 1, 375: 1, 320: 1,
     }
 
@@ -90,8 +92,10 @@ test.describe('Link view responsive layout', () => {
     await setupLinks(page)
     await setViewMode(page, 'list')
 
+    // P8: list/compact are single-column like the mockup list (the desktop
+    // grid's content column is narrow once sidebar and detail rail are present).
     const expected = {
-      1440: 2, 1280: 2, 1200: 2, 1100: 2, 1024: 1, 900: 1, 768: 1,
+      1440: 1, 1280: 1, 1200: 1, 1100: 1, 1024: 1, 900: 1, 768: 1,
       640: 1, 480: 1, 430: 1, 390: 1, 375: 1, 320: 1,
     }
 
@@ -108,8 +112,9 @@ test.describe('Link view responsive layout', () => {
     await setupLinks(page)
     await setViewMode(page, 'compact')
 
+    // P8: single-column compact, same as the list view.
     const expected = {
-      1440: 2, 1280: 2, 1200: 2, 1100: 2, 1024: 1, 900: 1, 768: 1,
+      1440: 1, 1280: 1, 1200: 1, 1100: 1, 1024: 1, 900: 1, 768: 1,
       640: 1, 480: 1, 430: 1, 390: 1, 375: 1, 320: 1,
     }
 

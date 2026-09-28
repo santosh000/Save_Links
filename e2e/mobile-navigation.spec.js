@@ -1,17 +1,16 @@
 import { test, expect } from '@playwright/test'
-import { clearStorage, openView, saveLink } from './helpers.js'
+import { clearStorage, openView, saveLink, ensureCardView } from './helpers.js'
 
-// Mobile shell (approved architecture): top bar = branding · search · profile,
-// bottom bar = exactly Links · Folders · Add · More. Tablet keeps the sidebar
-// drawer, desktop is unchanged. The shell is CSS-conditional on one breakpoint,
-// so these tests assert both the structure and the behaviour of that shell.
+// P8 shell (mockup parity): below 1024 the topbar is a single row and the bottom
+// bar (All · Favorites · Folders · More) + floating Add action own the bottom
+// edge; the sidebar is a drawer and the detail is a sheet. At >=1024 the shell
+// is the mockup's three-column grid. The library boots in Compact.
 const MOBILE = { width: 390, height: 844 }
 const TABLET = { width: 900, height: 1100 }
 const DESKTOP = { width: 1280, height: 900 }
 
 const bottomNav = (page) => page.getByRole('navigation', { name: 'Primary' })
 const navItem = (page, name) => bottomNav(page).getByRole('button', { name, exact: true })
-const moreMenu = (page) => page.locator('#more-menu')
 
 function toRgb(v) {
   const hex = v.trim().match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i)
@@ -36,9 +35,10 @@ test.describe('Mobile & tablet navigation shell', () => {
     await expect(page.getByLabel('Search links')).toBeHidden()
     await expect(page.locator('.identity-btn')).toBeVisible()
 
-    // The drawer is not part of the mobile shell, and nothing else is stacked in.
+    // The drawer is present but off-canvas (opened by the bottom bar's More);
+    // no topbar toggle and no fullscreen utility are stacked into this row.
     await expect(page.locator('#sidebar-toggle')).toBeHidden()
-    await expect(page.locator('.sidebar-wrapper')).toBeHidden()
+    await expect(page.locator('.sidebar-wrapper')).not.toHaveClass(/\bshow\b/)
     await expect(page.locator('.sidebar-overlay')).toBeHidden()
     await expect(page.locator('#btn-fullscreen')).toBeHidden()
   })
@@ -79,20 +79,23 @@ test.describe('Mobile & tablet navigation shell', () => {
     expect(Math.abs((header.x + header.width) - (count.x + count.width))).toBeLessThanOrEqual(1)
     await expect(page.locator('.page-subtitle')).toHaveText(/^\d+ of \d+ links shown$/)
 
-    // The bottom bar's Add is the single mobile Add entry point: the panel's
+    // Below the desktop grid the FAB is the single Add entry point: the panel's
     // duplicate "Add link" and the Export control are hidden here.
     await expect(page.locator('.content-head .add-card')).toBeHidden()
     await expect(page.locator('.toolbar-export')).toBeHidden()
-    await navItem(page, 'Add').click()
+    await page.locator('.fab').click()
     await expect(page.locator('#add-form')).toBeVisible()
     await page.locator('.add-popover').getByRole('button', { name: 'Cancel', exact: true }).click()
 
-    // Tablet and desktop keep both toolbar actions.
+    // Tablet (still below the desktop grid): the same single FAB entry point.
     await page.setViewportSize(TABLET)
-    await expect(page.locator('.content-head .add-card')).toBeVisible()
-    await expect(page.locator('.toolbar-export')).toBeVisible()
+    await expect(page.locator('.fab')).toBeVisible()
+    await expect(page.locator('.content-head .add-card')).toBeHidden()
+    await expect(page.locator('.toolbar-export')).toBeHidden()
 
+    // Desktop grid: the toolbar Add and Export return.
     await page.setViewportSize(DESKTOP)
+    await expect(page.locator('.fab')).toBeHidden()
     await expect(page.locator('.content-head .add-card')).toBeVisible()
     await expect(page.locator('.toolbar-export')).toBeVisible()
   })
@@ -102,18 +105,21 @@ test.describe('Mobile & tablet navigation shell', () => {
 
     const items = bottomNav(page).getByRole('button')
     await expect(items).toHaveCount(4)
-    await expect(items).toHaveText([/^Links$/, /^Folders$/, /^Add$/, /^More$/])
+    await expect(items).toHaveText([/^All$/, /^Favorites$/, /^Folders$/, /^More$/])
 
-    // Search, Settings and Profile are not destinations of the bar.
+    // Add is the floating action, never a duplicate bar item; and Search,
+    // Settings and Profile are not destinations of the bar.
+    await expect(bottomNav(page).getByRole('button', { name: 'Add', exact: true })).toHaveCount(0)
+    await expect(page.locator('.fab')).toBeVisible()
     await expect(bottomNav(page).getByRole('button', { name: /Search|Settings|Profile|Backup|About/ })).toHaveCount(0)
   })
 
-  test('Links and Folders navigate through the shared view state', async ({ page }) => {
+  test('All and Folders navigate through the shared view state', async ({ page }) => {
     await page.setViewportSize(MOBILE)
 
-    await navItem(page, 'Links').click()
+    await navItem(page, 'All').click()
     await expect(page.locator('.page-title')).toHaveText('Links')
-    await expect(page.locator('.bottom-nav-item[aria-current="page"]')).toHaveText('Links')
+    await expect(page.locator('.bottom-nav-item[aria-current="page"]')).toHaveText('All')
 
     await navItem(page, 'Folders').click()
     await expect(page.locator('.page-title')).toHaveText('Folders')
@@ -124,10 +130,10 @@ test.describe('Mobile & tablet navigation shell', () => {
   test('Add opens the one shared add-link form', async ({ page }) => {
     await page.setViewportSize(MOBILE)
 
-    // From another destination, Add is an action: it returns to Saved links
+    // From another destination, the FAB is an action: it returns to Saved links
     // and opens the existing form (never a second form or a new view).
     await navItem(page, 'Folders').click()
-    await navItem(page, 'Add').click()
+    await page.locator('.fab').click()
     await expect(page.locator('.page-title')).toHaveText('Links')
     await expect(page.locator('#add-form')).toHaveCount(1)
     await expect(page.locator('#add-form')).toBeVisible()
@@ -137,35 +143,36 @@ test.describe('Mobile & tablet navigation shell', () => {
     await expect(page.locator('#add-form')).toHaveCount(0)
   })
 
-  test('More exposes the secondary destinations and closes cleanly', async ({ page }) => {
+  test('More opens the navigation drawer with the real secondary destinations', async ({ page }) => {
     await page.setViewportSize(MOBILE)
+    const drawer = page.locator('.sidebar-wrapper')
 
-    await expect(moreMenu(page)).toHaveCount(0)
+    await expect(drawer).not.toHaveClass(/\bshow\b/)
     await navItem(page, 'More').click()
-    await expect(moreMenu(page)).toBeVisible()
+    await expect(drawer).toHaveClass(/\bshow\b/)
     await expect(navItem(page, 'More')).toHaveAttribute('aria-expanded', 'true')
-    await expect(moreMenu(page).getByRole('button')).toHaveText([/^Settings$/, /^Backup & restore$/, /^About$/])
+    await expect(drawer.locator('.sidebar-menu-link').filter({ hasText: 'Settings' })).toBeVisible()
+    await expect(drawer.locator('.sidebar-menu-link').filter({ hasText: 'Backup & restore' })).toBeVisible()
+    await expect(drawer.locator('.sidebar-menu-link').filter({ hasText: 'About' })).toBeVisible()
 
-    // Escape closes it
-    await page.keyboard.press('Escape')
-    await expect(moreMenu(page)).toHaveCount(0)
+    // The overlay (outside the drawer) closes it.
+    await page.locator('.sidebar-overlay').click({ position: { x: 360, y: 120 } })
+    await expect(drawer).not.toHaveClass(/\bshow\b/)
     await expect(navItem(page, 'More')).toHaveAttribute('aria-expanded', 'false')
 
-    // An outside click closes it too
+    // The drawer's own close control closes it.
     await navItem(page, 'More').click()
-    await expect(moreMenu(page)).toBeVisible()
-    await page.locator('.page-title').click()
-    await expect(moreMenu(page)).toHaveCount(0)
+    await expect(drawer).toHaveClass(/\bshow\b/)
+    await drawer.getByRole('button', { name: 'Close navigation' }).click()
+    await expect(drawer).not.toHaveClass(/\bshow\b/)
 
-    // A destination navigates and closes the menu behind it
+    // A destination navigates and closes the drawer behind it.
     await navItem(page, 'More').click()
-    await moreMenu(page).getByRole('button', { name: 'Settings', exact: true }).click()
+    await drawer.locator('.sidebar-menu-link').filter({ hasText: 'Settings' }).click()
     await expect(page.locator('.page-title')).toHaveText('Settings')
-    await expect(moreMenu(page)).toHaveCount(0)
+    await expect(drawer).not.toHaveClass(/\bshow\b/)
     await expect(navItem(page, 'More')).toHaveClass(/active/)
 
-    // ...and the destinations it replaced are still reachable from the drawer's
-    // equivalent entries (Backup & restore, About).
     await openView(page, 'backup')
     await expect(page.locator('.page-title')).toHaveText('Backup & restore')
     await openView(page, 'about')
@@ -176,6 +183,7 @@ test.describe('Mobile & tablet navigation shell', () => {
     await page.setViewportSize(MOBILE)
     await saveLink(page, { url: 'https://example.com/alpha', title: 'Alpha Link' })
     await saveLink(page, { url: 'https://example.com/beta', title: 'Beta Link' })
+    await ensureCardView(page) // P8: the library boots in Compact
     await expect(page.locator('.grid > .card')).toHaveCount(2)
 
     // The collapsed bar opens the existing field, which still drives the same
@@ -216,7 +224,8 @@ test.describe('Mobile & tablet navigation shell', () => {
     // shell hides the desktop footer, so the last visible content element (the
     // panel's pagination footer) stands in as the page's end at this width.
     await page.setViewportSize(MOBILE)
-    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+    // P8: the window no longer scrolls — the content column is the scroller.
+    await page.evaluate(() => { const el = document.querySelector('.main-wrapper'); el.scrollTop = el.scrollHeight })
     const bar = await page.locator('.bottom-nav').boundingBox()
     const lastContent = await page.locator('.table-footer-control').boundingBox()
     expect(lastContent.y + lastContent.height).toBeLessThanOrEqual(bar.y + 1)
@@ -241,10 +250,24 @@ test.describe('Mobile & tablet navigation shell', () => {
       expect({ [where]: nav.x + nav.width - (profile.x + profile.width) <= 48 }).toEqual({ [where]: true })
     }
 
-    // Toolbar: the Add control and the control group share one toolbar line
-    // wherever both are shown (the group wraps internally instead of dropping
-    // below the Add), and the group stays right-aligned at tablet/desktop.
-    for (const width of [800, 860, 900, 1280, 1440]) {
+    // Toolbar: at >=1024 the Add control and the control group share one row
+    // (the group wraps internally instead of dropping below the Add), and the
+    // group stays right-aligned. Below 1024 the FAB is the Add entry point, so
+    // the group alone is aligned to the panel's inner right edge.
+    for (const width of [800, 860, 900]) {
+      await clearStorage(page)
+      await page.setViewportSize({ width, height: 900 })
+      await saveLink(page, { url: `https://example.com/a${width}`, title: 'Alpha Link' })
+      const head = await page.locator('.content-head').boundingBox()
+      const controls = await page.locator('.toolbar-controls').boundingBox()
+      const controlsRight = controls.x + controls.width
+      const headRight = head.x + head.width
+      const where = `toolbar @${width}`
+      await expect(page.locator('.content-head .add-card')).toBeHidden() // FAB owns Add
+      expect({ [where]: headRight - controlsRight >= 0 && headRight - controlsRight <= 20 })
+        .toEqual({ [where]: true })
+    }
+    for (const width of [1024, 1280, 1440]) {
       await clearStorage(page)
       await page.setViewportSize({ width, height: 900 })
       await saveLink(page, { url: `https://example.com/a${width}`, title: 'Alpha Link' })
@@ -283,14 +306,15 @@ test.describe('Mobile & tablet navigation shell', () => {
   test('view-mode group stays one grouped control and shares the toolbar row on mobile', async ({ page }) => {
     const viewGroup = page.getByRole('group', { name: 'View mode' })
 
-    // One group, three modes, existing semantics intact.
+    // One group, three modes, existing semantics intact. P8: the library boots
+    // in Compact, so Compact is the pressed mode here.
     await page.setViewportSize({ width: 390, height: 900 })
     await clearStorage(page)
     await saveLink(page, { url: 'https://example.com/view', title: 'View Mode Link' })
     await expect(viewGroup).toBeVisible()
     await expect(viewGroup.getByRole('button')).toHaveCount(3)
-    await expect(viewGroup.getByRole('button', { name: 'Card' })).toHaveAttribute('aria-pressed', 'true')
-    await expect(viewGroup.getByRole('button', { name: 'List' })).toHaveAttribute('aria-pressed', 'false')
+    await expect(viewGroup.getByRole('button', { name: 'Compact' })).toHaveAttribute('aria-pressed', 'true')
+    await expect(viewGroup.getByRole('button', { name: 'Card' })).toHaveAttribute('aria-pressed', 'false')
 
     // Mobile: the group hugs its three segments (a segmented control, not a
     // full-width bar), shares the toolbar row with the Sort & Filter trigger,
@@ -375,6 +399,7 @@ test.describe('Mobile & tablet navigation shell', () => {
       await page.setViewportSize({ width, height: 900 })
       await saveLink(page, { url: `https://example.com/a${width}`, title: 'Alpha Link', category: 'Other' })
       await saveLink(page, { url: `https://example.com/b${width}`, title: 'Beta Link', category: 'Other' })
+      await ensureCardView(page) // P8: the library boots in Compact
       const where = `disclosure @${width}`
 
       // Collapsed: one trigger, the existing controls are not visible and not
@@ -436,6 +461,7 @@ test.describe('Mobile & tablet navigation shell', () => {
     await clearStorage(page)
     await saveLink(page, { url: 'https://example.com/first', title: 'Alpha Link' })
     await saveLink(page, { url: 'https://example.com/second', title: 'Zeta Link' })
+    await ensureCardView(page) // P8: the library boots in Compact
     // Default sort is newest-first, so the most recently saved link leads.
     await expect(page.locator('.grid > .card').first()).toContainText('Zeta Link')
 
@@ -449,12 +475,15 @@ test.describe('Mobile & tablet navigation shell', () => {
     await expect(page.getByRole('button', { name: 'Sort & Filter', exact: true })).toHaveClass(/active/)
   })
 
-  test('tablet keeps the desktop structure and the drawer still closes', async ({ page }) => {
+  test('tablet keeps the drawer + bar band and the drawer still closes', async ({ page }) => {
     await page.setViewportSize(TABLET)
 
+    // P8: 768-1023 is still the drawer band, with the topbar brand, the bottom
+    // bar and the floating Add action.
     await expect(page.locator('.sidebar-toggle-btn')).toBeVisible()
-    await expect(page.locator('.mobile-brand')).toBeHidden()
-    await expect(page.locator('.bottom-nav')).toBeHidden()
+    await expect(page.locator('.mobile-brand')).toBeVisible()
+    await expect(page.locator('.bottom-nav')).toBeVisible()
+    await expect(page.locator('.fab')).toBeVisible()
 
     await page.locator('#sidebar-toggle').click()
     await expect(page.locator('.sidebar-wrapper')).toHaveClass(/show/)
@@ -463,31 +492,39 @@ test.describe('Mobile & tablet navigation shell', () => {
     await expect(page.locator('.sidebar-wrapper')).not.toHaveClass(/show/)
   })
 
-  test('the shell switches to the mobile bar below the tablet breakpoint', async ({ page }) => {
-    // One breakpoint for the shell: 768px, the width the phone layout already used.
-    await page.setViewportSize({ width: 769, height: 900 })
+  test('the shell switches to the desktop grid at 1024px', async ({ page }) => {
+    // P8 breakpoint: >=1024 is the mockup's static three-column grid.
+    await page.setViewportSize({ width: 1024, height: 900 })
     await expect(page.locator('.bottom-nav')).toBeHidden()
-    await expect(page.locator('.sidebar-toggle-btn')).toBeVisible()
-    await expect(page.locator('.mobile-brand')).toBeHidden()
-    // Tablet keeps the always-visible field and none of the mobile affordance.
+    await expect(page.locator('.fab')).toBeHidden()
+    await expect(page.locator('.sidebar-toggle-btn')).toBeHidden()
+    await expect(page.locator('.sidebar-wrapper')).toBeVisible()
+    await expect(page.locator('.sidebar-wrapper')).not.toHaveClass(/\bshow\b/) // static, not a drawer
+    await expect(page.locator('.mobile-brand')).toBeVisible()
     await expect(page.getByLabel('Search links')).toBeVisible()
     await expect(page.locator('.navbar-search-toggle')).toBeHidden()
+    await expect(page.locator('.btn-date-picker')).toBeVisible()
 
-    await page.setViewportSize({ width: 768, height: 900 })
+    await page.setViewportSize({ width: 1023, height: 900 })
     await expect(page.locator('.bottom-nav')).toBeVisible()
-    await expect(page.locator('.sidebar-toggle-btn')).toBeHidden()
+    await expect(page.locator('.fab')).toBeVisible()
+    await expect(page.locator('.sidebar-toggle-btn')).toBeVisible()
     await expect(page.locator('.mobile-brand')).toBeVisible()
-    await expect(page.locator('.navbar-search-toggle')).toBeVisible()
-    await expect(page.getByLabel('Search links')).toBeHidden()
+    await expect(page.locator('.navbar-search-toggle')).toBeHidden()
+    await expect(page.getByLabel('Search links')).toBeVisible()
   })
 
-  test('desktop is unchanged', async ({ page }) => {
+  test('desktop is the static grid shell', async ({ page }) => {
     await page.setViewportSize(DESKTOP)
 
     await expect(page.locator('.sidebar-wrapper')).toBeVisible()
     await expect(page.locator('.sidebar-toggle-btn')).toBeHidden()
-    await expect(page.locator('.mobile-brand')).toBeHidden()
+    await expect(page.locator('.mobile-brand')).toBeVisible() // topbar brand (mockup)
     await expect(page.locator('.bottom-nav')).toBeHidden()
+    await expect(page.locator('.fab')).toBeHidden()
+    // the detail rail is structurally present before any selection (mockup)
+    await expect(page.locator('.detail')).toBeVisible()
+    await expect(page.locator('.detail-empty-title')).toHaveText('No link selected')
     // the desktop page header keeps its Add link
     await expect(page.locator('.btn-date-picker')).toBeVisible()
 
@@ -512,6 +549,7 @@ test.describe('Mobile & tablet navigation shell', () => {
     await page.getByLabel('Light theme').click()
     await expect(page.locator('html')).toHaveAttribute('data-appearance', 'light')
     await openView(page, 'links')
+    await page.waitForTimeout(250) // item colors animate (150ms) between active states
     const light = await readShell()
     expect(light.bar).toBe(light.surface)
     expect(light.active).not.toBe(light.inactive)
@@ -521,6 +559,7 @@ test.describe('Mobile & tablet navigation shell', () => {
     await page.getByLabel('Dark theme').click()
     await expect(page.locator('html')).toHaveAttribute('data-appearance', 'dark')
     await openView(page, 'links')
+    await page.waitForTimeout(250) // item colors animate (150ms) between active states
     const dark = await readShell()
     expect(dark.bar).toBe(dark.surface)
     expect(dark.bar).not.toBe(light.bar)
@@ -543,7 +582,8 @@ test.describe('Mobile & tablet navigation shell', () => {
       // The current destination takes the scheme accent (transition settles first).
       const accentRgb = `rgb(${toRgb(shell.accent).join(', ')})`
       await expect.poll(async () => (await readShell()).active).toBe(accentRgb)
-      expect(shell.active).not.toBe(shell.inactive)
+      const settled = await readShell()
+      expect(settled.active).not.toBe(settled.inactive)
     }
   })
 })
