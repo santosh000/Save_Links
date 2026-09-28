@@ -12,6 +12,8 @@ import { clearStorage, visibleLinkRows } from './helpers.js'
 
 const PAGE_SIZE = 10
 
+const SEED_TYPES = ['article', 'video', 'docs', 'repo']
+
 function seedLinks(count, now = Date.now()) {
   const categories = ['GitHub', 'YouTube', 'Instagram', 'Other']
   const links = []
@@ -31,6 +33,8 @@ function seedLinks(count, now = Date.now()) {
       important: i % 7 === 0,
       mustHave: i % 11 === 0,
       favorite: i % 5 === 0,
+      pinned: i % 10 === 0,
+      type: SEED_TYPES[i % SEED_TYPES.length],
       folderId: null,
       status: null,
       createdAt: new Date(now - i * 7 * 60 * 60 * 1000).toISOString(), // every 7h, newest first
@@ -163,6 +167,42 @@ test.describe('Large-library baseline (500–1,000 links)', () => {
     const noOverflow = await page.evaluate(() =>
       document.documentElement.scrollWidth <= document.documentElement.clientWidth)
     expect(noOverflow).toBe(true)
+  })
+
+  test('P3 type/pinned filters stay correct and bounded at 1,000 links', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await seedAndBoot(page, 1000)
+    await page.goto('/')
+    await expect(visibleLinkRows(page).first()).toBeVisible()
+
+    // Type filter: 250 of 1,000 are 'video'
+    await page.locator('#filter-type').selectOption('video')
+    await expect(page.locator('.library-results-count')).toHaveText(/^Showing 1–10 of 250 links$/)
+    await expect(visibleLinkRows(page)).toHaveCount(PAGE_SIZE)
+    await expect(page.locator('.filter-chip', { hasText: 'Type: Video' })).toBeVisible()
+
+    // Compose with search: a single known video seed
+    await page.getByLabel('Search links').fill('Seed Link 0001')
+    await expect(page.locator('.library-results-count')).toHaveText(/^Showing 1 of 1 links$/)
+    await page.getByLabel('Search links').fill('')
+
+    // Pinned-only (no type filter): 100 pinned
+    await page.locator('.filter-chip', { hasText: 'Type: Video' }).getByRole('button', { name: 'Clear type filter' }).click()
+    await page.locator('.pinned-toggle').click()
+    await expect(page.locator('.library-results-count')).toHaveText(/^Showing 1–10 of 100 links$/)
+
+    // Compose type + pinned: pinned indices are multiples of 10, and every
+    // other one is a 'docs' seed (i % 4 === 2) -> 50 of 1,000.
+    await page.locator('#filter-type').selectOption('docs')
+    await expect(page.locator('.library-results-count')).toHaveText(/^Showing 1–10 of 50 links$/)
+    await expect(visibleLinkRows(page)).toHaveCount(PAGE_SIZE)
+
+    // Bulk pin selected visible links (all already pinned -> uniform unpin)
+    await page.locator('.select-visible input').check()
+    await expect(page.locator('.bulk-bar .bulk-count')).toHaveText('10 selected')
+    await page.locator('.bulk-bar').getByRole('button', { name: 'Toggle pin for selected links' }).click()
+    await expect(page.locator('.library-results-count')).toHaveText(/^Showing 1–10 of 40 links$/)
+    await expect(visibleLinkRows(page)).toHaveCount(PAGE_SIZE)
   })
 
   test('500 links: bounded DOM and correct result context', async ({ page }, testInfo) => {
