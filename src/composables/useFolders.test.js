@@ -395,4 +395,122 @@ describe('useFolders', () => {
       expect(await repo.getPendingMutations()).toHaveLength(0)
     })
   })
+
+  describe('P4 nested folders', () => {
+    it('creates root and child folders with parentId defaults', async () => {
+      const { useFolders } = await import('./useFolders.js')
+      const { folders, createFolder } = useFolders()
+      const root = createFolder('Work')
+      expect(root.parentId).toBe(null)
+      const child = createFolder('Engineering', root.id)
+      expect(child.parentId).toBe(root.id)
+      expect(folders.value).toHaveLength(2)
+      await flush()
+      const stored = await repository.getAllFolders()
+      expect(stored.find((f) => f.id === child.id).parentId).toBe(root.id)
+      expect(stored.find((f) => f.id === root.id).parentId).toBe(null)
+    })
+
+    it('rejects an unknown parent and depth beyond 4', async () => {
+      const { useFolders } = await import('./useFolders.js')
+      const { createFolder } = useFolders()
+      expect(() => createFolder('X', 'nope')).toThrow('Parent folder not found')
+      const l1 = createFolder('L1')
+      const l2 = createFolder('L2', l1.id)
+      const l3 = createFolder('L3', l2.id)
+      const l4 = createFolder('L4', l3.id) // depth 4 allowed
+      expect(() => createFolder('L5', l4.id)).toThrow('Maximum folder depth is 4')
+    })
+
+    it('renames a nested folder without changing ids or parents', async () => {
+      const { useFolders } = await import('./useFolders.js')
+      const { folders, createFolder, renameFolder } = useFolders()
+      const root = createFolder('Work')
+      const child = createFolder('Engineering', root.id)
+      renameFolder(child.id, 'Engineering (renamed)')
+      const updated = folders.value.find((f) => f.id === child.id)
+      expect(updated.name).toBe('Engineering (renamed)')
+      expect(updated.parentId).toBe(root.id)
+      expect(updated.id).toBe(child.id)
+    })
+
+    it('moves a child to another parent and back to root', async () => {
+      const { useFolders } = await import('./useFolders.js')
+      const { folders, createFolder, moveFolder } = useFolders()
+      const work = createFolder('Work')
+      const personal = createFolder('Personal')
+      const eng = createFolder('Engineering', work.id)
+      moveFolder(eng.id, personal.id)
+      expect(folders.value.find((f) => f.id === eng.id).parentId).toBe(personal.id)
+      moveFolder(eng.id, null)
+      expect(folders.value.find((f) => f.id === eng.id).parentId).toBe(null)
+    })
+
+    it('rejects self-parent, descendant-parent and over-depth moves', async () => {
+      const { useFolders } = await import('./useFolders.js')
+      const { createFolder, moveFolder } = useFolders()
+      const work = createFolder('Work')
+      const eng = createFolder('Engineering', work.id)
+      const frontend = createFolder('Frontend', eng.id)
+      expect(() => moveFolder(work.id, work.id)).toThrow('A folder cannot contain itself')
+      expect(() => moveFolder(work.id, frontend.id)).toThrow('A folder cannot be moved into its own subfolder')
+      // depth: personal(1) + work-subtree(1 + 2) = 4 -> allowed; finance(2) + 3 = 5 -> rejected
+      const personal = createFolder('Personal')
+      const finance = createFolder('Finance', personal.id)
+      expect(() => moveFolder(work.id, finance.id)).toThrow('Maximum folder depth is 4')
+    })
+
+    it('sanitizeFolders repairs dangling parents, cycles and over-depth chains', async () => {
+      const { useFolders } = await import('./useFolders.js')
+      const { setFolders, folders } = useFolders()
+      setFolders([
+        { id: 'a', name: 'A', parentId: 'ghost' },
+        { id: 'b', name: 'B', parentId: 'c' },
+        { id: 'c', name: 'C', parentId: 'b' },
+        { id: 'd1', name: 'D1' },
+        { id: 'd2', name: 'D2', parentId: 'd1' },
+        { id: 'd3', name: 'D3', parentId: 'd2' },
+        { id: 'd4', name: 'D4', parentId: 'd3' },
+        { id: 'd5', name: 'D5', parentId: 'd4' },
+      ])
+      const byId = new Map(folders.value.map((f) => [f.id, f]))
+      expect(byId.get('a').parentId).toBe(null)
+      expect([byId.get('b').parentId, byId.get('c').parentId].includes(null)).toBe(true)
+      expect(byId.get('d5').parentId).toBe(null)
+      expect(byId.get('d4').parentId).toBe('d3')
+    })
+
+    it('mergeFolders preserves parentId and remaps nested imports', async () => {
+      const { useFolders } = await import('./useFolders.js')
+      const { folders, mergeFolders } = useFolders()
+      // New nested import: child references the parent by the backup's id.
+      const res = await mergeFolders([
+        { id: 'b-root', name: 'Imported Root', parentId: null },
+        { id: 'b-child', name: 'Imported Child', parentId: 'b-root' },
+      ], 'skip')
+      await flush()
+      expect(res.newCount).toBe(2)
+      const root = folders.value.find((f) => f.name === 'Imported Root')
+      const child = folders.value.find((f) => f.name === 'Imported Child')
+      expect(root.id).not.toBe('b-root') // fresh ids (Bug 15 rule)
+      expect(child.parentId).toBe(root.id) // remapped to the fresh parent id
+    })
+
+    it('deleting a subtree is driven by descendantIds (App loop semantics)', async () => {
+      const { useFolders } = await import('./useFolders.js')
+      const { folders, createFolder, deleteFolder } = useFolders()
+      const { descendantIds } = await import('../utils/folderTree.js')
+      const work = createFolder('Work')
+      const eng = createFolder('Engineering', work.id)
+      createFolder('Frontend', eng.id)
+      createFolder('Design', work.id)
+      createFolder('Personal')
+      const ids = new Set([work.id, ...descendantIds(folders.value, work.id)])
+      for (const id of ids) deleteFolder(id)
+      await flush()
+      expect(folders.value.map((f) => f.name)).toEqual(['Personal'])
+      const stored = await repository.getAllFolders()
+      expect(stored.map((f) => f.name)).toEqual(['Personal'])
+    })
+  })
 })

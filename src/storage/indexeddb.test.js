@@ -238,7 +238,7 @@ it('persists folders and deletes by id', async () => {
       await repo.upsertFolder({ id: 'f2', name: '  Personal  ' })
       const folders = await repo.getAllFolders()
       expect(folders.length).toBe(2)
-      expect(folders[0]).toEqual({ id: 'f1', name: 'Work', createdAt: '2024-02-02T00:00:00.000Z', revision: 0, account_id: null, kept_local: false })
+      expect(folders[0]).toEqual({ id: 'f1', name: 'Work', createdAt: '2024-02-02T00:00:00.000Z', parentId: null, revision: 0, account_id: null, kept_local: false })
       expect(folders[1].name).toBe('Personal')
       expect(folders[1].createdAt).toBeTruthy()
       expect(folders[1].revision).toBe(0)
@@ -246,6 +246,17 @@ it('persists folders and deletes by id', async () => {
       expect(folders[1].kept_local).toBe(false)
       await repo.deleteFolder('f1')
       expect((await repo.getAllFolders()).map((f) => f.id)).toEqual(['f2'])
+    })
+
+    it('persists P4 parentId and defaults invalid values to null', async () => {
+      const repo = makeRepo()
+      await repo.upsertFolder({ id: 'f1', name: 'Work' })
+      await repo.upsertFolder({ id: 'f2', name: 'Engineering', parentId: 'f1' })
+      await repo.upsertFolder({ id: 'f3', name: 'Bad', parentId: 42 })
+      const folders = await repo.getAllFolders()
+      expect(folders.find((f) => f.id === 'f1').parentId).toBe(null)
+      expect(folders.find((f) => f.id === 'f2').parentId).toBe('f1')
+      expect(folders.find((f) => f.id === 'f3').parentId).toBe(null)
     })
 
     it('rejects invalid folders', async () => {

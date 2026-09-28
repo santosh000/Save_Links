@@ -64,7 +64,8 @@ test.describe('Folders, Appearance, Color Schemes, Backup v2', () => {
     // folder count should be 1 for Office
     await openView(page, 'folders')
     await expect(page.locator('.folder-item', { hasText: 'Office' })).toContainText('1')
-    // delete folder moves to Unfiled (in-app dialog; cancel returns focus to the trigger)
+    // delete folder (P4 subtree semantics: the folder and every link inside it
+    // are deleted; in-app dialog; cancel returns focus to the trigger)
     await page.getByRole('button', { name: 'Delete folder Office' }).click()
     const folderDialog = page.getByRole('dialog')
     await expect(folderDialog).toBeVisible()
@@ -76,15 +77,14 @@ test.describe('Folders, Appearance, Color Schemes, Backup v2', () => {
     await folderDialog.getByRole('button', { name: 'Delete', exact: true }).click()
     await expect(page.getByText('Office')).toHaveCount(0)
     await openView(page, 'folders')
-    await expect(page.locator('.folder-item', { hasText: 'Unfiled' })).toContainText('1')
-    // the link itself still exists in Saved links
+    await expect(page.locator('.folder-item', { hasText: 'Unfiled' }).locator('.folder-count')).toHaveText('0')
+    // P4: the link inside the deleted folder went with it (not moved to Unfiled)
     await openView(page, 'links')
-    await expect(visibleLinkRows(page).first()).toContainText('Work link')
-    await openView(page, 'folders')
-    await expect(page.locator('.folder-item', { hasText: 'Unfiled' }).locator('.folder-count')).toHaveText('1') // folder state lives in the Folders view, not in card text
+    await expect(visibleLinkRows(page)).toHaveCount(0)
     // after CONFIRM deletion the trigger button is gone, focus falls to body (no fallback)
     // Note: focus-return-after-confirm is a known gap in the new shell
     // a subsequent valid create still works
+    await openView(page, 'folders')
     await page.getByLabel('New folder name').fill('AfterDuplicate')
     await page.getByRole('button', { name: 'Create folder', exact: true }).click()
     await expect(page.locator('.folder-item', { hasText: 'AfterDuplicate' })).toBeVisible()

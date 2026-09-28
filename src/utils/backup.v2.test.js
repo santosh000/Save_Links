@@ -22,7 +22,7 @@ describe('backup v2', () => {
   })
 
   it('v2 export contains folders, appearance, colorScheme', () => {
-    const folders = [{ id:'f1', name:'Work', createdAt:new Date().toISOString()}]
+    const folders = [{ id:'f1', name:'Work', createdAt:new Date().toISOString(), parentId: null }]
     const links = [{ id:'1', originalUrl:'https://example.com', normalizedUrl:'https://example.com', url:'https://example.com', title:'T', description:'', image:'', tags:[], category:'Other', important:false, mustHave:false, favorite:false, folderId:'f1', domain:'example.com', createdAt:new Date().toISOString(), savedFrom:'Windows'}]
     const payload = createBackupPayload({ links, profile:{}, folders, appearance:'dark', colorScheme:'forest'})
     expect(payload.version).toBe(2)

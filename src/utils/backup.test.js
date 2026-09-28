@@ -89,6 +89,19 @@ describe('backup utils', () => {
       expect(payload.links[1].type).toBe('other')
     })
 
+    it('exports nested folder parentIds (P4)', () => {
+      const payload = createBackupPayload({
+        links: [],
+        folders: [
+          { id: 'f1', name: 'Work', parentId: null },
+          { id: 'f2', name: 'Engineering', parentId: 'f1' },
+        ],
+        profile: {},
+      })
+      expect(payload.folders[0].parentId).toBe(null)
+      expect(payload.folders[1].parentId).toBe('f1')
+    })
+
     it('exports from in-memory state (not raw localStorage)', () => {
       // put different data in localStorage (using environment-specific key)
       const ls2 = (typeof window !== 'undefined' && window.localStorage) ? window.localStorage : globalThis.localStorage
@@ -389,6 +402,39 @@ describe('backup utils', () => {
       const { links } = normalizeBackupData(payload)
       expect(links[0].pinned).toBe(true)
       expect(links[0].type).toBe('tutorial')
+    })
+
+    it('imports old flat folder backups with parentId null (P4)', () => {
+      const data = {
+        app: 'Save_Link',
+        version: 2,
+        exportedAt: new Date().toISOString(),
+        profile: {},
+        folders: [{ id: 'f1', name: 'Work' }],
+        links: [],
+      }
+      const { folders } = normalizeBackupData(data)
+      expect(folders[0].parentId).toBe(null)
+    })
+
+    it('round-trips nested folders and repairs invalid relationships (P4)', () => {
+      const payload = createBackupPayload({
+        links: [],
+        folders: [
+          { id: 'f1', name: 'Work', parentId: null },
+          { id: 'f2', name: 'Engineering', parentId: 'f1' },
+          { id: 'f3', name: 'Ghost', parentId: 'missing' },
+          { id: 'f4', name: 'CycleA', parentId: 'f5' },
+          { id: 'f5', name: 'CycleB', parentId: 'f4' },
+        ],
+        profile: {},
+      })
+      const { folders } = normalizeBackupData(payload)
+      const byId = new Map(folders.map((f) => [f.id, f]))
+      expect(byId.get('f1').parentId).toBe(null)
+      expect(byId.get('f2').parentId).toBe('f1')
+      expect(byId.get('f3').parentId).toBe(null) // dangling -> root
+      expect([byId.get('f4').parentId, byId.get('f5').parentId].includes(null)).toBe(true) // cycle broken
     })
   })
 })
