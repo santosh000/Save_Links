@@ -1,9 +1,18 @@
 <script setup>
 import { ref, watch } from 'vue'
 import { CATEGORIES, categorizeUrl, normalizeUrl, getDomain } from '../utils/categorize.js'
+import { LINK_TYPES, LINK_TYPE_LABELS } from '../domain/link.js'
 import { fetchMetadata } from '../utils/metadata.js'
 import { useAnchoredPopover } from '../utils/anchoredPopover.js'
 import AppSelect from './AppSelect.vue'
+
+// '' = Auto (detect): the submitted payload omits `type`, so buildLinkSpec
+// applies the conservative creation-time heuristic (or 'other'). Choosing an
+// explicit type always wins.
+const TYPE_OPTIONS = [
+  { value: '', label: 'Auto (detect)' },
+  ...LINK_TYPES.map((t) => ({ value: t, label: LINK_TYPE_LABELS[t] })),
+]
 
 const props = defineProps({
   folders: { type: Array, default: () => [] }
@@ -20,6 +29,8 @@ const category = ref('Other')
 const tagsInput = ref('')
 const important = ref(false)
 const mustHave = ref(false)
+const pinned = ref(false)
+const type = ref('')
 const folderId = ref('')
 const loadingMeta = ref(false)
 const error = ref('')
@@ -35,6 +46,9 @@ useAnchoredPopover({
   popover: popoverEl,
   isOpen: open,
   onOutside: () => { open.value = false },
+  // The form's AppSelects render their own teleported menu; a pointerdown there
+  // belongs to this form, not outside it (same rule as the item menus).
+  ignoreSelector: '.asel-menu',
   // Mobile presentation: viewport-centred below the shell breakpoint so the
   // form keeps equal margins instead of hanging off the bottom bar.
   mode: 'auto'
@@ -115,6 +129,8 @@ function onSubmit() {
     tags,
     important: important.value,
     mustHave: mustHave.value,
+    pinned: pinned.value,
+    type: type.value || undefined,
     folderId: folderId.value || null,
     _prefetchedMeta: usePrefetched ? lastMeta : null,
     _prefetchedUrl: usePrefetched ? lastMetaUrl : null
@@ -132,6 +148,8 @@ function resetForm() {
   tagsInput.value = ''
   important.value = false
   mustHave.value = false
+  pinned.value = false
+  type.value = ''
   category.value = 'Other'
   folderId.value = ''
   lastMeta = null
@@ -216,8 +234,15 @@ defineExpose({ open, toggleFrom, close })
                     <div class="checks">
                       <label class="check"><input type="checkbox" v-model="important" /> Important</label>
                       <label class="check"><input type="checkbox" v-model="mustHave" /> Must Have</label>
+                      <label class="check"><input type="checkbox" v-model="pinned" /> Pin</label>
                     </div>
                   </div>
+                </div>
+                <div class="row row-2">
+                  <label class="field" for="save-type">
+                    <span>Type</span>
+                    <AppSelect id="save-type" v-model="type" variant="field" :options="TYPE_OPTIONS" aria-label="Type" />
+                  </label>
                 </div>
               </div>
             </Transition>
@@ -326,7 +351,19 @@ defineExpose({ open, toggleFrom, close })
 .meta-hint { font-size: var(--text-xs); color: var(--muted); }
 .error { color: var(--error); font-size: var(--text-sm); margin: 0 0 10px; }
 .btn.block { width: 100%; margin-top: 2px; }
-.form-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 14px; }
+/* Actions stay reachable while a tall form scrolls internally (mobile): the
+   row sticks to the bottom of the popover's scroll area. */
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 14px;
+  position: sticky;
+  bottom: 0;
+  background: var(--card);
+  padding-top: 10px;
+  padding-bottom: 2px;
+}
 .checks { display: flex; gap: 14px; align-items: center; padding-top: 9px; flex-wrap: wrap; }
 .check { font-size: var(--text-sm); color: var(--text-h); display: flex; gap: 6px; align-items: center; cursor: pointer; }
 .check input { accent-color: var(--accent); }

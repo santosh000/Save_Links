@@ -94,9 +94,11 @@ test.describe('Card information hierarchy (Step 2C-1)', () => {
     await important.click()
     await expect(important).toHaveAttribute('aria-pressed', 'true')
     // Step 2C-3: Must Have is no longer a permanent card control (it moved into
-    // the quick-action menu); the permanent status area is Important + Favorite.
+    // the quick-action menu); the permanent status area is Important + Favorite
+    // (+ Pin, added in P3 as its own persistent flag).
     await expect(card.getByRole('button', { name: 'Toggle Must Have' })).toHaveCount(0)
-    expect(await card.locator('.status-group button').count()).toBe(2)
+    expect(await card.locator('.status-group button').count()).toBe(3)
+    await expect(card.getByRole('button', { name: 'Toggle Pin' })).toBeVisible()
 
     // Card / List / Compact all render the saved link
     for (const [index, mode] of [['0', 'card'], ['1', 'list'], ['2', 'compact']]) {

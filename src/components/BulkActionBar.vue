@@ -14,7 +14,7 @@ const props = defineProps({
   folders: { type: Array, default: () => [] },
 })
 
-const emit = defineEmits(['select-all', 'clear', 'move', 'favorite', 'delete'])
+const emit = defineEmits(['select-all', 'clear', 'move', 'favorite', 'pin', 'delete'])
 
 // Action-shaped options: '' = the trigger label, '__unfiled' maps to null in
 // App.vue (the same "Unfiled" convention the per-item folder menus use).
@@ -60,6 +60,11 @@ function onMove(value) {
     <button type="button" class="bulk-btn" aria-label="Toggle favorite for selected links" @click="emit('favorite')">
       <svg class="bulk-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21C7 16.8 3 13.6 3 9.6 3 7 5 5 7.4 5c1.8 0 3.4 1 4.6 2.6C13.2 6 14.8 5 16.6 5 19 5 21 7 21 9.6c0 4-4 7.2-9 11.4z"/></svg>
       <span class="bulk-label">Favorite</span>
+    </button>
+
+    <button type="button" class="bulk-btn" aria-label="Toggle pin for selected links" @click="emit('pin')">
+      <svg class="bulk-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6"/><path d="M10 4v6l-2 3h8l-2-3V4"/><path d="M12 13v7"/></svg>
+      <span class="bulk-label">Pin</span>
     </button>
 
     <button type="button" class="bulk-btn danger" aria-label="Delete selected links" @click="emit('delete')">

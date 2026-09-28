@@ -2,6 +2,7 @@
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, toRaw } from 'vue'
 import { sortLinks, SORT_OPTIONS, DEFAULT_SORT } from './utils/sort.js'
 import { CATEGORIES } from './utils/categorize.js'
+import { LINK_TYPES, LINK_TYPE_LABELS } from './domain/link.js'
 import { paginationLabel } from './utils/pagination.js'
 import { pickImportSlices } from './utils/backup.js'
 import { getStorageKey } from './utils/environment.js'
@@ -30,7 +31,7 @@ import pkg from '../package.json'
 
 const appVersion = pkg.version
 
-const { links, total, importantCount, mustHaveCount, favoriteCount, byCategory, storageError, addLink, replaceLink, toggleImportant, toggleMustHave, toggleFavorite, setStatus, removeLink, updateLink, setLinks, moveLinksFromFolder, mergeLinks, getAnonymousLinksCount, getAnonymousLinks } = useLinks()
+const { links, total, importantCount, mustHaveCount, favoriteCount, byCategory, storageError, addLink, replaceLink, toggleImportant, toggleMustHave, toggleFavorite, togglePin, setStatus, removeLink, updateLink, setLinks, moveLinksFromFolder, mergeLinks, getAnonymousLinksCount, getAnonymousLinks } = useLinks()
 const { profile, updateProfile } = useProfile()
 const { folders, createFolder, renameFolder, deleteFolder, setFolders, mergeFolders, getAnonymousFoldersCount, getAnonymousFolders } = useFolders()
 const { appearance, colorScheme, resolvedAppearance, setAppearance, setColorScheme } = useSettings()
@@ -98,6 +99,8 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onCommandShortcutK
 const filterCategory = ref('')
 const filterStatus = ref('')
 const filterFolder = ref('')
+const filterType = ref('')
+const filterPinned = ref(false)
 const sortBy = ref(DEFAULT_SORT)
 
 // Links presentation: 'card' | 'list' | 'compact'.
@@ -560,7 +563,17 @@ function handleRenameFolder({ id, name }, done) {
 }
 
 // ---- Filtering / sorting ----
-const sortedLinks = computed(() => sortLinks(links.value, sortBy.value))
+// P3: pinned links surface first, then the existing selected sort order. A
+// stable partition (not a second comparator) keeps every existing sort
+// (newest / oldest / A-Z / Z-A) exactly as it was within each group.
+const sortedLinks = computed(() => {
+  const sorted = sortLinks(links.value, sortBy.value)
+  if (!sorted.some((l) => l.pinned)) return sorted
+  const pinned = []
+  const rest = []
+  for (const l of sorted) (l.pinned ? pinned : rest).push(l)
+  return [...pinned, ...rest]
+})
 
 const filteredLinks = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
@@ -571,6 +584,8 @@ const filteredLinks = computed(() => {
       else if (l.folderId !== filterFolder.value) return false
     }
     if (filterCategory.value && l.category !== filterCategory.value) return false
+    if (filterType.value && (l.type || 'other') !== filterType.value) return false
+    if (filterPinned.value && !l.pinned) return false
     if (filterStatus.value) {
       if (filterStatus.value === 'none' && (l.important || l.mustHave)) return false
       if (filterStatus.value === 'important' && !l.important) return false
@@ -592,7 +607,7 @@ const hasSearch = computed(() => search.value.trim().length > 0)
 const hasFilters = computed(() => !!(filterCategory.value || filterStatus.value || filterFolder.value))
 const favoritesOnly = computed(() => filterStatus.value === 'favorite' && !hasSearch.value && !filterCategory.value && !filterFolder.value)
 
-function clearFilters() { search.value = ''; filterCategory.value = ''; filterStatus.value = ''; filterFolder.value = '' }
+function clearFilters() { search.value = ''; filterCategory.value = ''; filterStatus.value = ''; filterFolder.value = ''; filterType.value = ''; filterPinned.value = false }
 
 // Pagination
 const ITEMS_PER_PAGE = 10
@@ -605,7 +620,7 @@ const paginatedLinks = computed(() => {
 // Result-count label for the results bar. Uses the filtered result set
 // (pagination operates on filtered links) and the existing ITEMS_PER_PAGE.
 const paginationText = computed(() => paginationLabel(filteredLinks.value.length, currentPage.value, ITEMS_PER_PAGE))
-watch([search, filterCategory, filterStatus, filterFolder, sortBy], () => { currentPage.value = 1 })
+watch([search, filterCategory, filterStatus, filterFolder, filterType, filterPinned, sortBy], () => { currentPage.value = 1 })
 
 // Windowed page links: large collections (1,000 links = 100 pages) must not
 // render one link per page in the DOM. First/last plus a window around the
@@ -694,6 +709,15 @@ function bulkToggleFavorite() {
   showToast(next ? 'Added to favorites' : 'Removed from favorites')
 }
 
+// P3: uniform pin toggle for the selected links (same shape as bulk favorite).
+function bulkTogglePin() {
+  const sel = selectedLinks()
+  if (!sel.length) return
+  const next = !sel.every((l) => l.pinned)
+  for (const l of sel) updateLink(l.id, { pinned: next })
+  showToast(next ? 'Pinned' : 'Unpinned')
+}
+
 function bulkMove(value) {
   const folderId = value === '__unfiled' ? null : value
   const sel = selectedLinks()
@@ -776,11 +800,18 @@ const STATUS_FILTER_OPTIONS = [
   { value: 'favorite', label: 'Favorites' },
   { value: 'not-favorite', label: 'No favorite' },
 ]
+// P3: real link-type filter (values are the persisted enum; labels for humans).
+const TYPE_FILTER_OPTIONS = [
+  { value: '', label: 'Types' },
+  ...LINK_TYPES.map((t) => ({ value: t, label: LINK_TYPE_LABELS[t] })),
+]
 const activeFilterChips = computed(() => {
   const chips = []
   const q = search.value.trim()
   if (q) chips.push({ key: 'search', label: `Search: "${q}"`, clear: () => { search.value = '' } })
   if (filterStatus.value) chips.push({ key: 'status', label: `Status: ${STATUS_OPTION_LABELS[filterStatus.value] || filterStatus.value}`, clear: () => { filterStatus.value = '' } })
+  if (filterType.value) chips.push({ key: 'type', label: `Type: ${LINK_TYPE_LABELS[filterType.value] || filterType.value}`, clear: () => { filterType.value = '' } })
+  if (filterPinned.value) chips.push({ key: 'pinned', label: 'Pinned', clear: () => { filterPinned.value = false } })
   if (filterCategory.value) chips.push({ key: 'category', label: `Category: ${filterCategory.value}`, clear: () => { filterCategory.value = '' } })
   if (filterFolder.value) {
     const name = filterFolder.value === '__unfiled' ? 'Unfiled' : (folders.value.find(f => f.id === filterFolder.value)?.name || filterFolder.value)
@@ -1048,6 +1079,31 @@ onBeforeUnmount(() => {
                       @update:model-value="filterStatus = $event"
                     />
                   </div>
+                  <div class="filter-field">
+                    <span class="filter-field-label">Type</span>
+                    <AppSelect
+                      id="filter-type"
+                      variant="header"
+                      aria-label="Filter by type"
+                      :model-value="filterType"
+                      :options="TYPE_FILTER_OPTIONS"
+                      @update:model-value="filterType = $event"
+                    />
+                  </div>
+                  <div class="filter-field">
+                    <span class="filter-field-label">Pinned</span>
+                    <button
+                      type="button"
+                      class="pinned-toggle"
+                      :class="{ active: filterPinned }"
+                      :aria-pressed="String(filterPinned)"
+                      aria-label="Show pinned links only"
+                      @click="filterPinned = !filterPinned"
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6"/><path d="M10 4v6l-2 3h8l-2-3V4"/><path d="M12 13v7"/></svg>
+                      <span>Pinned</span>
+                    </button>
+                  </div>
                 </div>
                 <button type="button" class="toolbar-add toolbar-export" aria-label="Export links" @click="go('backup')">
           <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-box-arrow-up-right'"></use></svg>
@@ -1093,6 +1149,7 @@ onBeforeUnmount(() => {
             @clear="clearSelection"
             @move="bulkMove"
             @favorite="bulkToggleFavorite"
+            @pin="bulkTogglePin"
             @delete="requestBulkDelete"
           />
 
@@ -1127,6 +1184,7 @@ onBeforeUnmount(() => {
                   @toggle-important="toggleImportant"
                   @toggle-must-have="toggleMustHave"
                   @toggle-favorite="toggleFavorite"
+                  @toggle-pin="togglePin"
                   @set-status="setStatus"
                   @delete="requestDeleteLink"
                   @edit="handleEdit"
@@ -1147,6 +1205,7 @@ onBeforeUnmount(() => {
                     @toggle-important="toggleImportant"
                     @toggle-must-have="toggleMustHave"
                     @toggle-favorite="toggleFavorite"
+                    @toggle-pin="togglePin"
                     @set-status="setStatus"
                     @delete="requestDeleteLink"
                     @edit="handleEdit"
@@ -1563,6 +1622,31 @@ onBeforeUnmount(() => {
   display: none;
 }
 
+/* P3 Pinned filter toggle: quiet inline control on desktop/tablet; stacked in
+   the mobile disclosure like the other filter fields. */
+.pinned-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--control-height-sm);
+  padding: 5px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+.pinned-toggle svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+@media (hover: hover) and (pointer: fine) {
+  .pinned-toggle:hover { color: var(--text-h); background: var(--muted-bg); }
+}
+.pinned-toggle.active { color: var(--accent); background: var(--accent-bg); font-weight: var(--weight-semibold); }
+.pinned-toggle:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 1px; }
+
 /* Toolbar utility actions (Export): secondary, quiet */
 .toolbar-add {
   width: var(--control-height);
@@ -1886,6 +1970,7 @@ onBeforeUnmount(() => {
     font-weight: var(--weight-semibold);
     color: var(--text-h);
   }
+  .pinned-toggle { width: 100%; justify-content: flex-start; min-height: var(--control-height); }
   .toolbar-filters :deep(.asel-trigger) {
     min-height: var(--control-height);
   }

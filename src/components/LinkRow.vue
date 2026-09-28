@@ -18,7 +18,7 @@ const props = defineProps({
   mode: { type: String, default: 'list' }, // 'list' | 'compact'
   selected: { type: Boolean, default: false }
 })
-const emit = defineEmits(['toggle-important', 'toggle-must-have', 'toggle-favorite', 'set-status', 'delete', 'edit', 'set-folder', 'copy', 'share', 'select'])
+const emit = defineEmits(['toggle-important', 'toggle-must-have', 'toggle-favorite', 'toggle-pin', 'set-status', 'delete', 'edit', 'set-folder', 'copy', 'share', 'select'])
 
 // Quick-action menu (Open / Copy link / Share / Category / Folder / Delete):
 // the same anchored-popover infrastructure and neutral menu surface as LinkCard
@@ -85,6 +85,9 @@ useAnchoredPopover({
   popover: editPopoverEl,
   isOpen: editing,
   onOutside: () => { editing.value = false },
+  // The form's AppSelects render their own teleported menu; a pointerdown there
+  // belongs to this form, not outside it (same rule as the quick-action menu).
+  ignoreSelector: '.asel-menu',
   mode: 'auto'
 })
 
@@ -148,6 +151,16 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
         @click="emit('toggle-favorite', link.id)"
       >
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21C7 16.8 3 13.6 3 9.6 3 7 5 5 7.4 5c1.8 0 3.4 1 4.6 2.6C13.2 6 14.8 5 16.6 5 19 5 21 7 21 9.6c0 4-4 7.2-9 11.4z" /></svg>
+      </button>
+      <button
+        class="row-toggle"
+        :class="{ active: link.pinned }"
+        :aria-pressed="String(!!link.pinned)"
+        aria-label="Toggle Pin"
+        title="Pin"
+        @click="emit('toggle-pin', link.id)"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6"/><path d="M10 4v6l-2 3h8l-2-3V4"/><path d="M12 13v7"/></svg>
       </button>
       <button ref="editTriggerEl" class="icon-btn" @click="toggleEdit" aria-label="Edit link" title="Edit">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>

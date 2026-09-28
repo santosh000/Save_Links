@@ -25,7 +25,7 @@ const props = defineProps({
   folders: { type: Array, default: () => [] },
   selected: { type: Boolean, default: false }
 })
-const emit = defineEmits(['toggle-important', 'toggle-must-have', 'toggle-favorite', 'set-status', 'delete', 'edit', 'set-folder', 'copy', 'share', 'select'])
+const emit = defineEmits(['toggle-important', 'toggle-must-have', 'toggle-favorite', 'toggle-pin', 'set-status', 'delete', 'edit', 'set-folder', 'copy', 'share', 'select'])
 
 const imageFailed = ref(false)
 watch(() => props.link.image, () => { imageFailed.value = false })
@@ -74,6 +74,9 @@ useAnchoredPopover({
   popover: editPopoverEl,
   isOpen: editing,
   onOutside: () => { editing.value = false },
+  // The form's AppSelects render their own teleported menu; a pointerdown there
+  // belongs to this form, not outside it (same rule as the quick-action menu).
+  ignoreSelector: '.asel-menu',
   mode: 'auto'
 })
 
@@ -187,6 +190,16 @@ function platformIcon() {
           >
             <svg class="pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21C7 16.8 3 13.6 3 9.6 3 7 5 5 7.4 5c1.8 0 3.4 1 4.6 2.6C13.2 6 14.8 5 16.6 5 19 5 21 7 21 9.6c0 4-4 7.2-9 11.4z" /></svg>
             <span>Favorite</span>
+          </button>
+          <button
+            class="pill"
+            :class="{ active: link.pinned }"
+            :aria-pressed="String(!!link.pinned)"
+            aria-label="Toggle Pin"
+            @click="emit('toggle-pin', link.id)"
+          >
+            <svg class="pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6"/><path d="M10 4v6l-2 3h8l-2-3V4"/><path d="M12 13v7"/></svg>
+            <span>Pin</span>
           </button>
         </div>
         <div class="right-actions">

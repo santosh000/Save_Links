@@ -1,7 +1,10 @@
 <script setup>
 import { ref } from 'vue'
 import { CATEGORIES } from '../utils/categorize.js'
+import { LINK_TYPES, LINK_TYPE_LABELS } from '../domain/link.js'
 import AppSelect from './AppSelect.vue'
+
+const TYPE_OPTIONS = LINK_TYPES.map((t) => ({ value: t, label: LINK_TYPE_LABELS[t] }))
 
 // Shared edit form for LinkCard (Card) and LinkRow (List/Compact). The parent
 // renders it inside an anchored popover and owns the open/close state; this
@@ -20,6 +23,8 @@ const draftImage = ref(props.link.image || '')
 const draftTags = ref((props.link.tags || []).join(', '))
 const draftCategory = ref(props.link.category)
 const draftFolderId = ref(props.link.folderId || '')
+const draftPinned = ref(!!props.link.pinned)
+const draftType = ref(LINK_TYPES.includes(props.link.type) ? props.link.type : 'other')
 
 function save() {
   const tags = draftTags.value.split(',').map(t => t.trim()).filter(Boolean)
@@ -29,7 +34,9 @@ function save() {
     image: draftImage.value.trim(),
     tags,
     category: draftCategory.value,
-    folderId: draftFolderId.value || null
+    folderId: draftFolderId.value || null,
+    pinned: draftPinned.value,
+    type: draftType.value
   })
 }
 </script>
@@ -46,6 +53,12 @@ function save() {
     <label class="edit-field"><span>Folder</span>
       <AppSelect v-model="draftFolderId" variant="field" :options="[{ value: '', label: 'Unfiled' }, ...folders]" aria-label="Edit folder" />
     </label>
+    <label class="edit-field"><span>Type</span>
+      <AppSelect v-model="draftType" variant="field" :options="TYPE_OPTIONS" aria-label="Edit type" />
+    </label>
+    <label class="edit-check">
+      <input type="checkbox" v-model="draftPinned" /> Pinned
+    </label>
     <div class="edit-actions">
       <button class="btn primary sm" @click="save">Save</button>
       <button class="btn ghost sm" @click="emit('cancel')">Cancel</button>
@@ -57,6 +70,8 @@ function save() {
 .edit-form { display: flex; flex-direction: column; gap: var(--space-2); }
 .edit-field { display: flex; flex-direction: column; gap: var(--space-1); font-size: var(--text-xs); font-weight: var(--weight-semibold); color: var(--text-h); }
 .edit-input { font-weight: 400; }
+.edit-check { display: flex; align-items: center; gap: 6px; font-size: var(--text-xs); font-weight: var(--weight-semibold); color: var(--text-h); }
+.edit-check input { accent-color: var(--accent); }
 /* Field visuals and the dense button size come from the shared control language
    (src/app-overrides.css §11-§12); the mobile tap-size override below still
    applies. */
