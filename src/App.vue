@@ -597,10 +597,56 @@ const paginatedLinks = computed(() => {
   const start = (currentPage.value - 1) * ITEMS_PER_PAGE
   return filteredLinks.value.slice(start, start + ITEMS_PER_PAGE)
 })
-// Result-count label for the pagination footer. Uses the filtered result set
+// Result-count label for the results bar. Uses the filtered result set
 // (pagination operates on filtered links) and the existing ITEMS_PER_PAGE.
 const paginationText = computed(() => paginationLabel(filteredLinks.value.length, currentPage.value, ITEMS_PER_PAGE))
 watch([search, filterCategory, filterStatus, filterFolder, sortBy], () => { currentPage.value = 1 })
+
+// Windowed page links: large collections (1,000 links = 100 pages) must not
+// render one link per page in the DOM. First/last plus a window around the
+// current page, with ellipsis markers between.
+const pageItems = computed(() => {
+  const total = totalPages.value
+  const cur = currentPage.value
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1)
+  const items = [1]
+  const start = Math.max(2, cur - 1)
+  const end = Math.min(total - 1, cur + 1)
+  if (start > 2) items.push('…')
+  for (let p = start; p <= end; p++) items.push(p)
+  if (end < total - 1) items.push('…')
+  items.push(total)
+  return items
+})
+
+// ---- Derived time groups (presentation only) ----
+// Group headers are derived deterministically from createdAt; no stored field,
+// no domain/persistence change. They are meaningful only for the newest-first
+// date sort and only in the row views; card view stays flat.
+function startOfLocalDay(t) {
+  const d = new Date(t)
+  d.setHours(0, 0, 0, 0)
+  return d.getTime()
+}
+function timeGroupLabel(iso, now = Date.now()) {
+  const t = Date.parse(iso)
+  if (Number.isNaN(t)) return 'Earlier'
+  const days = Math.round((startOfLocalDay(now) - startOfLocalDay(t)) / 86400000)
+  if (days <= 0) return 'Today'
+  if (days === 1) return 'Yesterday'
+  if (days < 7) return 'This Week'
+  return 'Earlier'
+}
+const groupHeadersEnabled = computed(() => viewMode.value !== 'card' && sortBy.value === 'newest')
+function groupLabelAt(index) {
+  if (!groupHeadersEnabled.value) return ''
+  const links = paginatedLinks.value
+  const link = links[index]
+  if (!link) return ''
+  const label = timeGroupLabel(link.createdAt)
+  if (index === 0) return label
+  return timeGroupLabel(links[index - 1].createdAt) === label ? '' : label
+}
 
 // Open link safely
 function openLink(link) {
@@ -911,6 +957,12 @@ onBeforeUnmount(() => {
             </template>
           </div>
 
+          <!-- Results bar: real window + filter context (no invented counts) -->
+          <div v-if="hasLinks" class="library-results" aria-live="polite">
+            <span class="library-results-count">{{ paginationText }}</span>
+            <span v-if="hasSearch || hasFilters" class="library-results-context">Filtered</span>
+          </div>
+
           <!-- Link content -->
           <div class="links-content">
           <!-- Old Links content section (hybrid: old link presentation + current pagination) -->
@@ -949,22 +1001,23 @@ onBeforeUnmount(() => {
                 />
               </div>
               <div v-else class="row-list" :class="{ compact: viewMode === 'compact' }">
-                <LinkRow
-                  v-for="link in paginatedLinks"
-                  :key="link.id"
-                  :link="link"
-                  :folders="folders"
-                  :mode="viewMode"
-                  @toggle-important="toggleImportant"
-                  @toggle-must-have="toggleMustHave"
-                  @toggle-favorite="toggleFavorite"
-                  @set-status="setStatus"
-                  @delete="requestDeleteLink"
-                  @edit="handleEdit"
-                  @set-folder="handleSetFolder"
-                  @copy="handleCopyLink"
-                  @share="handleShareLink"
-                />
+                <template v-for="(link, i) in paginatedLinks" :key="link.id">
+                  <div v-if="groupLabelAt(i)" class="group-h">{{ groupLabelAt(i) }}</div>
+                  <LinkRow
+                    :link="link"
+                    :folders="folders"
+                    :mode="viewMode"
+                    @toggle-important="toggleImportant"
+                    @toggle-must-have="toggleMustHave"
+                    @toggle-favorite="toggleFavorite"
+                    @set-status="setStatus"
+                    @delete="requestDeleteLink"
+                    @edit="handleEdit"
+                    @set-folder="handleSetFolder"
+                    @copy="handleCopyLink"
+                    @share="handleShareLink"
+                  />
+                </template>
               </div>
             </template>
           </template>
@@ -980,16 +1033,16 @@ onBeforeUnmount(() => {
           </div>
           </div>
 
-          <!-- Pagination footer -->
-          <div class="table-footer-control">
-            <span class="table-pagination-info">{{ paginationText }}</span>
+          <!-- Pagination footer: page controls only (the results bar owns the label) -->
+          <div class="table-footer-control" :class="{ 'is-empty': totalPages <= 1 }">
             <nav v-if="totalPages > 1" aria-label="Page navigation">
               <ul class="pagination">
                 <li class="page-item" :class="{ disabled: currentPage === 1 }">
                   <a class="page-link" href="#" aria-label="Previous page" @click.prevent="currentPage = Math.max(1, currentPage - 1)"><svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-chevron-left'"></use></svg></a>
                 </li>
-                <li v-for="p in totalPages" :key="p" class="page-item" :class="{ active: p === currentPage }">
-                  <a class="page-link" href="#" :aria-label="'Page ' + p" :aria-current="p === currentPage ? 'page' : undefined" @click.prevent="currentPage = p">{{ p }}</a>
+                <li v-for="(p, idx) in pageItems" :key="idx" class="page-item" :class="{ active: p === currentPage, ellipsis: p === '…' }">
+                  <span v-if="p === '…'" class="page-link page-ellipsis" aria-hidden="true">…</span>
+                  <a v-else class="page-link" href="#" :aria-label="'Page ' + p" :aria-current="p === currentPage ? 'page' : undefined" @click.prevent="currentPage = p">{{ p }}</a>
                 </li>
                 <li class="page-item" :class="{ disabled: currentPage === totalPages }">
                   <a class="page-link" href="#" aria-label="Next page" @click.prevent="currentPage = Math.min(totalPages, currentPage + 1)"><svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-chevron-right'"></use></svg></a>
@@ -1237,12 +1290,37 @@ onBeforeUnmount(() => {
 }
 /* Link content inside the panel */
 .links-content { padding: 14px; }
+/* Results bar: real window/filter context between the toolbar and the list */
+.library-results {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 7px 14px;
+  background: var(--muted-bg);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+.library-results-count { color: var(--text-h); font-weight: var(--weight-medium); }
+.library-results-context {
+  margin-left: auto;
+  padding: 1px 8px;
+  border-radius: var(--radius-full);
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-weight: var(--weight-semibold);
+}
 /* Pagination = panel footer (no separate card/background) */
 .links-panel .table-footer-control {
   background: transparent;
   border-top: 1px solid var(--border);
   padding: 10px 14px;
   margin: 0;
+}
+/* With a single page there are no page controls, so the footer collapses. */
+.links-panel .table-footer-control.is-empty {
+  border-top: none;
+  padding: 0;
 }
 /* Toolbar layout: Add link on the left, view/sort/filter/export on the right.
    The AddLink root inherits this component's scope, so drop its own card chrome
@@ -1433,6 +1511,20 @@ onBeforeUnmount(() => {
 }
 .row-list.compact { gap: 6px; }
 
+/* Derived time-group headers (row views, newest first): a quiet full-width
+   label that breaks the scan without becoming chrome. Cards stay flat. */
+.group-h {
+  grid-column: 1 / -1;
+  padding: 6px 2px 0;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--muted);
+}
+.row-list.compact .group-h { padding-top: 4px; }
+
+/* Windowed pagination: ellipsis markers are not links. */
+.page-item.ellipsis .page-link { pointer-events: none; color: var(--muted); }
+
 /* Empty states: plain centered content inside the panel (no nested box) */
 .empty-state {
   padding: 36px 20px;
@@ -1459,11 +1551,12 @@ onBeforeUnmount(() => {
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* Card view columns */
-@media (min-width: 768px) {
+/* Card view columns (large-library targets: 2-col from 560, 3-col from 1024,
+   4-col from 1280 on wide desktop content). */
+@media (min-width: 560px) {
   .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
-@media (min-width: 1200px) {
+@media (min-width: 1024px) {
   .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 @media (min-width: 1280px) {

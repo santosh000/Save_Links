@@ -72,8 +72,8 @@ test.describe('Link view responsive layout', () => {
     await setViewMode(page, 'card')
 
     const expected = {
-      1440: 4, 1280: 4, 1200: 3, 1100: 2, 1024: 2, 900: 2, 768: 2,
-      640: 1, 480: 1, 430: 1, 390: 1, 375: 1, 320: 1,
+      1440: 4, 1280: 4, 1200: 3, 1100: 3, 1024: 3, 900: 2, 768: 2,
+      640: 2, 480: 1, 430: 1, 390: 1, 375: 1, 320: 1,
     }
 
     for (const width of WIDTHS) {
