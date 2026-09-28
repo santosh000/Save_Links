@@ -1797,6 +1797,29 @@ onBeforeUnmount(() => {
   justify-content: flex-end;
   min-width: 0;
 }
+
+/* P10 (G2): at >=1024 the controls become ONE horizontally scrollable row like
+   the mockup's filterbar. This removes the tall wrapped toolbar block at
+   1024–1100 without touching the shell, the card grid or any filter behaviour.
+   The <=768 disclosure and the 769–1023 inline wrap are unchanged. */
+@media (min-width: 1024px) {
+  .toolbar-controls {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    justify-content: flex-start;
+    scrollbar-width: none;
+  }
+  .toolbar-controls::-webkit-scrollbar { display: none; }
+  /* The chips are the real flex items on desktop (the .toolbar-filters /
+     .filter-field wrappers are display: contents), so they keep their
+     intrinsic width and overflow into the scroll area instead of compressing. */
+  .toolbar-controls > *,
+  .toolbar-controls :deep(.asel),
+  .toolbar-controls .pinned-toggle {
+    flex-shrink: 0;
+  }
+}
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 
 /* Sorting/filter controls: quiet, borderless — hierarchy from typography + hover */
