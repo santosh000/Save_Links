@@ -18,10 +18,12 @@ const emit = defineEmits(['select-all', 'clear', 'move', 'favorite', 'pin', 'del
 
 // Action-shaped options: '' = the trigger label, '__unfiled' maps to null in
 // App.vue (the same "Unfiled" convention the per-item folder menus use).
+// P4: App passes the indented folder select options ({ value, label }), the
+// same list the per-item menus use.
 const moveOptions = computed(() => [
   { value: '', label: 'Move to…' },
   { value: '__unfiled', label: 'Unfiled' },
-  ...props.folders.map((f) => ({ value: f.id, label: f.name })),
+  ...props.folders,
 ])
 
 function onMove(value) {

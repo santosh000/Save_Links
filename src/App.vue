@@ -3,6 +3,7 @@ import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, toRaw } fro
 import { sortLinks, SORT_OPTIONS, DEFAULT_SORT } from './utils/sort.js'
 import { CATEGORIES } from './utils/categorize.js'
 import { LINK_TYPES, LINK_TYPE_LABELS } from './domain/link.js'
+import { descendantIds, folderPath, folderSelectOptions as buildFolderSelectOptions } from './utils/folderTree.js'
 import { paginationLabel } from './utils/pagination.js'
 import { pickImportSlices } from './utils/backup.js'
 import { getStorageKey } from './utils/environment.js'
@@ -33,7 +34,7 @@ const appVersion = pkg.version
 
 const { links, total, importantCount, mustHaveCount, favoriteCount, byCategory, storageError, addLink, replaceLink, toggleImportant, toggleMustHave, toggleFavorite, togglePin, setStatus, removeLink, updateLink, setLinks, moveLinksFromFolder, mergeLinks, getAnonymousLinksCount, getAnonymousLinks } = useLinks()
 const { profile, updateProfile } = useProfile()
-const { folders, createFolder, renameFolder, deleteFolder, setFolders, mergeFolders, getAnonymousFoldersCount, getAnonymousFolders } = useFolders()
+const { folders, createFolder, renameFolder, moveFolder, deleteFolder, setFolders, mergeFolders, getAnonymousFoldersCount, getAnonymousFolders } = useFolders()
 const { appearance, colorScheme, resolvedAppearance, setAppearance, setColorScheme } = useSettings()
 
 const search = ref('')
@@ -453,15 +454,41 @@ function requestDeleteLink(id) {
 }
 
 function requestDeleteFolder(id) {
+  const folder = folders.value.find((f) => f.id === id)
+  if (!folder) return
+  // P4: delete-subtree semantics — compute the real scope for the confirmation
+  // so nothing is deleted silently (descendants + every link inside them).
+  const subtree = descendantIds(folders.value, id)
+  const folderCount = 1 + subtree.size
+  const ids = new Set([id, ...subtree])
+  const linkCount = links.value.filter((l) => l.folderId && ids.has(l.folderId)).length
+  const scope = folderCount > 1
+    ? `${folderCount} folders`
+    : 'This folder'
   openDialog({
     kind: 'delete-folder', id,
-    title: 'Delete this folder?',
-    message: 'This will remove it from your device and your synced account. Links will move to Unfiled.',
+    title: subtree.size
+      ? `Delete "${folder.name}" and its ${subtree.size} subfolder${subtree.size > 1 ? 's' : ''}?`
+      : `Delete "${folder.name}"?`,
+    message: linkCount
+      ? `${scope} and ${linkCount} link${linkCount > 1 ? 's' : ''} inside will be deleted. This cannot be undone.`
+      : `${scope} will be deleted. This cannot be undone.`,
     buttons: [
       { label: 'Delete', variant: 'danger', value: 'confirm' },
       { label: 'Cancel', variant: 'ghost', value: 'cancel', default: true }
     ]
   })
+}
+
+// P4: delete the folder, all descendant folders, and the links assigned to any
+// of them (already confirmed through AppDialog before this runs).
+async function deleteFolderSubtree(id) {
+  const ids = new Set([id, ...descendantIds(folders.value, id)])
+  const linkIds = links.value.filter((l) => l.folderId && ids.has(l.folderId)).map((l) => l.id)
+  for (const linkId of linkIds) await removeLink(linkId)
+  for (const folderId of ids) deleteFolder(folderId)
+  if (ids.has(filterFolder.value)) filterFolder.value = ''
+  showToast(ids.size > 1 ? `${ids.size} folders deleted` : 'Folder deleted')
 }
 
 function requestImport(payload) { handleImportBackup(payload) }
@@ -485,12 +512,7 @@ function onDialogChoose(value) {
     if (cfg.kind === 'duplicate') handleDuplicateChoice(value)
     else if (cfg.kind === 'delete-link') { if (value === 'confirm') { removeLink(cfg.id); showToast('Link deleted') } }
     else if (cfg.kind === 'delete-folder') {
-      if (value === 'confirm') {
-        deleteFolder(cfg.id)
-        moveLinksFromFolder(cfg.id)
-        if (filterFolder.value === cfg.id) filterFolder.value = ''
-        showToast('Folder deleted')
-      }
+      if (value === 'confirm') deleteFolderSubtree(cfg.id)
     }
     else if (cfg.kind === 'delete-selected') { if (value === 'confirm') bulkDeleteConfirmed() }
     else if (cfg.kind === 'anonymous-sync') handleAnonymousSyncChoice(value)
@@ -553,16 +575,43 @@ async function handleImportBackup(payload) {
   showToast(parts.length ? `Import complete: ${parts.join(', ')}` : 'Import complete: no changes')
 }
 
-function handleCreateFolder(name, done) {
-  try { createFolder(name); showToast('Folder created'); done({ ok: true }) }
-  catch (e) { showToast(e.message || 'Failed'); if (e.message === 'Folder already exists' || e.message === 'Folder name required') done({ ok: false, error: e.message }); else throw e }
+// Folder errors the forms surface inline instead of throwing through the event
+// system (P4 adds the nesting/depth validation messages).
+const FOLDER_ERRORS = new Set([
+  'Folder already exists',
+  'Folder name required',
+  'Parent folder not found',
+  'A folder cannot contain itself',
+  'A folder cannot be moved into its own subfolder',
+  'Maximum folder depth is 4',
+])
+
+function handleCreateFolder(name, parentId, done) {
+  try { createFolder(name, parentId); showToast('Folder created'); done({ ok: true }) }
+  catch (e) { showToast(e.message || 'Failed'); if (FOLDER_ERRORS.has(e.message)) done({ ok: false, error: e.message }); else throw e }
 }
 function handleRenameFolder({ id, name }, done) {
   try { renameFolder(id, name); showToast('Folder renamed'); done({ ok: true }) }
-  catch (e) { showToast(e.message || 'Failed'); if (e.message === 'Folder already exists' || e.message === 'Folder name required') done({ ok: false, error: e.message }); else throw e }
+  catch (e) { showToast(e.message || 'Failed'); if (FOLDER_ERRORS.has(e.message)) done({ ok: false, error: e.message }); else throw e }
+}
+// P4: reparent a folder (null = root). Invalid destinations are already
+// excluded from the picker; this is the runtime guard.
+function handleMoveFolder({ id, parentId }, done) {
+  try { moveFolder(id, parentId); showToast('Folder moved'); done({ ok: true }) }
+  catch (e) { showToast(e.message || 'Failed'); if (FOLDER_ERRORS.has(e.message)) done({ ok: false, error: e.message }); else throw e }
 }
 
 // ---- Filtering / sorting ----
+// P4: selecting a folder includes its whole subtree (derived, never stored).
+const folderFilterIds = computed(() => {
+  const ids = new Set()
+  if (!filterFolder.value || filterFolder.value === '__unfiled') return ids
+  ids.add(filterFolder.value)
+  for (const id of descendantIds(folders.value, filterFolder.value)) ids.add(id)
+  return ids
+})
+// Indented options for the link forms' folder selectors (values stay folder ids).
+const folderSelectOptions = computed(() => buildFolderSelectOptions(folders.value))
 // P3: pinned links surface first, then the existing selected sort order. A
 // stable partition (not a second comparator) keeps every existing sort
 // (newest / oldest / A-Z / Z-A) exactly as it was within each group.
@@ -581,7 +630,7 @@ const filteredLinks = computed(() => {
   return sortedLinks.value.filter(l => {
     if (filterFolder.value) {
       if (filterFolder.value === '__unfiled') { if (l.folderId) return false }
-      else if (l.folderId !== filterFolder.value) return false
+      else if (!folderFilterIds.value.has(l.folderId)) return false
     }
     if (filterCategory.value && l.category !== filterCategory.value) return false
     if (filterType.value && (l.type || 'other') !== filterType.value) return false
@@ -814,7 +863,7 @@ const activeFilterChips = computed(() => {
   if (filterPinned.value) chips.push({ key: 'pinned', label: 'Pinned', clear: () => { filterPinned.value = false } })
   if (filterCategory.value) chips.push({ key: 'category', label: `Category: ${filterCategory.value}`, clear: () => { filterCategory.value = '' } })
   if (filterFolder.value) {
-    const name = filterFolder.value === '__unfiled' ? 'Unfiled' : (folders.value.find(f => f.id === filterFolder.value)?.name || filterFolder.value)
+    const name = filterFolder.value === '__unfiled' ? 'Unfiled' : (folderPath(folders.value, filterFolder.value) || filterFolder.value)
     chips.push({ key: 'folder', label: `Folder: ${name}`, clear: () => { filterFolder.value = '' } })
   }
   return chips
@@ -992,7 +1041,7 @@ onBeforeUnmount(() => {
           <div class="links-panel">
           <!-- Toolbar: "Add link" on the left, view/sort/filter/export on the right -->
           <div class="content-head">
-            <AddLink ref="addLinkEl" :folders="folders" @add="handleAdd" />
+            <AddLink ref="addLinkEl" :folders="folderSelectOptions" @add="handleAdd" />
             <template v-if="hasLinks">
               <div class="toolbar-controls">
                 <div class="view-switch" role="group" aria-label="View mode">
@@ -1144,7 +1193,7 @@ onBeforeUnmount(() => {
             :visible-count="visibleIds.length"
             :all-visible-selected="allVisibleSelected"
             :some-visible-selected="someVisibleSelected"
-            :folders="folders"
+            :folders="folderSelectOptions"
             @select-all="selectVisible"
             @clear="clearSelection"
             @move="bulkMove"
@@ -1178,7 +1227,7 @@ onBeforeUnmount(() => {
                   v-for="link in paginatedLinks"
                   :key="link.id"
                   :link="link"
-                  :folders="folders"
+                  :folders="folderSelectOptions"
                   :selected="isSelected(link.id)"
                   @select="setSelected"
                   @toggle-important="toggleImportant"
@@ -1198,7 +1247,7 @@ onBeforeUnmount(() => {
                   <div v-if="groupLabelAt(i)" class="group-h">{{ groupLabelAt(i) }}</div>
                   <LinkRow
                     :link="link"
-                    :folders="folders"
+                    :folders="folderSelectOptions"
                     :mode="viewMode"
                     :selected="isSelected(link.id)"
                     @select="setSelected"
@@ -1255,8 +1304,9 @@ onBeforeUnmount(() => {
             :folders="folders"
             :links="links"
             :active-view="navView"
-            @create="handleCreateFolder"
-            @rename="handleRenameFolder"
+                          @create="handleCreateFolder"
+                          @rename="handleRenameFolder"
+                          @move="handleMoveFolder"
             @delete="requestDeleteFolder"
             @select="handleSelectFolder"
           />
