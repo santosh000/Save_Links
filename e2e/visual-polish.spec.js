@@ -27,6 +27,7 @@ const tokens = (page) =>
       shadowSm: read('--shadow-sm', 'box-shadow'),
       shadowMd: read('--shadow-md', 'box-shadow'),
       accentBorder: read('--accent-border', 'border-top-color'),
+      sidebarActiveBg: read('--sidebar-active-bg', 'background-color'),
       sm: read('--radius-sm', 'border-top-left-radius'),
       radius: read('--radius', 'border-top-left-radius'),
     }
@@ -58,25 +59,28 @@ test.describe('Visual polish (Step 2C-6)', () => {
     await clearStorage(page)
   })
 
-  test('sidebar active indicator is a straight rail, not a rounded outlined row', async ({ page }) => {
+  test('sidebar active state is the mockup soft accent block (no rail, no shift)', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.goto('/')
     const t = await tokens(page)
 
+    // P7 re-baseline: the mockup marks the active nav row with a soft accent
+    // fill + accent text + filled count pill (supersedes the 2C-6 rail).
     const active = page.locator('.sidebar-menu-link.active')
-    await expect(active).toHaveCSS('border-inline-start-width', '2px')
-    await expect(active).toHaveCSS('border-inline-start-color', t.accent)
-    await expect(active).toHaveCSS('border-start-start-radius', '0px')
-    await expect(active).toHaveCSS('border-end-start-radius', '0px')
-    await expect(active).toHaveCSS('border-start-end-radius', t.sm) // row keeps its own shape
+    await expect(active).toHaveCSS('border-inline-start-width', '0px')
+    await expect(active).toHaveCSS('background-color', t.sidebarActiveBg)
+    await expect(active).toHaveCSS('color', t.accent)
+    await expect(active).toHaveCSS('border-start-start-radius', t.sm)
+    await expect(active).toHaveCSS('border-start-end-radius', t.sm)
     await expect(active).toHaveCSS('min-height', '40px')
-    await expect(active).toHaveCSS('font-weight', '600')
+    await expect(active).toHaveCSS('font-weight', '500')
+    await expect(active).toHaveCSS('padding-left', '10px') // compact mockup row
 
-    // inactive rows reserve the same rail width with no colour (no layout shift)
+    // Inactive rows stay unfilled and muted (no layout shift between rows).
     const inactive = page.locator('.sidebar-menu-link:not(.active)').first()
-    await expect(inactive).toHaveCSS('border-inline-start-width', '2px')
-    await expect(inactive).toHaveCSS('border-inline-start-color', 'rgba(0, 0, 0, 0)')
-    await expect(inactive).toHaveCSS('border-start-start-radius', '0px')
+    await expect(inactive).toHaveCSS('border-inline-start-width', '0px')
+    await expect(inactive).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+    await expect(inactive).toHaveCSS('min-height', '40px')
   })
 
   test('search keycap is a compact key and never affects search geometry', async ({ page }) => {
@@ -87,11 +91,27 @@ test.describe('Visual polish (Step 2C-6)', () => {
     const kbd = page.locator('.navbar-search-kbd')
     await expect(kbd).toBeVisible()
     await expect(kbd).toHaveCSS('border-top-width', '1px')
-    await expect(kbd).toHaveCSS('background-color', t.mutedBg)
-    expect(parseFloat(await kbd.evaluate((el) => getComputedStyle(el).borderRadius))).toBeLessThan(6) // was 10px (pill-like)
-    await expect(kbd).toHaveCSS('color', t.text) // clearer than muted metadata
+    // P7: mockup keycap values (surface + faint text + 11px), still absolutely
+    // positioned so it can never affect search geometry.
+    await expect(kbd).toHaveCSS('background-color', await page.evaluate(() => {
+      const probe = document.createElement('div')
+      probe.style.color = 'var(--card)'
+      document.body.appendChild(probe)
+      const out = getComputedStyle(probe).color
+      probe.remove()
+      return out
+    }))
+    expect(parseFloat(await kbd.evaluate((el) => getComputedStyle(el).borderRadius))).toBeLessThan(6)
+    await expect(kbd).toHaveCSS('color', await page.evaluate(() => {
+      const probe = document.createElement('div')
+      probe.style.color = 'var(--text-subtle)'
+      document.body.appendChild(probe)
+      const out = getComputedStyle(probe).color
+      probe.remove()
+      return out
+    }))
     expect(t.text).not.toBe(t.muted)
-    await expect(kbd).toHaveCSS('font-size', '12px')
+    await expect(kbd).toHaveCSS('font-size', '11px')
     await expect(kbd).toHaveCSS('position', 'absolute') // cannot contribute to layout
     await expect(kbd).toHaveCSS('pointer-events', 'none')
 
@@ -154,13 +174,27 @@ test.describe('Visual polish (Step 2C-6)', () => {
     expect(t.text).not.toBe(t.muted)
 
     const kbd = page.locator('.navbar-search-kbd')
-    await expect(kbd).toHaveCSS('color', t.text)
-    await expect(kbd).toHaveCSS('background-color', t.mutedBg)
+    await expect(kbd).toHaveCSS('color', await page.evaluate(() => {
+      const probe = document.createElement('div')
+      probe.style.color = 'var(--text-subtle)'
+      document.body.appendChild(probe)
+      const out = getComputedStyle(probe).color
+      probe.remove()
+      return out
+    }))
+    await expect(kbd).toHaveCSS('background-color', await page.evaluate(() => {
+      const probe = document.createElement('div')
+      probe.style.color = 'var(--card)'
+      document.body.appendChild(probe)
+      const out = getComputedStyle(probe).color
+      probe.remove()
+      return out
+    }))
     expect(parseFloat(await kbd.evaluate((el) => getComputedStyle(el).borderRadius))).toBeLessThan(6)
 
     const active = page.locator('.sidebar-menu-link.active')
-    await expect(active).toHaveCSS('border-inline-start-color', t.accent)
-    await expect(active).toHaveCSS('border-start-start-radius', '0px')
+    await expect(active).toHaveCSS('color', t.accent)
+    await expect(active).toHaveCSS('background-color', t.sidebarActiveBg)
 
     const search = page.locator('.navbar-search-input')
     await search.focus()
@@ -387,8 +421,9 @@ test.describe('Secondary surfaces (Step 2D)', () => {
     // the group label is quiet supporting text, not an uppercase tracked heading
     const groupLabel = page.locator('.folder-group-label')
     await expect(groupLabel).toHaveCSS('text-transform', 'none')
-    // not tracked: the app's base typography may carry a small negative optical value
-    expect(parseFloat(await groupLabel.evaluate((el) => getComputedStyle(el).letterSpacing))).toBeLessThanOrEqual(0)
+    // not tracked: computed "normal" (the base stack's default) counts as 0
+    const ls = await groupLabel.evaluate((el) => getComputedStyle(el).letterSpacing)
+    expect(Number.isNaN(parseFloat(ls)) ? 0 : parseFloat(ls)).toBeLessThanOrEqual(0)
 
     // create + select a folder: the active row uses the reserved accent rail, no filled block
     await page.getByLabel('New folder name').fill('Work')
@@ -411,7 +446,8 @@ test.describe('Secondary surfaces (Step 2D)', () => {
     for (const sel of ['.local-profile-label', '.online-account-label']) {
       const el = page.locator(sel).first()
       await expect(el).toHaveCSS('text-transform', 'none')
-      expect(parseFloat(await el.evaluate((x) => getComputedStyle(x).letterSpacing))).toBeLessThanOrEqual(0)
+      const ls = await el.evaluate((x) => getComputedStyle(x).letterSpacing)
+      expect(Number.isNaN(parseFloat(ls)) ? 0 : parseFloat(ls)).toBeLessThanOrEqual(0)
     }
   })
 })

@@ -243,67 +243,53 @@ test.describe('Folders, Appearance, Color Schemes, Backup v2', () => {
     await page.getByLabel('Dark theme').click()
     await expect(page.locator('html')).toHaveAttribute('data-appearance', 'dark')
 
-    // --- Ocean dark: neutral surfaces + indigo accent ---
+    // --- Ocean dark: the mockup's slate surfaces + scheme accent ---
     await page.getByLabel('Ocean color scheme').click()
     await expect(page.locator('html')).toHaveAttribute('data-color-scheme', 'ocean')
-    // toRgb handles both "#rrggbb" tokens and resolved "rgb(r, g, b)"
-    const toRgb = (v) => {
-      const hex = v.trim().match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i)
-      if (hex) return hex.slice(1).map((h) => parseInt(h, 16))
-      const parts = v.match(/\d+(?:\.\d+)?/g)
-      if (!parts || parts.length < 3) throw new Error(`unparseable color: ${v}`)
-      return parts.slice(0, 3).map(Number)
-    }
-    const assertNeutral = (v, label) => {
-      const [r, g, b] = toRgb(v)
-      expect({ label, v, r, g, b, d1: Math.abs(g - r), d2: Math.abs(g - b) }).toBeDefined()
-      expect(Math.abs(g - r), `${label}=${v}`).toBeLessThanOrEqual(7)
-      expect(Math.abs(g - b), `${label}=${v}`).toBeLessThanOrEqual(7)
-    }
     const readVar = (name) =>
       page.evaluate((n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim(), name)
 
-    for (const v of ['--bg', '--card', '--muted-bg', '--border']) {
-      assertNeutral(await readVar(v), v)
-    }
+    // P7 re-baseline: the supplied mockup is the authoritative dark palette
+    // (exact token values — supersedes the earlier neutral-black heuristic).
+    expect(await readVar('--bg')).toBe('#0B0E14')
+    expect(await readVar('--card')).toBe('#12161F')
+    expect(await readVar('--muted-bg')).toBe('#1A1F2B')
+    expect(await readVar('--border')).toBe('#232A38')
 
-    // Accent is still the scheme colour — not neutral
+    // Accent is still the scheme colour — not a surface tint
     const oceanAccent = await readVar('--accent')
     expect(oceanAccent).toBe('#7C8CF2')
 
-    // Sidebar background is neutral (scheme no longer tints it).
+    // Sidebar background is the mockup's raised dark surface, untinted by the scheme.
     // .sidebar-wrapper has `transition: all 0.3s`, so poll until it settles.
     await expect
       .poll(() =>
         page.evaluate(() => getComputedStyle(document.querySelector('.sidebar-wrapper')).backgroundColor)
       )
-      .toBe('rgb(0, 0, 0)')
+      .toBe('rgb(18, 22, 31)')
     const sidebarBg = await page.evaluate(() =>
       getComputedStyle(document.querySelector('.sidebar-wrapper')).backgroundColor
     )
-    assertNeutral(sidebarBg, 'sidebar (ocean)')
+    expect(sidebarBg).toBe('rgb(18, 22, 31)')
 
-    // --- Forest dark: surfaces still neutral, accent is forest green ---
+    // --- Forest dark: same surfaces, accent is forest green ---
     await page.getByLabel('Forest color scheme').click()
-    for (const v of ['--bg', '--card', '--muted-bg', '--border']) {
-      assertNeutral(await readVar(v))
-    }
+    expect(await readVar('--bg')).toBe('#0B0E14')
+    expect(await readVar('--card')).toBe('#12161F')
+    expect(await readVar('--muted-bg')).toBe('#1A1F2B')
+    expect(await readVar('--border')).toBe('#232A38')
     const forestAccent = await readVar('--accent')
     expect(forestAccent).toBe('#62A982')
     await expect
       .poll(() =>
         page.evaluate(() => getComputedStyle(document.querySelector('.sidebar-wrapper')).backgroundColor)
       )
-      .toBe('rgb(0, 0, 0)')
-    const forestSidebarBg = await page.evaluate(() =>
-      getComputedStyle(document.querySelector('.sidebar-wrapper')).backgroundColor
-    )
-    assertNeutral(forestSidebarBg, 'sidebar (forest)')
+      .toBe('rgb(18, 22, 31)')
 
-    // --- Light mode unchanged: soft near-white canvas, white card ---
+    // --- Light mode: the mockup's soft slate canvas, white card ---
     await page.getByLabel('Light theme').click()
     expect(await readVar('--card')).toBe('#FFFFFF')
-    expect(await readVar('--bg')).toBe('#F6F6F7') // not dark's black
+    expect(await readVar('--bg')).toBe('#F8FAFC')
   })
 
   test('Backup v2 export/import and v1 migrate, invalid rejected', async ({ page }) => {
