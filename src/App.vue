@@ -28,6 +28,7 @@ import LinkRow from './components/LinkRow.vue'
 import AppSelect from './components/AppSelect.vue'
 import BulkActionBar from './components/BulkActionBar.vue'
 import CommandPalette from './components/CommandPalette.vue'
+import LinkDetailPanel from './components/LinkDetailPanel.vue'
 import pkg from '../package.json'
 
 const appVersion = pkg.version
@@ -95,8 +96,37 @@ function onCommandShortcutKeydown(e) {
   commandOpen.value = true
 }
 
-onMounted(() => document.addEventListener('keydown', onCommandShortcutKeydown))
-onBeforeUnmount(() => document.removeEventListener('keydown', onCommandShortcutKeydown))
+// Escape closes the inspected link (desktop rail + mobile/tablet sheet). The
+// command palette and AppDialog swallow their own Escape before it reaches the
+// document, and the guards below keep those layers authoritative.
+function onGlobalEscapeKeydown(e) {
+  if (e.key !== 'Escape') return
+  if (commandOpen.value || dialog.value) return
+  if (detailOpen.value) closeDetail()
+}
+
+// P5: the detail presentation follows the approved shell boundary (>=1200 is
+// the desktop shell with the permanent sidebar; below that the sidebar is a
+// drawer and the detail opens as a mockup sheet). CSS owns the visuals; this
+// flag only selects the sheet/rail behaviour (role, backdrop, drag, focus).
+const isDesktopShell = ref(false)
+let shellMq = null
+function onShellMqChange(e) { isDesktopShell.value = e.matches }
+
+onMounted(() => {
+  document.addEventListener('keydown', onCommandShortcutKeydown)
+  document.addEventListener('keydown', onGlobalEscapeKeydown)
+  if (typeof window.matchMedia === 'function') {
+    shellMq = window.matchMedia('(min-width: 1200px)')
+    isDesktopShell.value = shellMq.matches
+    shellMq.addEventListener('change', onShellMqChange)
+  }
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', onCommandShortcutKeydown)
+  document.removeEventListener('keydown', onGlobalEscapeKeydown)
+  if (shellMq) shellMq.removeEventListener('change', onShellMqChange)
+})
 const filterCategory = ref('')
 const filterStatus = ref('')
 const filterFolder = ref('')
@@ -750,6 +780,21 @@ watch(links, (list) => {
 
 function selectedLinks() { return links.value.filter((l) => selectedIds.value.has(l.id)) }
 
+// ---- Link detail panel (P5) ----
+// Inspection state is deliberately separate from bulk selection: a link can be
+// checked for bulk actions without becoming the inspected link, selecting a
+// different link replaces the inspected one, and neither Set represents the
+// other. The panel renders exactly one record; the library stays paginated.
+const detailId = ref(null)
+const detailLink = computed(() => (detailId.value ? links.value.find((l) => l.id === detailId.value) || null : null))
+const detailOpen = computed(() => !!detailLink.value)
+function openDetail(id) { detailId.value = id }
+function closeDetail() { detailId.value = null }
+// Drop the inspected link when it no longer exists (delete, import, reconcile).
+watch(links, (list) => {
+  if (detailId.value && !list.some((l) => l.id === detailId.value)) detailId.value = null
+})
+
 function bulkToggleFavorite() {
   const sel = selectedLinks()
   if (!sel.length) return
@@ -969,7 +1014,7 @@ onBeforeUnmount(() => {
     </aside>
 
     <!-- Main wrapper -->
-    <div class="main-wrapper">
+    <div class="main-wrapper" :class="{ 'has-detail': detailOpen }">
       <!-- Navbar -->
       <nav class="navbar-custom" :class="{ 'is-searching': searchOpen }">
         <div class="navbar-left">
@@ -1230,6 +1275,7 @@ onBeforeUnmount(() => {
                   :folders="folderSelectOptions"
                   :selected="isSelected(link.id)"
                   @select="setSelected"
+                  @inspect="openDetail"
                   @toggle-important="toggleImportant"
                   @toggle-must-have="toggleMustHave"
                   @toggle-favorite="toggleFavorite"
@@ -1251,6 +1297,7 @@ onBeforeUnmount(() => {
                     :mode="viewMode"
                     :selected="isSelected(link.id)"
                     @select="setSelected"
+                    @inspect="openDetail"
                     @toggle-important="toggleImportant"
                     @toggle-must-have="toggleMustHave"
                     @toggle-favorite="toggleFavorite"
@@ -1420,6 +1467,25 @@ onBeforeUnmount(() => {
       :bio="profile.bio"
       @save="saveLocalProfile"
       @close="closeLocalProfile"
+    />
+
+    <!-- P5: inspection surface — fixed rail >=1200, sheet below (mockup) -->
+    <LinkDetailPanel
+      :open="detailOpen"
+      :link="detailLink"
+      :folders="folders"
+      :folder-options="folderSelectOptions"
+      :overlay="!isDesktopShell"
+      @close="closeDetail"
+      @edit="handleEdit"
+      @copy="handleCopyLink"
+      @share="handleShareLink"
+      @delete="requestDeleteLink"
+      @pin="togglePin"
+      @favorite="toggleFavorite"
+      @important="toggleImportant"
+      @must-have="toggleMustHave"
+      @move="handleSetFolder"
     />
     <AppDialog
       :open="!!dialog"
@@ -1854,6 +1920,43 @@ onBeforeUnmount(() => {
 /* List/Compact view columns */
 @media (min-width: 1100px) {
   .row-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* P5 detail rail (>=1200): reserve the mockup's third column by insetting the
+   content wrapper, and let the grids reflow from the reduced content width
+   (mockup: card grid caps at 3 columns next to the rail). Below 1200 the detail
+   is an overlay sheet, so no reflow is needed. */
+@media (min-width: 1200px) {
+  .main-wrapper.has-detail { margin-right: var(--detail-width); }
+}
+@media (min-width: 1200px) and (max-width: 1439px) {
+  .main-wrapper.has-detail .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .main-wrapper.has-detail .row-list { grid-template-columns: 1fr; }
+}
+@media (min-width: 1440px) {
+  .main-wrapper.has-detail .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (min-width: 1500px) {
+  .main-wrapper.has-detail .row-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* With the rail open the content column narrows: below ~1680px the three-column
+   navbar can no longer hold the 480px search and the identity control on one
+   line, so it wraps with the same recipe the tablet shell uses (search on its
+   own row, actions right-aligned). Above that, let the identity shrink instead
+   of clipping at the rail edge. */
+@media (min-width: 1200px) and (max-width: 1679px) {
+  .main-wrapper.has-detail .navbar-custom {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+  }
+  .main-wrapper.has-detail .navbar-actions { margin-left: auto; }
+  .main-wrapper.has-detail .navbar-search-wrapper { order: 3; width: 100%; max-width: 100%; }
+}
+@media (min-width: 1200px) {
+  .main-wrapper.has-detail .navbar-actions,
+  .main-wrapper.has-detail .navbar-actions > * { min-width: 0; }
 }
 
 /* Content header: the page title and its dynamic count share one row at every

@@ -18,7 +18,7 @@ const props = defineProps({
   mode: { type: String, default: 'list' }, // 'list' | 'compact'
   selected: { type: Boolean, default: false }
 })
-const emit = defineEmits(['toggle-important', 'toggle-must-have', 'toggle-favorite', 'toggle-pin', 'set-status', 'delete', 'edit', 'set-folder', 'copy', 'share', 'select'])
+const emit = defineEmits(['toggle-important', 'toggle-must-have', 'toggle-favorite', 'toggle-pin', 'set-status', 'delete', 'edit', 'set-folder', 'copy', 'share', 'select', 'inspect'])
 
 // Quick-action menu (Open / Copy link / Share / Category / Folder / Delete):
 // the same anchored-popover infrastructure and neutral menu surface as LinkCard
@@ -48,6 +48,17 @@ function changeCategory(value) { emit('edit', props.link.id, { category: value }
 function changeFolder(value) { emit('set-folder', props.link.id, value); closeMore() }
 function copyLink() { emit('copy', props.link.id); closeMore() }
 function shareLink() { emit('share', props.link.id); closeMore() }
+
+// P5: clicking the row body (anywhere that is not an existing control or the
+// row link) opens the detail panel; every control keeps its own behaviour.
+function onInspectClick(e) {
+  if (e.target.closest('a, button, input, select, label')) return
+  emit('inspect', props.link.id)
+}
+function inspectFromMenu() {
+  closeMore()
+  emit('inspect', props.link.id)
+}
 async function deleteLink() {
   // Close first (restoring focus to the trigger) so the existing confirmation
   // dialog can restore focus to something that still exists afterwards.
@@ -106,7 +117,7 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
 </script>
 
 <template>
-  <article class="link-row" :class="[mode, { editing, selected }]">
+  <article class="link-row" :class="[mode, { editing, selected }]" @click="onInspectClick">
     <label class="row-check">
       <input
         type="checkbox"
@@ -191,6 +202,10 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>
             <span>Open</span>
           </a>
+          <button type="button" class="more-item" @click="inspectFromMenu">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 16v-5"/><path d="M12 8v.2"/></svg>
+            <span>Details</span>
+          </button>
           <button type="button" class="more-item" @click="copyLink">
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
             <span>Copy link</span>
@@ -263,6 +278,7 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
   min-width: 0;
   max-width: 100%;
   box-sizing: border-box;
+  cursor: pointer;
 }
 @media (hover: hover) and (pointer: fine){
 .link-row:hover { border-color: var(--accent-border); box-shadow: var(--shadow-sm); }
