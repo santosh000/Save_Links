@@ -181,6 +181,8 @@
     --sidebar-width: 260px;
     /* P5 detail rail width (mockup --detail-w; 380px >=1280 below) */
     --detail-width: 360px;
+    /* P8: shell topbar height (mockup --topbar-h; 56px >=768 below) */
+    --navbar-height: 52px;
 }
 
 /* ---- Appearance: dark (mockup #0b0e14 family, scheme-independent) ---- */
@@ -398,6 +400,8 @@ body{
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     overscroll-behavior: none;
+    /* P8: the application viewport never scrolls; each shell column does. */
+    overflow: hidden;
 }
 
 /* While a dialog/panel backdrop is mounted the document behind it must not
@@ -476,6 +480,7 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
 --------------------------------------------------------------------- */
 .sidebar-wrapper{
     width: var(--sidebar-width);
+    max-width: 85vw;
     background-color: var(--sidebar-bg);
     height: 100vh;
     position: fixed;
@@ -486,7 +491,33 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
     flex-direction: column;
     padding: var(--space-5) var(--space-3) var(--space-4);
     border-right: 1px solid var(--sidebar-border);
-    transition: all var(--transition-slow);
+    transform: translateX(-100%);
+    transition: transform var(--transition-slow), background-color var(--transition-slow);
+}
+
+/* Drawer open (<1024) */
+.sidebar-wrapper.show{
+    transform: translateX(0);
+    box-shadow: var(--shadow-lg);
+}
+
+/* P8: >=1024 the sidebar is the shell grid's static first column and the
+   mockup hides its head there (the topbar carries the brand). */
+@media (min-width: 1024px){
+    .sidebar-wrapper{
+        position: static;
+        transform: none;
+        height: auto;
+        min-height: 0;
+        grid-column: 1;
+        grid-row: 2;
+        width: auto;
+        max-width: none;
+        box-shadow: none;
+    }
+    .sidebar-overlay{
+        display: none;
+    }
 }
 
 /* Sidebar scroller: the menu area takes the remaining height and scrolls
@@ -642,37 +673,50 @@ body.sidebar-minimized .sidebar-menu-link .bi{
 }
 
 /* ---------------------------------------------------------------------
-   5. Main Wrapper Layout
+   5. Main Wrapper Layout (P8: the content column; its own scroll container)
 --------------------------------------------------------------------- */
 .main-wrapper{
-    margin-left: var(--sidebar-width);
+    margin-left: 0;
     padding: 2rem 2.5rem;
-    min-height: 100vh;
-    min-height: 100dvh;
     transition: all var(--transition-slow);
     display: flex;
     flex-direction: column;
 }
 
 /* ---------------------------------------------------------------------
-   6. Custom Header / Navbar Component
+   6. Custom Header / Navbar Component (P8: one full-width topbar row)
+   Below 1024 it is a single sticky row inside the content scroller; at
+   >=1024 it is row 1 of the shell grid, spanning every column.
 --------------------------------------------------------------------- */
 .navbar-custom{
     position: sticky;
     top: 0;
     z-index: var(--z-sticky);
     background-color: var(--card);
-    margin-top: -2rem;
-    margin-left: -2.5rem;
-    margin-right: -2.5rem;
-    padding: 8px 2.5rem;
     border-bottom: 1px solid var(--border);
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 480px) minmax(0, 1fr);
+    display: flex;
+    flex-wrap: nowrap;
     align-items: center;
-    margin-bottom: 1.5rem;
-    min-height: 52px;
-    gap: var(--space-4);
+    gap: var(--space-2);
+    padding: 8px 12px;
+    min-height: var(--navbar-height);
+    flex-shrink: 0;
+}
+@media (min-width: 768px){
+    .navbar-custom{
+        padding: 8px 16px;
+        gap: var(--space-3);
+    }
+}
+@media (min-width: 1024px){
+    .navbar-custom{
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 480px) minmax(0, 1fr);
+        grid-column: 1 / -1;
+        grid-row: 1;
+        padding: 8px 1.25rem;
+        gap: var(--space-4);
+    }
 }
 
 .navbar-left{
@@ -680,12 +724,13 @@ body.sidebar-minimized .sidebar-menu-link .bi{
     align-items: center;
     gap: var(--space-3);
     min-width: 0;
+    flex-shrink: 0;
 }
 
-/* Brand inside the top bar. Only the mobile shell shows it (the sidebar carries
-   the brand on desktop/tablet), so it is hidden above the mobile breakpoint. */
+/* Brand in the topbar (mockup .brand): visible at every width. At >=1024 the
+   sidebar head is hidden, so this is the shell's identity. */
 .mobile-brand{
-    display: none;
+    display: inline-flex;
     align-items: center;
     gap: var(--space-2);
     min-width: 0;
@@ -938,94 +983,55 @@ body.sidebar-minimized .sidebar-menu-link .bi{
     }
 }
 
-@media (max-width: 1200px) {
-    .sidebar-wrapper{
-        transform: translateX(-100%);
-    }
-
-    .sidebar-wrapper.show{
-        transform: translateX(0);
-        box-shadow: var(--shadow-lg);
-    }
-
-    .main-wrapper{
-        margin-left: 0;
-        padding: 1.5rem 1.5rem;
-    }
-
-    .sidebar-toggle-btn{
-        display: flex;
-    }
-
-    .navbar-search-wrapper{
-        order: 3;
-        max-width: 100%;
-        width: 100%;
-        margin-top: 0.5rem;
-    }
-
-    /* Below the desktop breakpoint the navbar is a wrapped flex row instead of
-       the three-column grid, so the free space on the first line has to be
-       handed to the actions: this keeps the account/utility controls in the
-       right-hand position the grid gives them (and that they keep on mobile). */
-    .navbar-actions{
-        margin-left: auto;
-    }
-
-    .navbar-custom{
-        display: flex;
-        margin-top: -1.5rem;
-        margin-left: -1.5rem;
-        margin-right: -1.5rem;
-        padding: 8px 1.5rem;
-        flex-wrap: wrap;
-        gap: var(--space-3);
+/* P8: mockup topbar height from the tablet breakpoint */
+@media (min-width: 768px) {
+    :root {
+        --navbar-height: 56px;
     }
 }
 
-/* Mobile bottom navigation (Links · Folders · Add · More): the primary
-   destinations of the mobile shell. Hidden above the mobile breakpoint —
-   desktop and tablet keep the sidebar, so the bar never duplicates it. */
+@media (max-width: 1200px) {
+    .main-wrapper{
+        padding: 1.5rem 1.5rem;
+    }
+}
+
+/* Mobile bottom navigation (All · Favorites · Folders · More): the mockup's
+   primary destinations, shown for the whole <1024 drawer/mobile band. */
 .bottom-nav{
     display: none;
 }
 
-@media (max-width: 768px) {
-    .page-header{
-        flex-direction: column;
-        align-items: flex-start;
-        gap: var(--space-4);
+/* ---------------------------------------------------------------------
+   P8 responsive shell:
+   · <1024  : drawer sidebar + sticky single-row topbar + bottom bar + FAB
+   · >=1024 : static three-column grid (sidebar · content · detail), topbar row
+--------------------------------------------------------------------- */
+@media (max-width: 1023px) {
+    .main-wrapper{
+        padding: 1.5rem 1.5rem;
+        /* The fixed bottom bar + FAB own the bottom edge of the screen. */
+        padding-bottom: calc(var(--bottom-nav-height) + var(--safe-area-bottom) + var(--space-5));
     }
 
-    /* The mobile shell replaces the drawer with the bottom bar: the sidebar,
-       its toggle and its overlay are not part of the mobile navigation. */
-    .sidebar-wrapper,
-    .sidebar-overlay,
-    .sidebar-toggle-btn{
-        display: none;
+    .navbar-actions{
+        margin-left: auto;
     }
 
-    .navbar-custom{
-        padding-top: calc(1rem + var(--safe-area-top));
+    .navbar-search-wrapper{
+        flex: 1 1 auto;
+        width: auto;
+        min-width: 0;
     }
 
-    .mobile-brand{
-        display: inline-flex;
-    }
-
-    /* One Add entry point on mobile: the Add item in the bottom bar. */
+    /* One Add entry point in this band: the floating action. */
     .btn-date-picker{
         display: none;
     }
 
-    /* The top bar stays brand · search · profile (no fullscreen utility). */
+    /* The topbar stays brand · search · profile (no fullscreen utility). */
     #btn-fullscreen{
         display: none;
-    }
-
-    /* Keep the fixed bar from covering the end of the page (pagination, footer). */
-    .main-wrapper{
-        padding-bottom: calc(var(--bottom-nav-height) + var(--safe-area-bottom) + var(--space-5));
     }
 
     .bottom-nav{
@@ -1042,6 +1048,26 @@ body.sidebar-minimized .sidebar-menu-link .bi{
         padding-bottom: calc(var(--space-1) + var(--safe-area-bottom));
         background-color: var(--card);
         border-top: 1px solid var(--border);
+    }
+}
+
+/* The drawer toggle exists in the tablet band only; the mobile shell opens the
+   same drawer from its More item so the topbar stays brand · search · profile. */
+@media (min-width: 768px) and (max-width: 1023px) {
+    .sidebar-toggle-btn{
+        display: flex;
+    }
+}
+
+@media (max-width: 768px) {
+    .page-header{
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--space-4);
+    }
+
+    .navbar-custom{
+        padding-top: calc(8px + var(--safe-area-top));
     }
 }
 

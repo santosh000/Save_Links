@@ -117,7 +117,7 @@ onMounted(() => {
   document.addEventListener('keydown', onCommandShortcutKeydown)
   document.addEventListener('keydown', onGlobalEscapeKeydown)
   if (typeof window.matchMedia === 'function') {
-    shellMq = window.matchMedia('(min-width: 1200px)')
+    shellMq = window.matchMedia('(min-width: 1024px)')
     isDesktopShell.value = shellMq.matches
     shellMq.addEventListener('change', onShellMqChange)
   }
@@ -143,7 +143,8 @@ function readViewMode() {
     const raw = localStorage.getItem(getStorageKey('viewMode'))
     if (raw && VIEW_MODES.includes(raw)) return raw
   } catch { /* storage unavailable (tests/private mode): default is fine */ }
-  return 'card'
+  // P8 (mockup default): the library opens in the dense Compact presentation.
+  return 'compact'
 }
 const viewMode = ref(readViewMode())
 function setViewMode(m) {
@@ -156,29 +157,21 @@ function setViewMode(m) {
 const currentView = ref('links')
 const sidebarOpen = ref(false)
 
-// Mobile bottom navigation: "More" is a menu of the secondary destinations the
-// desktop sidebar keeps under "Tools" — not a fifth destination of its own.
+// P8: the drawer carries the secondary destinations the mockup keeps behind
+// the topbar menu / "More" item (the sidebar's Tools group).
 const MORE_VIEWS = ['settings', 'backup', 'about']
-const moreOpen = ref(false)
-const moreTriggerEl = ref(null)
-const moreMenuEl = ref(null)
-const moreActive = computed(() => MORE_VIEWS.includes(currentView.value))
+const drawerActive = computed(() => sidebarOpen.value || MORE_VIEWS.includes(currentView.value))
+function openDrawer() { sidebarOpen.value = true }
 
-function toggleMore() { moreOpen.value = !moreOpen.value }
-function closeMore() { moreOpen.value = false }
-function closeMoreFromKey() {
-  moreOpen.value = false
-  moreTriggerEl.value?.focus()
-}
+function go(view) { currentView.value = view; sidebarOpen.value = false }
 
-useAnchoredPopover({
-  trigger: moreTriggerEl,
-  popover: moreMenuEl,
-  isOpen: moreOpen,
-  onOutside: closeMore,
-})
-
-function go(view) { currentView.value = view; sidebarOpen.value = false; moreOpen.value = false }
+// P8 bottom navigation: real SaveLink destinations/filters only. All/Favorites
+// drive the existing filter state (no new filtering model); Folders is the real
+// Folders view; More opens the real navigation drawer.
+function showAllLinks() { filterStatus.value = ''; filterFolder.value = ''; go('links') }
+function showFavorites() { filterStatus.value = 'favorite'; filterFolder.value = ''; go('links') }
+const allLinksActive = computed(() => currentView.value === 'links' && filterStatus.value !== 'favorite')
+const favoritesActive = computed(() => currentView.value === 'links' && filterStatus.value === 'favorite')
 
 // Desktop sidebar minimize + fullscreen toggle
 const sidebarMinimized = ref(false)
@@ -958,10 +951,15 @@ onBeforeUnmount(() => {
 
     <!-- Sidebar -->
     <aside class="sidebar-wrapper" id="sidebar" :class="{ show: sidebarOpen }">
-      <a href="#" class="sidebar-brand" @click.prevent="go('links')">
-        <img src="/logo.png" alt="Save Links logo" width="30" height="30" />
-        <span>Save <span class="brand-accent">Links</span></span>
-      </a>
+      <div class="sidebar-head">
+        <a href="#" class="sidebar-brand" @click.prevent="go('links')">
+          <img src="/logo.png" alt="Save Links logo" width="30" height="30" />
+          <span>Save <span class="brand-accent">Links</span></span>
+        </a>
+        <button type="button" class="sidebar-close" aria-label="Close navigation" @click="sidebarOpen = false">
+          <svg class="ui-icon ui-icon-lg" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
 
       <div class="sidebar-menu-scroll">
         <!-- Group: Menu -->
@@ -1013,8 +1011,7 @@ onBeforeUnmount(() => {
 
     </aside>
 
-    <!-- Main wrapper -->
-    <div class="main-wrapper" :class="{ 'has-detail': detailOpen }">
+    <!-- Navbar (P8: the shell's full-width top row, outside the content scroller) -->
       <!-- Navbar -->
       <nav class="navbar-custom" :class="{ 'is-searching': searchOpen }">
         <div class="navbar-left">
@@ -1071,6 +1068,8 @@ onBeforeUnmount(() => {
         </div>
       </nav>
 
+    <!-- Main wrapper (P8: the content column; its own scroll container) -->
+    <div class="main-wrapper" :class="{ 'has-detail': detailOpen }">
       <!-- Page Header -->
       <div class="page-header">
         <div>
@@ -1391,20 +1390,29 @@ onBeforeUnmount(() => {
       </footer>
     </div>
 
-    <!-- Mobile bottom navigation: the primary destinations of the mobile shell
-         (Links · Folders · Add · More), hidden above the mobile breakpoint by CSS.
-         Every item routes through the existing go() / openAddLink() state — the
-         bar is another entry point, not a second navigation system. -->
+    <!-- Bottom navigation (P8 mockup shell: bound to the real <1024 layout).
+         Every item is a real SaveLink destination or the existing filter state;
+         Add is the single floating action (no duplicate Add control). -->
     <nav class="bottom-nav" aria-label="Primary">
       <button
         type="button"
         class="bottom-nav-item"
-        :class="{ active: currentView === 'links' }"
-        :aria-current="currentView === 'links' ? 'page' : null"
-        @click="go('links')"
+        :class="{ active: allLinksActive }"
+        :aria-current="allLinksActive ? 'page' : null"
+        @click="showAllLinks"
       >
           <svg class="ui-icon ui-icon-xl" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/></svg>
-          <span>Links</span>
+          <span>All</span>
+      </button>
+      <button
+        type="button"
+        class="bottom-nav-item"
+        :class="{ active: favoritesActive }"
+        :aria-current="favoritesActive ? 'page' : null"
+        @click="showFavorites"
+      >
+          <svg class="ui-icon ui-icon-xl" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21C7 16.8 3 13.6 3 9.6 3 7 5 5 7.4 5c1.8 0 3.4 1 4.6 2.6C13.2 6 14.8 5 16.6 5 19 5 21 7 21 9.6c0 4-4 7.2-9 11.4z"/></svg>
+          <span>Favorites</span>
       </button>
       <button
         type="button"
@@ -1416,45 +1424,30 @@ onBeforeUnmount(() => {
           <svg class="ui-icon ui-icon-xl" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>
           <span>Folders</span>
       </button>
-      <button type="button" class="bottom-nav-item" @click="openAddLink($event.currentTarget)">
-          <svg class="ui-icon ui-icon-xl" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
-          <span>Add</span>
-      </button>
       <button
         type="button"
-        ref="moreTriggerEl"
         class="bottom-nav-item"
-        :class="{ active: moreActive }"
-        aria-controls="more-menu"
-        :aria-expanded="String(moreOpen)"
-        @click="toggleMore"
-        @keydown.esc="closeMoreFromKey"
+        :class="{ active: drawerActive }"
+        :aria-current="drawerActive ? 'page' : null"
+        aria-controls="sidebar"
+        :aria-expanded="String(sidebarOpen)"
+        @click="openDrawer"
       >
           <svg class="ui-icon ui-icon-xl" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
           <span>More</span>
       </button>
     </nav>
 
-    <!-- More menu: the secondary destinations (the sidebar's "Tools" group),
-         anchored to the More item by src/utils/anchoredPopover.js. -->
-    <Teleport to="body">
-      <Transition name="fade-down">
-        <div v-if="moreOpen" id="more-menu" ref="moreMenuEl" class="more-menu anchored-popover" @keydown.esc="closeMoreFromKey">
-          <button type="button" class="more-item" :class="{ active: currentView === 'settings' }" @click="go('settings')">
-            <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-            <span>Settings</span>
-          </button>
-          <button type="button" class="more-item" :class="{ active: currentView === 'backup' }" @click="go('backup')">
-            <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
-            <span>Backup &amp; restore</span>
-          </button>
-          <button type="button" class="more-item" :class="{ active: currentView === 'about' }" @click="go('about')">
-            <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
-            <span>About</span>
-          </button>
-        </div>
-      </Transition>
-    </Teleport>
+    <!-- Floating Add action (P8 mockup shell): the single Add entry point
+         below the desktop grid; opens the one shared add-link form. -->
+    <button
+      type="button"
+      class="fab"
+      aria-label="Add link"
+      @click="openAddLink($event.currentTarget)"
+    >
+      <svg class="ui-icon ui-icon-xl" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+    </button>
 
       <!-- ===== Panels & Dialog ===== -->
       <CommandPalette
@@ -1513,9 +1506,102 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/* ---------------------------------------------------------------------
+   P8 shell — the mockup's single-application-viewport model.
+   Below 1024: flex column (topbar · content · bottom bar); at >=1024 the
+   mockup's three-column grid (static sidebar · content · static detail rail)
+   with the topbar spanning every column. The window never scrolls; each
+   column owns its own scroller (sidebar, .main-wrapper, detail scroll).
+--------------------------------------------------------------------- */
 .app {
-  min-height: 100vh;
-  min-height: 100dvh;
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.main-wrapper {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+@media (min-width: 1024px) {
+  .app {
+    display: grid;
+    grid-template-columns: var(--sidebar-width) minmax(0, 1fr) var(--detail-width);
+    grid-template-rows: var(--navbar-height) minmax(0, 1fr);
+  }
+  .main-wrapper {
+    grid-column: 2;
+    grid-row: 2;
+    margin-left: 0;
+    padding: 1.25rem;
+  }
+}
+
+/* Sidebar head (drawer): brand + close. Hidden on the desktop grid where the
+   sidebar is permanent and the topbar carries the brand (mockup .sidebar-head). */
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-5);
+}
+@media (min-width: 1024px) {
+  .sidebar-head { display: none; }
+}
+.sidebar-close {
+  flex-shrink: 0;
+  width: var(--control-height-sm);
+  height: var(--control-height-sm);
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+@media (hover: hover) and (pointer: fine){
+.sidebar-close:hover { background: var(--muted-bg); color: var(--text-h); }
+}
+.sidebar-close:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 1px; }
+
+/* Floating Add (mockup .fab): the single Add entry point below the desktop
+   grid; sits above the bottom bar and clears the safe area. */
+.fab {
+  position: fixed;
+  right: 16px;
+  bottom: calc(var(--bottom-nav-height) + var(--safe-area-bottom) + 16px);
+  width: 54px;
+  height: 54px;
+  border-radius: var(--radius-full);
+  border: none;
+  background: var(--accent);
+  color: var(--on-accent);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-lg);
+  z-index: calc(var(--z-sticky) + 1);
+  cursor: pointer;
+  transition: background var(--transition-fast), transform var(--transition-fast);
+}
+.fab svg { width: 22px; height: 22px; }
+@media (hover: hover) and (pointer: fine){
+.fab:hover { background: var(--accent-hover); }
+}
+.fab:active { transform: scale(.94); }
+.fab:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 2px; }
+@media (max-width: 1023px) {
+  .fab { display: flex; }
 }
 
 /* Intentional reading width: page header, content and footer stay centered on
@@ -1597,7 +1683,9 @@ onBeforeUnmount(() => {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  overflow: hidden;
+  /* Visible, not hidden: the sticky group headers must stick to the content
+     scroller (.main-wrapper), and overflow:hidden would become their scrollport. */
+  overflow: visible;
 }
 /* Toolbar = panel header (no card chrome of its own) */
 .content-head {
@@ -1881,8 +1969,9 @@ onBeforeUnmount(() => {
 .row-list.compact { gap: 0; }
 
 /* Derived time-group headers (row views, newest first): the mockup's uppercase
-   micro-label on the page canvas, separating the scan without card chrome.
-   (Not sticky: SaveLink scrolls the window, not an inner list scroller.) */
+   micro-label on the page canvas, sticky against the content scroller. Below
+   the desktop grid the topbar is sticky inside the same scroller, so the
+   headers park directly under it; on the grid the topbar is its own row. */
 .group-h {
   grid-column: 1 / -1;
   padding: 8px 14px;
@@ -1893,6 +1982,12 @@ onBeforeUnmount(() => {
   color: var(--muted);
   background: var(--bg);
   border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: calc(var(--navbar-height) + var(--safe-area-top));
+  z-index: 2;
+}
+@media (min-width: 1024px) {
+  .group-h { top: 0; }
 }
 .row-list.compact .group-h { padding-top: 4px; }
 
@@ -1925,59 +2020,17 @@ onBeforeUnmount(() => {
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* Card view columns (large-library targets: 2-col from 560, 3-col from 1024,
-   4-col from 1280 on wide desktop content). */
+/* Card view columns (P8 mockup contract: 2-col from 560, 3-col from 1024,
+   maximum 3 per row — the old 4-up >=1280 rule is gone). */
 @media (min-width: 560px) {
   .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (min-width: 1024px) {
   .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
-@media (min-width: 1280px) {
-  .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-}
 
-/* List/Compact view columns */
-@media (min-width: 1100px) {
-  .row-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-
-/* P5 detail rail (>=1200): reserve the mockup's third column by insetting the
-   content wrapper, and let the grids reflow from the reduced content width
-   (mockup: card grid caps at 3 columns next to the rail). Below 1200 the detail
-   is an overlay sheet, so no reflow is needed. */
-@media (min-width: 1200px) {
-  .main-wrapper.has-detail { margin-right: var(--detail-width); }
-}
-@media (min-width: 1200px) and (max-width: 1439px) {
-  .main-wrapper.has-detail .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .main-wrapper.has-detail .row-list { grid-template-columns: 1fr; }
-}
-@media (min-width: 1440px) {
-  .main-wrapper.has-detail .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-}
-@media (min-width: 1500px) {
-  .main-wrapper.has-detail .row-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-
-/* With the rail open the content column narrows: below ~1680px the three-column
-   navbar can no longer hold the 480px search and the identity control on one
-   line, so it wraps with the same recipe the tablet shell uses (search on its
-   own row, actions right-aligned). Above that, let the identity shrink instead
-   of clipping at the rail edge. */
-@media (min-width: 1200px) and (max-width: 1679px) {
-  .main-wrapper.has-detail .navbar-custom {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-3);
-  }
-  .main-wrapper.has-detail .navbar-actions { margin-left: auto; }
-  .main-wrapper.has-detail .navbar-search-wrapper { order: 3; width: 100%; max-width: 100%; }
-}
-@media (min-width: 1200px) {
-  .main-wrapper.has-detail .navbar-actions,
-  .main-wrapper.has-detail .navbar-actions > * { min-width: 0; }
-}
+/* List/Compact stay single-column like the mockup list (the desktop grid's
+   content column is narrow once the sidebar and detail rail are both present). */
 
 /* Content header: the page title and its dynamic count share one row at every
    width - title at the start, count ending at the row's right edge. */
@@ -2067,10 +2120,8 @@ onBeforeUnmount(() => {
     margin-bottom: 0;
   }
 
-  /* Mobile toolbar: the bottom bar's Add item is the single Add entry point
-     (same AddLink form), so the panel's duplicate "Add link" is hidden here.
-     Export stays reachable through More → Backup & restore. Both controls keep
-     their desktop/tablet behavior. */
+  /* Mobile toolbar: the panel's duplicate "Add link" is hidden; the floating
+     action below the desktop grid is the single Add entry point (P8). */
   .content-head :deep(.add-card) {
     display: none;
   }
@@ -2154,10 +2205,21 @@ onBeforeUnmount(() => {
   }
 }
 
+/* P8: below the desktop grid the FAB is the single Add entry point and Export
+   stays reachable through More → Backup & restore (the mockup toolbar carries
+   neither control). At >=1024 both stay in the toolbar. */
+@media (max-width: 1023px) {
+  .content-head :deep(.add-card) {
+    display: none;
+  }
+  .toolbar-export {
+    display: none;
+  }
+}
+
 /* Pointer hover for the mobile sort/filter trigger (its base styles live in
    the max-width: 768px block above). */
-@media (max-width: 768px) and (hover: hover) and (pointer: fine) {
-  .sort-filter-toggle:hover {
+@media (max-width: 768px) and (hover: hover) and (pointer: fine) {  .sort-filter-toggle:hover {
     background: var(--muted-bg);
     color: var(--text-h);
   }
