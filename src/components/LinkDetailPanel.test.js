@@ -64,6 +64,19 @@ describe('LinkDetailPanel — presentation', () => {
     cleanup(w)
   })
 
+  it('desktop rail renders an honest placeholder before a selection (P8)', () => {
+    const w = mount(LinkDetailPanel, { props: { link: null, overlay: false }, attachTo: document.body })
+    const panel = document.querySelector('.detail')
+    expect(panel).not.toBeNull()
+    expect(panel.getAttribute('role')).toBe('complementary')
+    expect(document.querySelector('.detail-empty-title').textContent).toBe('No link selected')
+    expect(document.querySelector('.detail-empty-text')).not.toBeNull()
+    // no real detail controls and no fake data in the placeholder state
+    expect(document.querySelector('.detail-actions')).toBeNull()
+    expect(document.querySelector('.detail-title')).toBeNull()
+    cleanup(w)
+  })
+
   it('sheet semantics: modal dialog with backdrop and handle; close button takes focus', async () => {
     const w = open({ overlay: true })
     await flushPromises()

@@ -142,7 +142,7 @@ function onPanelKeydown(e) {
 
   <Transition name="detail">
     <aside
-      v-if="link"
+      v-if="overlay ? (open && link) : true"
       ref="panelEl"
       class="detail"
       :class="[overlay ? 'detail--sheet' : 'detail--rail', { open: open && !overlay, dragging }]"
@@ -162,7 +162,17 @@ function onPanelKeydown(e) {
         @pointercancel="onDragEnd"
       ></div>
 
-      <div class="detail-scroll">
+      <!-- P8 desktop rail placeholder: the column is structurally present
+           before a selection; no fake data, only the real empty state. -->
+      <div v-if="!link" class="detail-empty">
+        <div class="detail-empty-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M15 3v18"/></svg>
+        </div>
+        <p class="detail-empty-title">No link selected</p>
+        <p class="detail-empty-text">Select a link from the list to see its details here.</p>
+      </div>
+
+      <div v-else class="detail-scroll">
         <div class="detail-preview" :class="{ 'has-image': showImage }">
           <img
             v-if="showImage"
@@ -331,18 +341,48 @@ function onPanelKeydown(e) {
   transform: translateY(var(--drag-y, 0px));
   transition: transform .3s cubic-bezier(.4, 0, .2, 1);
 }
-/* Rail (>=1200): the mockup's static third grid column. */
-.detail--rail {
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: var(--detail-width);
-  border-right: none;
-  border-top: none;
-  border-bottom: none;
-  box-shadow: none;
-  transition: opacity var(--transition-normal);
+/* Rail (>=1024): the mockup's static third grid column. The column exists
+   before any selection; the placeholder fills it until a link is inspected. */
+@media (min-width: 1024px) {
+  .detail--rail {
+    position: static;
+    grid-column: 3;
+    grid-row: 2;
+    width: auto;
+    min-height: 0;
+    border-right: none;
+    border-top: none;
+    border-bottom: none;
+    box-shadow: none;
+    transition: opacity var(--transition-normal);
+  }
 }
+
+/* Placeholder state (real empty state, no invented data) */
+.detail-empty {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 24px;
+  text-align: center;
+}
+.detail-empty-icon {
+  width: 44px;
+  height: 44px;
+  margin-bottom: 6px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-full);
+  background: var(--muted-bg);
+  color: var(--muted);
+}
+.detail-empty-icon svg { width: 20px; height: 20px; }
+.detail-empty-title { margin: 0; font-size: 14px; font-weight: var(--weight-semibold); color: var(--text-h); }
+.detail-empty-text { margin: 0; max-width: 220px; font-size: 12.5px; line-height: 1.5; color: var(--muted); }
 
 .sheet-handle {
   height: 22px;
