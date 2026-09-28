@@ -177,6 +177,8 @@
 
     /* Layout */
     --sidebar-width: 280px;
+    /* P5 detail rail width (mockup --detail-w; 380px >=1280 below) */
+    --detail-width: 360px;
 }
 
 /* ---- Appearance: dark (scheme-independent surfaces/text/borders) ---- */
@@ -384,8 +386,8 @@ body{
    CSS-only, so there is no lock state to release and overlapping panels just
    work; scoped to coarse pointers so desktop keeps its normal scrollbar. */
 @media (pointer: coarse){
-html:has(.dialog-backdrop, .account-backdrop, .import-preview-backdrop, .lp-backdrop),
-body:has(.dialog-backdrop, .account-backdrop, .import-preview-backdrop, .lp-backdrop){
+html:has(.dialog-backdrop, .account-backdrop, .import-preview-backdrop, .lp-backdrop, .detail-backdrop),
+body:has(.dialog-backdrop, .account-backdrop, .import-preview-backdrop, .lp-backdrop, .detail-backdrop){
     overflow: hidden;
 }
 }
@@ -911,6 +913,13 @@ body.sidebar-minimized .sidebar-menu-link .bi{
 /* ---------------------------------------------------------------------
    9. Responsive Adjustments
 --------------------------------------------------------------------- */
+/* P5 detail rail: the mockup widens the third column at 1280 */
+@media (min-width: 1280px) {
+    :root {
+        --detail-width: 380px;
+    }
+}
+
 @media (max-width: 1200px) {
     .sidebar-wrapper{
         transform: translateX(-100%);
