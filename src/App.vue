@@ -960,7 +960,7 @@ onBeforeUnmount(() => {
     <aside class="sidebar-wrapper" id="sidebar" :class="{ show: sidebarOpen }">
       <a href="#" class="sidebar-brand" @click.prevent="go('links')">
         <img src="/logo.png" alt="Save Links logo" width="30" height="30" />
-        <span>Save Links</span>
+        <span>Save <span class="brand-accent">Links</span></span>
       </a>
 
       <div class="sidebar-menu-scroll">
@@ -970,14 +970,14 @@ onBeforeUnmount(() => {
           <ul class="sidebar-menu-list">
             <li class="sidebar-menu-item">
               <a href="#" class="sidebar-menu-link" :class="{ active: currentView === 'links' }" @click.prevent="go('links')">
-                <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-bookmarks'"></use></svg>
+                <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/></svg>
                 <span>Links</span>
                 <span class="sidebar-menu-badge">{{ total }}</span>
               </a>
             </li>
             <li class="sidebar-menu-item">
               <a href="#" class="sidebar-menu-link" :class="{ active: currentView === 'folders' }" @click.prevent="go('folders')">
-                <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-folder2'"></use></svg>
+                <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>
                 <span>Folders</span>
                 <span v-if="folders.length" class="sidebar-menu-badge">{{ folders.length }}</span>
               </a>
@@ -991,19 +991,19 @@ onBeforeUnmount(() => {
           <ul class="sidebar-menu-list">
             <li class="sidebar-menu-item">
               <a href="#" class="sidebar-menu-link" :class="{ active: currentView === 'backup' }" @click.prevent="go('backup')">
-                <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-arrow-repeat'"></use></svg>
+                <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
                 <span>Backup & restore</span>
               </a>
             </li>
             <li class="sidebar-menu-item">
               <a href="#" class="sidebar-menu-link" :class="{ active: currentView === 'settings' }" @click.prevent="go('settings')">
-                <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-gear'"></use></svg>
+                <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                 <span>Settings</span>
               </a>
             </li>
             <li class="sidebar-menu-item">
               <a href="#" class="sidebar-menu-link" :class="{ active: currentView === 'about' }" @click.prevent="go('about')">
-                <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-info-circle'"></use></svg>
+                <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
                 <span>About</span>
               </a>
             </li>
@@ -1020,31 +1020,37 @@ onBeforeUnmount(() => {
         <div class="navbar-left">
           <a href="#" class="mobile-brand" @click.prevent="go('links')">
             <img src="/logo.png" alt="" width="26" height="26" />
-            <span>Save Links</span>
+            <span>Save <span class="brand-accent">Links</span></span>
           </a>
           <button type="button" class="btn-desktop-toggle" id="desktop-sidebar-toggle" aria-label="Minimize sidebar" @click="toggleSidebarMinimized">
-            <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="`/icons.svg#${sidebarMinimized ? 'bi-chevron-bar-right' : 'bi-chevron-bar-left'}`"></use></svg>
+            <svg class="ui-icon ui-icon-lg" viewBox="0 0 24 24" aria-hidden="true">
+              <template v-if="sidebarMinimized"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M15 3v18"/></template>
+              <template v-else><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></template>
+            </svg>
           </button>
           <button type="button" class="sidebar-toggle-btn" id="sidebar-toggle" aria-label="Toggle navigation" @click="sidebarOpen = !sidebarOpen">
-            <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-list'"></use></svg>
+            <svg class="ui-icon ui-icon-lg" viewBox="0 0 24 24" aria-hidden="true"><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="18" y2="18"/></svg>
           </button>
         </div>
 
         <!-- Mid navbar: search pill -->
         <div class="navbar-search-wrapper" id="main-search">
           <input ref="searchInputEl" type="search" class="navbar-search-input" placeholder="Search links…" aria-label="Search links" enterkeyhint="search" :value="search" @input="search = $event.target.value" @keydown.esc.prevent="closeSearch(true)" @blur="onSearchBlur" />
-          <button v-if="search" type="button" class="navbar-search-btn" aria-label="Clear search" @click="search = ''"><svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-x-lg'"></use></svg></button>
-          <button v-else type="button" class="navbar-search-btn" :aria-label="searchOpen ? 'Close search' : null" :aria-hidden="searchOpen ? null : 'true'" :tabindex="searchOpen ? null : '-1'" @click="searchOpen && closeSearch(true)"><svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="`/icons.svg#${searchOpen ? 'bi-x-lg' : 'bi-search'}`"></use></svg></button>
+          <button v-if="search" type="button" class="navbar-search-btn" aria-label="Clear search" @click="search = ''"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+          <button v-else type="button" class="navbar-search-btn" :aria-label="searchOpen ? 'Close search' : null" :aria-hidden="searchOpen ? null : 'true'" :tabindex="searchOpen ? null : '-1'" @click="searchOpen && closeSearch(true)">
+            <svg v-if="searchOpen" class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+            <svg v-else class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          </button>
           <kbd class="navbar-search-kbd" aria-hidden="true">{{ searchShortcutLabel }}</kbd>
         </div>
 
         <!-- Right actions -->
         <div class="navbar-actions">
           <button ref="searchToggleEl" type="button" class="navbar-search-toggle" aria-label="Search" aria-controls="main-search" :aria-expanded="String(searchOpen)" @click="openSearch">
-            <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-search'"></use></svg>
+            <svg class="ui-icon ui-icon-lg" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
           </button>
           <button type="button" class="navbar-action-btn" id="btn-fullscreen" aria-label="Toggle Fullscreen" @click="toggleFullscreen">
-            <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-arrows-fullscreen'"></use></svg>
+            <svg class="ui-icon ui-icon-lg" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
           </button>
           <button
             type="button"
@@ -1072,7 +1078,7 @@ onBeforeUnmount(() => {
           <p v-if="pageSubtitle" class="page-subtitle">{{ pageSubtitle }}</p>
         </div>
         <button type="button" class="btn-date-picker" @click="openAddLink($event.currentTarget)">
-          <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-plus-lg'"></use></svg>
+          <svg class="ui-icon ui-icon-lg" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
           <span>Add link</span>
         </button>
       </div>
@@ -1116,7 +1122,7 @@ onBeforeUnmount(() => {
                         <path d="M5 6.5h14M5 12h14M5 17.5h14" />
                       </g>
                     </svg>
-                    <span class="view-label">{{ VIEW_MODE_LABELS[m] }}</span>
+                    <span class="view-label sr-only">{{ VIEW_MODE_LABELS[m] }}</span>
                   </button>
                 </div>
                 <button
@@ -1129,7 +1135,7 @@ onBeforeUnmount(() => {
                   @click="sortFilterOpen = !sortFilterOpen"
                   @keydown.esc="closeSortFilter(true)"
                 >
-          <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-sliders'"></use></svg>
+          <svg class="ui-icon ui-icon-lg" viewBox="0 0 24 24" aria-hidden="true"><line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/></svg>
           <span>Sort &amp; Filter</span>
                 </button>
                 <div
@@ -1155,6 +1161,7 @@ onBeforeUnmount(() => {
                     <AppSelect
                       id="filter-category"
                       variant="header"
+                      :class="{ 'is-active': !!filterCategory }"
                       aria-label="Filter by category"
                       :model-value="filterCategory"
                       :options="CATEGORY_FILTER_OPTIONS"
@@ -1167,6 +1174,7 @@ onBeforeUnmount(() => {
                     <AppSelect
                       id="filter-status"
                       variant="header"
+                      :class="{ 'is-active': !!filterStatus }"
                       aria-label="Filter by status"
                       :model-value="filterStatus"
                       :options="STATUS_FILTER_OPTIONS"
@@ -1178,6 +1186,7 @@ onBeforeUnmount(() => {
                     <AppSelect
                       id="filter-type"
                       variant="header"
+                      :class="{ 'is-active': !!filterType }"
                       aria-label="Filter by type"
                       :model-value="filterType"
                       :options="TYPE_FILTER_OPTIONS"
@@ -1200,7 +1209,7 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
                 <button type="button" class="toolbar-add toolbar-export" aria-label="Export links" @click="go('backup')">
-          <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-box-arrow-up-right'"></use></svg>
+          <svg class="ui-icon ui-icon-lg" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
           <span>Export</span>
                 </button>
               </div>
@@ -1330,14 +1339,14 @@ onBeforeUnmount(() => {
             <nav v-if="totalPages > 1" aria-label="Page navigation">
               <ul class="pagination">
                 <li class="page-item" :class="{ disabled: currentPage === 1 }">
-                  <a class="page-link" href="#" aria-label="Previous page" @click.prevent="currentPage = Math.max(1, currentPage - 1)"><svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-chevron-left'"></use></svg></a>
+                  <a class="page-link" href="#" aria-label="Previous page" @click.prevent="currentPage = Math.max(1, currentPage - 1)"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></a>
                 </li>
                 <li v-for="(p, idx) in pageItems" :key="idx" class="page-item" :class="{ active: p === currentPage, ellipsis: p === '…' }">
                   <span v-if="p === '…'" class="page-link page-ellipsis" aria-hidden="true">…</span>
                   <a v-else class="page-link" href="#" :aria-label="'Page ' + p" :aria-current="p === currentPage ? 'page' : undefined" @click.prevent="currentPage = p">{{ p }}</a>
                 </li>
                 <li class="page-item" :class="{ disabled: currentPage === totalPages }">
-                  <a class="page-link" href="#" aria-label="Next page" @click.prevent="currentPage = Math.min(totalPages, currentPage + 1)"><svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-chevron-right'"></use></svg></a>
+                  <a class="page-link" href="#" aria-label="Next page" @click.prevent="currentPage = Math.min(totalPages, currentPage + 1)"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></a>
                 </li>
               </ul>
             </nav>
@@ -1394,7 +1403,7 @@ onBeforeUnmount(() => {
         :aria-current="currentView === 'links' ? 'page' : null"
         @click="go('links')"
       >
-          <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-bookmarks'"></use></svg>
+          <svg class="ui-icon ui-icon-xl" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/></svg>
           <span>Links</span>
       </button>
       <button
@@ -1404,11 +1413,11 @@ onBeforeUnmount(() => {
         :aria-current="currentView === 'folders' ? 'page' : null"
         @click="go('folders')"
       >
-          <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-folder2'"></use></svg>
+          <svg class="ui-icon ui-icon-xl" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>
           <span>Folders</span>
       </button>
       <button type="button" class="bottom-nav-item" @click="openAddLink($event.currentTarget)">
-          <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-plus-lg'"></use></svg>
+          <svg class="ui-icon ui-icon-xl" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
           <span>Add</span>
       </button>
       <button
@@ -1421,7 +1430,7 @@ onBeforeUnmount(() => {
         @click="toggleMore"
         @keydown.esc="closeMoreFromKey"
       >
-          <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-three-dots'"></use></svg>
+          <svg class="ui-icon ui-icon-xl" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
           <span>More</span>
       </button>
     </nav>
@@ -1432,15 +1441,15 @@ onBeforeUnmount(() => {
       <Transition name="fade-down">
         <div v-if="moreOpen" id="more-menu" ref="moreMenuEl" class="more-menu anchored-popover" @keydown.esc="closeMoreFromKey">
           <button type="button" class="more-item" :class="{ active: currentView === 'settings' }" @click="go('settings')">
-            <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-gear'"></use></svg>
+            <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
             <span>Settings</span>
           </button>
           <button type="button" class="more-item" :class="{ active: currentView === 'backup' }" @click="go('backup')">
-            <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-arrow-repeat'"></use></svg>
+            <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
             <span>Backup &amp; restore</span>
           </button>
           <button type="button" class="more-item" :class="{ active: currentView === 'about' }" @click="go('about')">
-            <svg class="bi" viewBox="0 0 16 16" aria-hidden="true"><use :href="'/icons.svg#bi-info-circle'"></use></svg>
+            <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
             <span>About</span>
           </button>
         </div>
@@ -1607,20 +1616,21 @@ onBeforeUnmount(() => {
   max-width: 100%;
   box-sizing: border-box;
 }
-/* Link content inside the panel */
-.links-content { padding: 14px; }
-/* Results bar: real window/filter context between the toolbar and the list */
+/* Link content inside the panel (rows carry their own padding, like the
+   mockup list; the card grid carries the mockup's container padding). */
+.links-content { padding: 0; }
+/* Results bar: the mockup's "Showing X of N" line between toolbar and list. */
 .library-results {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   padding: 7px 14px;
-  background: var(--muted-bg);
+  background: var(--card);
   border-bottom: 1px solid var(--border);
-  font-size: var(--text-xs);
+  font-size: 12px;
   color: var(--muted);
 }
-.library-results-count { color: var(--text-h); font-weight: var(--weight-medium); }
+.library-results-count { color: var(--text-h); font-weight: var(--weight-semibold); }
 /* Select-all-visible control: native checkbox (tri-state via .indeterminate). */
 .select-visible { display: inline-flex; align-items: center; }
 .select-visible input {
@@ -1687,20 +1697,24 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: stretch;
   flex-shrink: 0;
+  gap: 2px;
   background: var(--muted-bg);
   border: none;
   border-radius: var(--radius-sm);
   overflow: hidden;
+  padding: 3px;
   margin-right: var(--space-1);
 }
 .view-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  min-height: var(--control-height-sm);
-  padding: 6px 10px;
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
   border: none;
+  border-radius: 5px;
   background: transparent;
   color: var(--muted);
   font-size: 12.5px;
@@ -1856,23 +1870,29 @@ onBeforeUnmount(() => {
 .grid {
   display: grid;
   grid-template-columns: repeat(1, minmax(0, 1fr));
-  gap: 16px;
+  gap: 12px;
+  padding: 14px;
 }
 .row-list {
   display: grid;
   grid-template-columns: repeat(1, minmax(0, 1fr));
-  gap: 10px;
+  gap: 0;
 }
-.row-list.compact { gap: 6px; }
+.row-list.compact { gap: 0; }
 
-/* Derived time-group headers (row views, newest first): a quiet full-width
-   label that breaks the scan without becoming chrome. Cards stay flat. */
+/* Derived time-group headers (row views, newest first): the mockup's uppercase
+   micro-label on the page canvas, separating the scan without card chrome.
+   (Not sticky: SaveLink scrolls the window, not an inner list scroller.) */
 .group-h {
   grid-column: 1 / -1;
-  padding: 6px 2px 0;
-  font-size: var(--text-xs);
+  padding: 8px 14px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
   font-weight: var(--weight-semibold);
   color: var(--muted);
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
 }
 .row-list.compact .group-h { padding-top: 4px; }
 

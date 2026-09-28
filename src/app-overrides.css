@@ -45,10 +45,12 @@
 --------------------------------------------------------------------- */
 
 /* ---------------------------------------------------------------------
-   1. Google Fonts CDN Import (Plus Jakarta Sans)
+   1. Typography stack (mockup: system UI stack, no webfont)
 --------------------------------------------------------------------- */
 
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+/* The mockup ships no webfont: -apple-system / BlinkMacSystemFont / "Segoe UI"
+   / Roboto / "Helvetica Neue" / sans-serif. Both the old Plus Jakarta Sans
+   import and its family token are gone — the user's own UI font is the design. */
 
 /* ---------------------------------------------------------------------
    2. Design System Tokens — the single source of truth
@@ -64,55 +66,55 @@
 :root {
     color-scheme: light;
 
-    /* Surfaces — soft near-white canvas, white raised surfaces */
-    --bg: #F6F6F7;                 /* page canvas */
+    /* Surfaces — the mockup's slate-tinted neutral system */
+    --bg: #F8FAFC;                 /* page canvas */
     --card: #FFFFFF;               /* default surface (cards, inputs, menus) */
     --surface-raised: #FFFFFF;     /* floating surfaces: modals, popovers */
-    --muted-bg: #F0F0F2;           /* inset / quiet surface */
+    --muted-bg: #F1F5F9;           /* inset / quiet surface */
 
-    /* Text — softened charcoal, never pure black */
-    --text-h: #1C1D1F;             /* headings + strong labels */
-    --text: #3C3E42;               /* body copy */
-    --muted: #6B6E74;              /* secondary text */
-    --text-subtle: #8E9196;        /* tertiary text, placeholders, meta */
+    /* Text — mockup text / text-dim / text-faint (+ a mid body tone) */
+    --text-h: #0F172A;             /* headings + strong labels */
+    --text: #334155;               /* body copy */
+    --muted: #64748B;              /* secondary text */
+    --text-subtle: #94A3B8;        /* tertiary text, placeholders, meta */
 
-    /* Borders — subtle neutral grey */
-    --border: #E4E4E7;
-    --border-subtle: rgba(20, 21, 24, 0.06);
+    /* Borders — mockup border / border-strong family */
+    --border: #E2E8F0;
+    --border-subtle: rgba(15, 23, 42, 0.06);
 
-    /* Accent — the scheme layer overrides --accent only;
-       hover/bg/border derive from it so nothing drifts to another hue. */
-    --accent: #4F545B;             /* None: neutral base, not a blue/purple */
-    --accent-hover: color-mix(in srgb, var(--accent) 88%, #000);
-    --accent-bg: color-mix(in srgb, var(--accent) 8%, #FFFFFF);
-    --accent-border: color-mix(in srgb, var(--accent) 45%, var(--border));
+    /* Accent — the scheme layer overrides --accent (and the derived trio);
+       the default is the mockup's indigo. */
+    --accent: #4F46E5;
+    --accent-hover: #4338CA;
+    --accent-bg: rgba(79, 70, 229, 0.08);
+    --accent-border: rgba(79, 70, 229, 0.25);
     --on-accent: #FFFFFF;
 
     /* Status (only the states the app actually renders) */
     --success: #15803D;
-    --error: #C0392B;
-    --error-bg: #FCEBE9;
+    --error: #DC2626;
+    --error-bg: rgba(220, 38, 38, 0.08);
     --on-error: #FFFFFF;
 
     /* Sidebar — follows the global surface system */
     --sidebar-bg: #FFFFFF;
-    --sidebar-border: #E4E4E7;
-    --sidebar-title: #8E9196;
-    --sidebar-text: #6B6E74;
-    --sidebar-text-strong: #1C1D1F;
-    --sidebar-hover-bg: rgba(20, 21, 24, 0.04);
-    --sidebar-active-bg: rgba(20, 21, 24, 0.05);
-    --sidebar-badge-bg: rgba(20, 21, 24, 0.06);
-    --sidebar-badge-text: #1C1D1F;
+    --sidebar-border: #E2E8F0;
+    --sidebar-title: #94A3B8;
+    --sidebar-text: #64748B;
+    --sidebar-text-strong: #0F172A;
+    --sidebar-hover-bg: #F1F5F9;
+    --sidebar-active-bg: rgba(79, 70, 229, 0.08);
+    --sidebar-badge-bg: #F1F5F9;
+    --sidebar-badge-text: #64748B;
 
-    /* Elevation — restrained, neutral (no colour cast) */
-    --shadow-sm: 0 1px 3px rgba(20, 21, 24, 0.05);
-    --shadow-md: 0 4px 12px rgba(20, 21, 24, 0.07);
-    --shadow-lg: 0 16px 40px rgba(20, 21, 24, 0.10);
+    /* Elevation — the mockup's restrained slate shadows */
+    --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+    --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.08);
+    --shadow-lg: 0 12px 32px rgba(15, 23, 42, 0.12);
 
-    /* Radii */
-    --radius-sm: 10px;
-    --radius: 14px;
+    /* Radii — mockup: 8px controls, 12px surfaces */
+    --radius-sm: 8px;
+    --radius: 12px;
     --radius-full: 999px;
 
     /* Spacing scale */
@@ -158,8 +160,8 @@
     --transition-normal: 0.2s ease;
     --transition-slow: 0.25s ease;
 
-    /* Typography */
-    --font-sans: 'Plus Jakarta Sans', sans-serif;
+    /* Typography — mockup system stack, 14px base */
+    --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
     --text-xs: 0.75rem;
     --text-sm: 0.85rem;
     --text-md: 0.875rem;
@@ -170,74 +172,74 @@
     --weight-semibold: 600;
     --weight-bold: 700;
     --leading-tight: 1.25;
-    --leading-normal: 1.5;
+    --leading-normal: 1.45;
 
     /* Shared state opacity */
     --opacity-disabled: 0.5;
 
-    /* Layout */
-    --sidebar-width: 280px;
+    /* Layout — mockup sidebar 260px (280px >=1280 below) */
+    --sidebar-width: 260px;
     /* P5 detail rail width (mockup --detail-w; 380px >=1280 below) */
     --detail-width: 360px;
 }
 
-/* ---- Appearance: dark (scheme-independent surfaces/text/borders) ---- */
+/* ---- Appearance: dark (mockup #0b0e14 family, scheme-independent) ---- */
 [data-appearance="dark"]{
     color-scheme: dark;
 
-    --bg: #000000;
-    --card: #080808;
-    --surface-raised: #0D0D0D;
-    --muted-bg: #0D0D0D;
+    --bg: #0B0E14;
+    --card: #12161F;
+    --surface-raised: #12161F;
+    --muted-bg: #1A1F2B;
 
-    --text-h: #E6E6E6;
-    --text: #A8A8A8;
-    --muted: #808080;
-    --text-subtle: #808080;
+    --text-h: #E6EDF6;
+    --text: #C3CCDA;
+    --muted: #8B95A8;
+    --text-subtle: #5B6478;
 
-    --border: #1F1F1F;
+    --border: #232A38;
     --border-subtle: rgba(255, 255, 255, 0.07);
 
-    --on-accent: #0A0A0A;
+    --on-accent: #FFFFFF;
 
     --success: #4ADE80;
     --error: #F87171;
     --error-bg: rgba(248, 113, 113, 0.12);
     --on-error: #101114;
 
-    --sidebar-bg: #000000;
-    --sidebar-border: #1F1F1F;
-    --sidebar-title: #808080;
-    --sidebar-text: #A8A8A8;
-    --sidebar-text-strong: #E6E6E6;
-    --sidebar-hover-bg: rgba(255, 255, 255, 0.06);
-    --sidebar-active-bg: rgba(255, 255, 255, 0.08);
-    --sidebar-badge-bg: rgba(255, 255, 255, 0.10);
-    --sidebar-badge-text: #E6E6E6;
+    --sidebar-bg: #12161F;
+    --sidebar-border: #232A38;
+    --sidebar-title: #5B6478;
+    --sidebar-text: #8B95A8;
+    --sidebar-text-strong: #E6EDF6;
+    --sidebar-hover-bg: #1A1F2B;
+    --sidebar-active-bg: rgba(129, 140, 248, 0.12);
+    --sidebar-badge-bg: #1A1F2B;
+    --sidebar-badge-text: #8B95A8;
 
-    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.30);
-    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.40);
-    --shadow-lg: 0 20px 50px rgba(0, 0, 0, 0.55);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.40);
+    --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.50);
+    --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.60);
 
-    --accent: #9FA3A9;
-    --accent-hover: color-mix(in srgb, var(--accent) 88%, #FFFFFF);
-    --accent-bg: color-mix(in srgb, var(--accent) 14%, #000000);
-    --accent-border: color-mix(in srgb, var(--accent) 45%, var(--border));
+    --accent: #818CF8;
+    --accent-hover: #A5B4FC;
+    --accent-bg: rgba(129, 140, 248, 0.12);
+    --accent-border: rgba(129, 140, 248, 0.28);
 
     --overlay: rgba(0, 0, 0, 0.6);
 }
 
-/* ---- Scheme accent: light ---- */
-[data-color-scheme="ocean"]{ --accent: #5366C9; }
-[data-color-scheme="forest"]{ --accent: #3F8064; }
-[data-color-scheme="lavender"]{ --accent: #7969A8; }
-[data-color-scheme="amber"]{ --accent: #B87824; }
+/* ---- Scheme accent: light (accent-only; the derived trio follows the hue) ---- */
+[data-color-scheme="ocean"]{ --accent: #5366C9; --accent-hover: color-mix(in srgb, var(--accent) 88%, #000); --accent-bg: color-mix(in srgb, var(--accent) 8%, #FFFFFF); --accent-border: color-mix(in srgb, var(--accent) 30%, var(--border)); }
+[data-color-scheme="forest"]{ --accent: #3F8064; --accent-hover: color-mix(in srgb, var(--accent) 88%, #000); --accent-bg: color-mix(in srgb, var(--accent) 8%, #FFFFFF); --accent-border: color-mix(in srgb, var(--accent) 30%, var(--border)); }
+[data-color-scheme="lavender"]{ --accent: #7969A8; --accent-hover: color-mix(in srgb, var(--accent) 88%, #000); --accent-bg: color-mix(in srgb, var(--accent) 8%, #FFFFFF); --accent-border: color-mix(in srgb, var(--accent) 30%, var(--border)); }
+[data-color-scheme="amber"]{ --accent: #B87824; --accent-hover: color-mix(in srgb, var(--accent) 88%, #000); --accent-bg: color-mix(in srgb, var(--accent) 8%, #FFFFFF); --accent-border: color-mix(in srgb, var(--accent) 30%, var(--border)); }
 
 /* ---- Scheme accent: dark ---- */
-[data-appearance="dark"][data-color-scheme="ocean"]{ --accent: #7C8CF2; }
-[data-appearance="dark"][data-color-scheme="forest"]{ --accent: #62A982; }
-[data-appearance="dark"][data-color-scheme="lavender"]{ --accent: #A695D4; }
-[data-appearance="dark"][data-color-scheme="amber"]{ --accent: #E0A43A; }
+[data-appearance="dark"][data-color-scheme="ocean"]{ --accent: #7C8CF2; --accent-hover: color-mix(in srgb, var(--accent) 88%, #FFFFFF); --accent-bg: color-mix(in srgb, var(--accent) 12%, #000000); --accent-border: color-mix(in srgb, var(--accent) 32%, var(--border)); }
+[data-appearance="dark"][data-color-scheme="forest"]{ --accent: #62A982; --accent-hover: color-mix(in srgb, var(--accent) 88%, #FFFFFF); --accent-bg: color-mix(in srgb, var(--accent) 12%, #000000); --accent-border: color-mix(in srgb, var(--accent) 32%, var(--border)); }
+[data-appearance="dark"][data-color-scheme="lavender"]{ --accent: #A695D4; --accent-hover: color-mix(in srgb, var(--accent) 88%, #FFFFFF); --accent-bg: color-mix(in srgb, var(--accent) 12%, #000000); --accent-border: color-mix(in srgb, var(--accent) 32%, var(--border)); }
+[data-appearance="dark"][data-color-scheme="amber"]{ --accent: #E0A43A; --accent-hover: color-mix(in srgb, var(--accent) 88%, #FFFFFF); --accent-bg: color-mix(in srgb, var(--accent) 12%, #000000); --accent-border: color-mix(in srgb, var(--accent) 32%, var(--border)); }
 
 /* ---------------------------------------------------------------------
    3. Base & Typography
@@ -356,6 +358,23 @@ img, svg{
     flex-shrink: 0;
 }
 
+/* Inline Lucide-style outline icons (the mockup's icon language): 24px grid,
+   stroke-width 2, currentColor — sized per context like the sprite icons. */
+.ui-icon{
+    width: 15px;
+    height: 15px;
+    display: inline-block;
+    vertical-align: -0.125em;
+    flex-shrink: 0;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+.ui-icon-lg{ width: 18px; height: 18px; }
+.ui-icon-xl{ width: 22px; height: 22px; }
+
 [type="search"]{
     -webkit-appearance: textfield;
     outline-offset: -2px;
@@ -373,11 +392,11 @@ body{
     background-color: var(--bg);
     color: var(--text-h);
     font-family: var(--font-sans);
-    font-size: 0.925rem;
-    font-weight: var(--weight-medium);
-    line-height: 1.5;
+    font-size: 0.875rem;      /* mockup base: 14px */
+    font-weight: 400;
+    line-height: 1.45;
     -webkit-font-smoothing: antialiased;
-    letter-spacing: -0.01em;
+    -moz-osx-font-smoothing: grayscale;
     overscroll-behavior: none;
 }
 
@@ -452,7 +471,8 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
 
 /* ---------------------------------------------------------------------
    4. Sidebar Component (.sidebar-wrapper)
-   Neutral surface (light) / true black (dark); accent only on interaction
+   Mockup sidebar: section labels, compact nav rows, count pills, folder-tree
+   density, accent-filled active row.
 --------------------------------------------------------------------- */
 .sidebar-wrapper{
     width: var(--sidebar-width);
@@ -464,7 +484,7 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
     z-index: var(--z-sidebar);
     display: flex;
     flex-direction: column;
-    padding: var(--space-6) var(--space-5);
+    padding: var(--space-5) var(--space-3) var(--space-4);
     border-right: 1px solid var(--sidebar-border);
     transition: all var(--transition-slow);
 }
@@ -479,14 +499,18 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
 .sidebar-brand{
     display: flex;
     align-items: center;
-    gap: var(--space-3);
-    font-size: 1.35rem;
+    gap: var(--space-2);
+    font-size: 16px;                     /* mockup brand: 15-16px bold */
     font-weight: var(--weight-bold);
     color: var(--sidebar-text-strong);
-    margin-bottom: 2.5rem;
-    padding-inline-start: var(--space-2);
+    margin-bottom: var(--space-5);
+    padding-inline-start: 10px;
     text-decoration: none;
 }
+
+/* The mockup wordmark accents the second half (Link|Vault); SaveLink keeps
+   its own name and marks "Links" the same way. */
+.sidebar-brand .brand-accent{ color: var(--accent); }
 
 @media (hover: hover) and (pointer: fine){
 .sidebar-brand:hover{
@@ -494,25 +518,19 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
 }
 }
 
-/* The brand mark is identity, not a hover toy: the accent icon stays, the
-   decorative rotation is gone. */
-.sidebar-brand .bi{
-    color: var(--accent);
-    font-size: var(--text-2xl);
-}
-
 .sidebar-menu-section{
-    margin-bottom: var(--space-5);
+    margin-bottom: var(--space-4);
 }
 
-/* Group labels are quiet supporting text (sentence case, no tracking): the
-   template-style uppercase micro-heading read as chrome, not navigation. */
+/* Group labels: the mockup's uppercase micro-heading (10px, tracked, faint). */
 .sidebar-menu-title{
-    font-size: var(--text-xs);
+    font-size: 10px;
     font-weight: var(--weight-semibold);
+    text-transform: uppercase;
+    letter-spacing: .08em;
     color: var(--sidebar-title);
-    padding-inline-start: var(--space-3);
-    margin-bottom: var(--space-3);
+    padding-inline-start: 10px;
+    margin-bottom: 6px;
 }
 
 .sidebar-menu-list{
@@ -522,75 +540,76 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
 }
 
 .sidebar-menu-item{
-    margin-bottom: var(--space-1);
+    margin-bottom: 2px;
 }
 
-/* Nav row: one control-height row on the spacing scale. The inline-start
-   border is reserved (transparent) so the active indicator never shifts the
-   label, and no absolute positioning or negative offsets are needed. */
+/* Nav row: the mockup's compact row — 40px tall, 8px radius, no rail. */
 .sidebar-menu-link{
     display: flex;
     align-items: center;
-    gap: var(--space-3);
+    gap: 10px;
     min-height: var(--control-height);
-    padding: var(--space-2) var(--space-3);
+    padding: 9px 10px;
     color: var(--sidebar-text);
-    border-inline-start: 2px solid transparent;
-    /* The inline-start corner radii stay square so the reserved accent border
-       renders as a straight navigation rail instead of a curved outline that
-       wraps the row like a selected button. */
-    border-start-end-radius: var(--radius-sm);
-    border-end-end-radius: var(--radius-sm);
+    border-radius: var(--radius-sm);
+    font-size: 14px;
     font-weight: var(--weight-medium);
-    transition: color var(--transition-normal), background-color var(--transition-normal), border-color var(--transition-normal);
+    transition: color var(--transition-normal), background-color var(--transition-normal);
 }
 
+.sidebar-menu-link svg,
 .sidebar-menu-link .bi{
+    width: 15px;
+    height: 15px;
+    flex-shrink: 0;
     font-size: var(--text-xl);
     transition: color var(--transition-normal);
 }
 
-/* Active State & Hover States */
-/* Inactive/default: neutral muted text + icons (never scheme-tinted). */
+/* Inactive/default: muted text + icons (never scheme-tinted). */
 .sidebar-wrapper .sidebar-menu-link{
     color: var(--sidebar-text);
 }
 
+.sidebar-wrapper .sidebar-menu-link svg,
 .sidebar-wrapper .sidebar-menu-link .bi{
     color: inherit;
 }
 
-/* Hover: the active scheme accent on text + icon (never white). The
-   .sidebar-wrapper prefix keeps this above the generic dark-mode a:hover. */
+/* Hover: quiet surface, strong label (mockup .nav-item:hover). */
 @media (hover: hover) and (pointer: fine){
 .sidebar-wrapper .sidebar-menu-link:hover{
-    color: var(--accent);
+    color: var(--text-h);
     background-color: var(--sidebar-hover-bg);
 }
-
-.sidebar-wrapper .sidebar-menu-link:hover .bi{
-    color: var(--accent);
-}
 }
 
-/* Active: accent indicator + accent icon + strong label. No filled active
-   block — the same state language the mobile bottom navigation already uses. */
+/* Active: the mockup's soft accent block + accent text + filled count pill. */
 .sidebar-wrapper .sidebar-menu-link.active{
-    color: var(--sidebar-text-strong);
-    border-inline-start-color: var(--accent);
-    font-weight: var(--weight-semibold);
+    color: var(--accent);
+    background-color: var(--sidebar-active-bg);
+    font-weight: var(--weight-medium);
 }
 
+.sidebar-wrapper .sidebar-menu-link.active svg,
 .sidebar-wrapper .sidebar-menu-link.active .bi{
     color: var(--accent);
 }
 
-/* Counts are supporting metadata (quiet text), not badge-shaped decoration. */
+.sidebar-wrapper .sidebar-menu-link.active .sidebar-menu-badge{
+    background-color: var(--accent);
+    color: var(--on-accent);
+}
+
+/* Counts: the mockup's small pill (surface-2, 11px, radius 10). */
 .sidebar-menu-badge{
     margin-left: auto;
-    font-size: var(--text-xs);
+    font-size: 11px;
     font-weight: var(--weight-medium);
-    color: var(--muted);
+    background-color: var(--sidebar-badge-bg);
+    color: var(--sidebar-badge-text);
+    padding: 1px 7px;
+    border-radius: 10px;
 }
 
 /* Minimized Sidebar Adjustments */
@@ -642,19 +661,18 @@ body.sidebar-minimized .sidebar-menu-link .bi{
     position: sticky;
     top: 0;
     z-index: var(--z-sticky);
-    background-color: color-mix(in srgb, var(--bg) 85%, transparent);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    background-color: var(--card);
     margin-top: -2rem;
     margin-left: -2.5rem;
     margin-right: -2.5rem;
-    padding: 1.25rem 2.5rem;
+    padding: 8px 2.5rem;
     border-bottom: 1px solid var(--border);
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 480px) minmax(0, 1fr);
     align-items: center;
-    margin-bottom: 2rem;
-    gap: var(--space-5);
+    margin-bottom: 1.5rem;
+    min-height: 52px;
+    gap: var(--space-4);
 }
 
 .navbar-left{
@@ -684,24 +702,24 @@ body.sidebar-minimized .sidebar-menu-link .bi{
 }
 
 .navbar-search-wrapper{
-    width: 480px;
-    max-width: 100%;
+    width: 100%;
+    max-width: 480px;
     position: relative;
     margin: 0 auto;
 }
 
 .navbar-search-input{
     width: 100%;
-    background-color: var(--card);
+    height: 36px;
+    background-color: var(--muted-bg);
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 0.65rem 1.25rem;
-    padding-right: 2.75rem;
-    font-size: var(--text-md);
-    font-weight: var(--weight-medium);
+    border-radius: 10px;
+    padding: 0 2.5rem 0 10px;
+    font-size: 14px;
+    font-weight: 400;
     color: var(--text-h);
     outline: none;
-    transition: all var(--transition-normal);
+    transition: border-color var(--transition-normal), background-color var(--transition-normal);
 }
 
 /* The app ships its own clear control (.navbar-search-btn with aria-label
@@ -722,7 +740,7 @@ body.sidebar-minimized .sidebar-menu-link .bi{
 
 .navbar-search-btn{
     position: absolute;
-    right: 1.25rem;
+    right: 10px;
     top: 50%;
     transform: translateY(-50%);
     background: none;
@@ -742,22 +760,20 @@ body.sidebar-minimized .sidebar-menu-link .bi{
    a collapsed affordance. */
 .navbar-search-kbd{
     position: absolute;
-    right: 1.25rem;
+    right: 10px;
     top: 50%;
     transform: translateY(-50%);
     pointer-events: none;
     font-family: inherit;
-    font-size: var(--text-xs);
+    font-size: 11px;                       /* mockup: 11px keycap */
     font-weight: var(--weight-medium);
     line-height: 1;
     white-space: nowrap;
-    color: var(--text);
-    background-color: var(--muted-bg);
+    color: var(--text-subtle);
+    background-color: var(--card);
     border: 1px solid var(--border);
-    /* The smallest radius token (10px) rounds a key this size into a pill; a
-       compact key needs a squarer corner, so this one literal is used. */
     border-radius: 4px;
-    padding: var(--space-1) var(--space-2);
+    padding: 2px 6px;
 }
 
 .navbar-search-input:focus ~ .navbar-search-kbd,
@@ -789,10 +805,12 @@ body.sidebar-minimized .sidebar-menu-link .bi{
     min-width: 0;
 }
 
-/* Top-bar utility icon buttons: one shared quiet/ghost treatment */
+/* Top-bar utility icon buttons: one shared quiet/ghost treatment (mockup 36px) */
 .navbar-action-btn, .sidebar-toggle-btn, .btn-desktop-toggle, .navbar-search-toggle{
-    min-width: var(--control-height);
-    min-height: var(--control-height);
+    min-width: 36px;
+    min-height: 36px;
+    width: 36px;
+    height: 36px;
     border-radius: var(--radius-sm);
     background-color: transparent;
     border: 1px solid transparent;
@@ -800,7 +818,6 @@ body.sidebar-minimized .sidebar-menu-link .bi{
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 1.05rem;
     cursor: pointer;
     transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
 }
@@ -859,13 +876,13 @@ body.sidebar-minimized .sidebar-menu-link .bi{
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    margin-bottom: 2rem;
+    margin-bottom: 1.25rem;
     flex-wrap: wrap;
-    gap: var(--space-5);
+    gap: var(--space-4);
 }
 
 .page-title{
-    font-size: 1.75rem;
+    font-size: 1.5rem;
     margin-bottom: 0.25rem;
 }
 
@@ -913,10 +930,11 @@ body.sidebar-minimized .sidebar-menu-link .bi{
 /* ---------------------------------------------------------------------
    9. Responsive Adjustments
 --------------------------------------------------------------------- */
-/* P5 detail rail: the mockup widens the third column at 1280 */
+/* P5 detail rail + mockup sidebar width at 1280 */
 @media (min-width: 1280px) {
     :root {
         --detail-width: 380px;
+        --sidebar-width: 280px;
     }
 }
 
@@ -959,7 +977,7 @@ body.sidebar-minimized .sidebar-menu-link .bi{
         margin-top: -1.5rem;
         margin-left: -1.5rem;
         margin-right: -1.5rem;
-        padding: 1rem 1.5rem;
+        padding: 8px 1.5rem;
         flex-wrap: wrap;
         gap: var(--space-3);
     }
@@ -1049,7 +1067,10 @@ body.sidebar-minimized .sidebar-menu-link .bi{
     transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 
-.bottom-nav-item .bi{
+.bottom-nav-item .bi,
+.bottom-nav-item .ui-icon{
+    width: 18px;
+    height: 18px;
     font-size: 1.15rem;
     line-height: 1;
 }
@@ -1516,26 +1537,32 @@ textarea.input{ resize: vertical; }
     background-color: var(--card);
 }
 
-/* header — quiet toolbar control (sort / filter) */
-.asel--header { flex: 0 1 auto; min-width: 96px; }
+/* header — the mockup's compact filter chip (sort / filter) */
+.asel--header { flex: 0 1 auto; min-width: 0; }
 .asel--header .asel-trigger {
-    height: var(--control-height-sm);
-    padding: 0 var(--space-2);
-    border-radius: var(--radius-sm);
-    border: 1px solid transparent;
-    background-color: transparent;
+    height: 30px;
+    padding: 0 12px;
+    border-radius: 16px;
+    border: 1px solid var(--border);
+    background-color: var(--muted-bg);
     color: var(--muted);
-    font-size: var(--text-sm);
+    font-size: 12.5px;
     font-weight: var(--weight-medium);
 }
 @media (hover: hover) and (pointer: fine){
-.asel--header .asel-trigger:hover { background-color: var(--muted-bg); color: var(--text-h); }
+.asel--header .asel-trigger:hover { border-color: var(--border); color: var(--text-h); }
 }
 .asel--header .asel-trigger:focus-visible,
 .asel--header .asel-trigger[aria-expanded="true"] {
     border-color: var(--accent);
     background-color: var(--card);
     color: var(--text-h);
+}
+/* A filter that actually narrows the list reads as the mockup's active chip. */
+.asel--header.is-active .asel-trigger {
+    background-color: var(--accent-bg);
+    border-color: var(--accent-border);
+    color: var(--accent);
 }
 
 /* inline — tiny control inside a card or list row */

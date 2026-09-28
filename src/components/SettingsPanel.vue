@@ -6,9 +6,9 @@ const props = defineProps({
 const emit = defineEmits(['update:appearance', 'update:colorScheme'])
 
 const appearances = [
-  { value: 'light', label: 'Light theme', name: 'Light', icon: 'sun-icon' },
-  { value: 'dark', label: 'Dark theme', name: 'Dark', icon: 'moon-icon' },
-  { value: 'system', label: 'System theme', name: 'System', icon: 'monitor-icon' }
+  { value: 'light', label: 'Light theme', name: 'Light' },
+  { value: 'dark', label: 'Dark theme', name: 'Dark' },
+  { value: 'system', label: 'System theme', name: 'System' }
 ]
 // Color schemes are optional accents; "None" uses the base neutral accent.
 // `color` mirrors the scheme accent tokens in src/app-overrides.css so each
@@ -32,7 +32,17 @@ const schemes = [
       <div class="theme-row" role="radiogroup" aria-label="Appearance">
         <label v-for="opt in appearances" :key="opt.value" class="theme-opt" :class="{ active: appearance === opt.value }">
           <input type="radio" name="appearance" :value="opt.value" :checked="appearance === opt.value" @change="emit('update:appearance', opt.value)" :aria-label="opt.label" />
-          <svg class="opt-icon" viewBox="0 0 24 24" aria-hidden="true"><use :href="`/icons.svg#${opt.icon}`" /></svg>
+          <svg class="opt-icon ui-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <template v-if="opt.value === 'light'">
+              <circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>
+            </template>
+            <template v-else-if="opt.value === 'dark'">
+              <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>
+            </template>
+            <template v-else>
+              <rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/>
+            </template>
+          </svg>
           <span class="opt-name">{{ opt.name }}</span>
         </label>
       </div>
@@ -83,6 +93,7 @@ const schemes = [
   margin: 0; opacity: 0; cursor: pointer;
 }
 .opt-icon { width: 22px; height: 22px; }
+.opt-icon.ui-icon { stroke-width: 1.8; }
 .opt-name { font-size: 12.5px; font-weight: var(--weight-semibold); }
 
 .swatch-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(76px, 1fr)); gap: 10px 6px; }
