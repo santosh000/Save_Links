@@ -1529,7 +1529,17 @@ onBeforeUnmount(() => {
   overflow-x: hidden;
   display: flex;
   flex-direction: column;
+  /* P9: no top padding on the scroller itself — sticky group headers must park
+     flush at the scrollport edge (the mockup's list has no top inset). The
+     page header supplies its own top spacing instead. */
+  padding-top: 0;
 }
+
+/* The page header carries the content's top inset (P9: the scroller has none,
+   so sticky group headers can park flush at its top edge). Below 1024 the
+   wrapper keeps its own horizontal padding; on the grid the header supplies
+   the horizontal inset too. */
+.page-header { padding-top: 1.5rem; }
 
 @media (min-width: 1024px) {
   .app {
@@ -1537,12 +1547,17 @@ onBeforeUnmount(() => {
     grid-template-columns: var(--sidebar-width) minmax(0, 1fr) var(--detail-width);
     grid-template-rows: var(--navbar-height) minmax(0, 1fr);
   }
+  /* P9 (G6): the desktop content column is full-bleed like the mockup — rows,
+     cards, toolbar and results carry their own spacing; only the page header
+     and footer keep a small outer inset. */
   .main-wrapper {
     grid-column: 2;
     grid-row: 2;
     margin-left: 0;
-    padding: 1.25rem;
+    padding: 0 0 1.25rem;
   }
+  .page-header { padding: 1.25rem 1.25rem 0; }
+  .footer { padding-inline: 1.25rem; }
 }
 
 /* Sidebar head (drawer): brand + close. Hidden on the desktop grid where the
@@ -1559,8 +1574,8 @@ onBeforeUnmount(() => {
 }
 .sidebar-close {
   flex-shrink: 0;
-  width: var(--control-height-sm);
-  height: var(--control-height-sm);
+  width: 36px;
+  height: 36px;
   display: grid;
   place-items: center;
   border: none;
@@ -1686,6 +1701,16 @@ onBeforeUnmount(() => {
   /* Visible, not hidden: the sticky group headers must stick to the content
      scroller (.main-wrapper), and overflow:hidden would become their scrollport. */
   overflow: visible;
+}
+/* P9 (G6): on the full-bleed desktop grid the panel drops its side chrome and
+   merges with the shell column edges (the mockup has no panel). Declared after
+   the base rule so the shorthand above cannot win the cascade. */
+@media (min-width: 1024px) {
+  .links-panel {
+    border-inline: none;
+    border-radius: 0;
+    margin-top: 0;
+  }
 }
 /* Toolbar = panel header (no card chrome of its own) */
 .content-head {
@@ -1969,9 +1994,9 @@ onBeforeUnmount(() => {
 .row-list.compact { gap: 0; }
 
 /* Derived time-group headers (row views, newest first): the mockup's uppercase
-   micro-label on the page canvas, sticky against the content scroller. Below
-   the desktop grid the topbar is sticky inside the same scroller, so the
-   headers park directly under it; on the grid the topbar is its own row. */
+   micro-label on the page canvas, sticky at the top edge of its own scrolling
+   container (.main-wrapper). The navbar is a sibling of the scroller (P8), so
+   the correct offset is 0 at every width. */
 .group-h {
   grid-column: 1 / -1;
   padding: 8px 14px;
@@ -1983,11 +2008,8 @@ onBeforeUnmount(() => {
   background: var(--bg);
   border-bottom: 1px solid var(--border);
   position: sticky;
-  top: calc(var(--navbar-height) + var(--safe-area-top));
+  top: 0;
   z-index: 2;
-}
-@media (min-width: 1024px) {
-  .group-h { top: 0; }
 }
 .row-list.compact .group-h { padding-top: 4px; }
 
@@ -2051,12 +2073,13 @@ onBeforeUnmount(() => {
   .identity-avatar { width: 28px; height: 28px; }
   /* Compact mobile app bar: brand · search · profile on ONE row (the ≤1200 shell
      wraps them onto two). The search takes the remaining width, the profile never
-     shrinks, and the brand yields first if the row gets very narrow. */
+     shrinks, and the brand yields first if the row gets very narrow.
+     P9: no bottom margin — the topbar is a shell row and the page header
+     supplies the content's top spacing (the old margin left a 12px seam). */
   .navbar-custom {
     flex-wrap: nowrap;
     align-items: center;
     padding: var(--space-2) var(--space-4);
-    margin-bottom: var(--space-3);
     gap: var(--space-2);
   }
   .navbar-left,

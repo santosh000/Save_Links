@@ -132,7 +132,7 @@
     /* Mobile shell: the fixed bottom navigation and the display cutout insets
        it (and the sticky top bar) have to stay clear of. --bottom-nav-height is
        the bar's box height, excluding the safe area appended below it. */
-    --bottom-nav-height: 56px;
+    --bottom-nav-height: 58px;
     --safe-area-top: env(safe-area-inset-top, 0px);
     --safe-area-bottom: env(safe-area-inset-bottom, 0px);
 
@@ -479,7 +479,10 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
    density, accent-filled active row.
 --------------------------------------------------------------------- */
 .sidebar-wrapper{
-    width: var(--sidebar-width);
+    /* P9 (G3): the mockup's off-canvas drawer is 280px / max 85vw at every
+       width below the desktop grid; >=1024 the shell grid column owns the
+       width (--sidebar-width 260/280). */
+    width: 280px;
     max-width: 85vw;
     background-color: var(--sidebar-bg);
     height: 100vh;
