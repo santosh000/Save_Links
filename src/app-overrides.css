@@ -646,6 +646,275 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
     border-radius: 10px;
 }
 
+/* ---------------------------------------------------------------------
+   P11: sidebar folder navigation (read-only tree)
+   Sidebar-specific classes only — FolderManager's .folder-* selectors are
+   never reused here, so existing tests cannot match two trees. The visual
+   language is the sidebar's own: 36px rows, hover surface, accent-soft
+   active block, shared focus ring, theme tokens.
+--------------------------------------------------------------------- */
+.sidebar-folder-tree{
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.sidebar-folder-node{
+    min-width: 0;
+}
+
+.sidebar-folder-line{
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 36px;
+    padding-inline-end: 8px;
+    border-radius: var(--radius-sm);
+    color: var(--sidebar-text);
+    transition: color var(--transition-normal), background-color var(--transition-normal);
+}
+
+@media (hover: hover) and (pointer: fine){
+.sidebar-folder-line:hover{
+    background-color: var(--sidebar-hover-bg);
+}
+}
+
+/* Selected folder: the same soft accent block as the active nav row. */
+.sidebar-folder-line.active{
+    background-color: var(--sidebar-active-bg);
+    color: var(--accent);
+}
+.sidebar-folder-line.active .sidebar-folder-label{
+    font-weight: var(--weight-medium);
+}
+
+/* Disclosure: a separate real button (aria-expanded lives here). */
+.sidebar-folder-toggle{
+    width: 22px;
+    height: 22px;
+    flex-shrink: 0;
+    display: grid;
+    place-items: center;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--sidebar-title);
+    cursor: pointer;
+    padding: 0;
+}
+.sidebar-folder-toggle svg{
+    width: 13px;
+    height: 13px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    transition: transform var(--transition-fast);
+}
+.sidebar-folder-toggle[aria-expanded="true"] svg{
+    transform: rotate(90deg);
+}
+@media (hover: hover) and (pointer: fine){
+.sidebar-folder-toggle:hover{
+    background-color: var(--sidebar-hover-bg);
+    color: var(--text-h);
+}
+}
+.sidebar-folder-toggle:focus-visible{
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: 1px;
+}
+
+/* Leaf alignment spacer (same box as the caret). */
+.sidebar-folder-spacer{
+    width: 22px;
+    height: 22px;
+    flex-shrink: 0;
+}
+
+/* The selectable row: a real button, keyboard reachable, never nested inside
+   the toggle. The label ellipsizes instead of overflowing the sidebar. */
+.sidebar-folder-row{
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 36px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: inherit;
+    font-family: inherit;
+    font-size: 14px;
+    text-align: left;
+    cursor: pointer;
+}
+.sidebar-folder-label{
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.sidebar-folder-row:focus-visible{
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: 1px;
+}
+
+/* P12: folder section header action (the edit-mode gear). */
+.sidebar-section-head{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    padding-inline-end: 4px;
+}
+
+.sidebar-section-action{
+    width: 24px;
+    height: 24px;
+    flex-shrink: 0;
+    display: grid;
+    place-items: center;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--sidebar-title);
+    cursor: pointer;
+    padding: 0;
+}
+.sidebar-section-action[aria-pressed="true"]{
+    background-color: var(--sidebar-active-bg);
+    color: var(--accent);
+}
+@media (hover: hover) and (pointer: fine){
+.sidebar-section-action:hover{
+    background-color: var(--sidebar-hover-bg);
+    color: var(--text-h);
+}
+}
+.sidebar-section-action:focus-visible{
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: 1px;
+}
+
+/* Folder glyph on each navigation row (the mockup's icon language). */
+.sidebar-folder-icon{
+    color: var(--sidebar-title);
+}
+.sidebar-folder-line.active .sidebar-folder-icon{
+    color: var(--accent);
+}
+
+/* P12: per-row edit affordance + its inline action panel. */
+.sidebar-folder-edit{
+    width: 24px;
+    height: 24px;
+    flex-shrink: 0;
+    display: grid;
+    place-items: center;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--sidebar-title);
+    cursor: pointer;
+    padding: 0;
+}
+.sidebar-folder-edit svg{
+    width: 13px;
+    height: 13px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+.sidebar-folder-edit[aria-expanded="true"]{
+    background-color: var(--sidebar-active-bg);
+    color: var(--accent);
+}
+@media (hover: hover) and (pointer: fine){
+.sidebar-folder-edit:hover{
+    background-color: var(--sidebar-hover-bg);
+    color: var(--text-h);
+}
+}
+.sidebar-folder-edit:focus-visible{
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: 1px;
+}
+
+.sidebar-folder-actions{
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 4px 8px 6px;
+}
+.sidebar-folder-action{
+    width: 26px;
+    height: 26px;
+    flex-shrink: 0;
+    display: grid;
+    place-items: center;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--sidebar-text);
+    cursor: pointer;
+    padding: 0;
+}
+.sidebar-folder-action svg{
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+@media (hover: hover) and (pointer: fine){
+.sidebar-folder-action:hover{
+    background-color: var(--sidebar-hover-bg);
+    color: var(--text-h);
+}
+}
+.sidebar-folder-action.delete:hover{
+    color: var(--error);
+}
+.sidebar-folder-action:focus-visible{
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: 1px;
+}
+.sidebar-folder-subrow{
+    flex: 1 1 100%;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+}
+.sidebar-folder-subrow .input{
+    flex: 1 1 120px;
+    min-width: 0;
+}
+.sidebar-folder-subrow .btn{
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+.sidebar-folder-subrow .asel{
+    flex: 1 1 130px;
+    min-width: 0;
+}
+.sidebar-folder-error{
+    flex: 1 1 100%;
+    margin: 0;
+    font-size: var(--text-xs);
+    color: var(--error);
+}
+
 /* Minimized Sidebar Adjustments */
 body.sidebar-minimized{
     --sidebar-width: 80px;
@@ -658,6 +927,12 @@ body.sidebar-minimized .sidebar-wrapper{
 
 body.sidebar-minimized .sidebar-brand span, body.sidebar-minimized .sidebar-menu-title, body.sidebar-minimized .sidebar-menu-link span, body.sidebar-minimized .sidebar-menu-badge{
     display: none !important;
+}
+
+/* P11: the minimized sidebar is icon-only — the folder tree has no icon form,
+   so it is hidden there (the Folders view keeps the full tree). */
+body.sidebar-minimized .sidebar-folder-tree{
+    display: none;
 }
 
 body.sidebar-minimized .sidebar-brand{

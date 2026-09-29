@@ -3,7 +3,7 @@ import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, toRaw } fro
 import { sortLinks, SORT_OPTIONS, DEFAULT_SORT } from './utils/sort.js'
 import { CATEGORIES } from './utils/categorize.js'
 import { LINK_TYPES, LINK_TYPE_LABELS } from './domain/link.js'
-import { descendantIds, folderPath, folderSelectOptions as buildFolderSelectOptions } from './utils/folderTree.js'
+import { descendantIds, folderPath, folderSelectOptions as buildFolderSelectOptions, childrenMap, flattenFolders, validParentIds, MAX_FOLDER_DEPTH } from './utils/folderTree.js'
 import { paginationLabel } from './utils/pagination.js'
 import { pickImportSlices } from './utils/backup.js'
 import { getStorageKey } from './utils/environment.js'
@@ -170,8 +170,11 @@ function go(view) { currentView.value = view; sidebarOpen.value = false }
 // Folders view; More opens the real navigation drawer.
 function showAllLinks() { filterStatus.value = ''; filterFolder.value = ''; go('links') }
 function showFavorites() { filterStatus.value = 'favorite'; filterFolder.value = ''; go('links') }
-const allLinksActive = computed(() => currentView.value === 'links' && filterStatus.value !== 'favorite')
-const favoritesActive = computed(() => currentView.value === 'links' && filterStatus.value === 'favorite')
+// P12: one destination, one active state. Links/All is the complete unfiltered
+// collection; while a folder or status filter is applied the filter (the
+// folder row / the Favorites destination) owns the active state.
+const allLinksActive = computed(() => currentView.value === 'links' && !filterFolder.value && !filterStatus.value)
+const favoritesActive = computed(() => currentView.value === 'links' && filterStatus.value === 'favorite' && !filterFolder.value)
 
 // Desktop sidebar minimize + fullscreen toggle
 const sidebarMinimized = ref(false)
@@ -426,6 +429,168 @@ function handleSelectFolder(value) {
   else if (value === '__favorites') { filterFolder.value = ''; filterStatus.value = 'favorite' }
   else { filterFolder.value = value; filterStatus.value = '' }
   currentView.value = 'links'
+  // P11: keep the sidebar tree's active row visible — selecting a nested folder
+  // (from either surface) expands its ancestors. Presentation-only state.
+  if (value && value !== '__all' && value !== '__favorites' && value !== '__unfiled') revealSidebarFolder(value)
+}
+
+// ---- P11: sidebar folder navigation (read-only tree) ----
+// Presentation-only: it renders the SAME `folders` ref and calls the SAME
+// handleSelectFolder path (subtree filtering via folderFilterIds). No folder
+// data, mutation or filtering logic is duplicated here; expansion is local UI
+// state, independent of FolderManager's expandedIds.
+const sidebarExpandedIds = ref(new Set())
+const sidebarChildren = computed(() => childrenMap(folders.value))
+function sidebarHasChildren(id) { return (sidebarChildren.value.get(id) || []).length > 0 }
+const sidebarFolderRows = computed(() =>
+  flattenFolders(folders.value, { isExpanded: (f) => sidebarExpandedIds.value.has(f.id) })
+)
+function toggleSidebarFolder(id) {
+  const next = new Set(sidebarExpandedIds.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  sidebarExpandedIds.value = next
+}
+function isSidebarFolderActive(id) { return filterFolder.value === id }
+function revealSidebarFolder(id) {
+  const byId = new Map(folders.value.map((f) => [f.id, f]))
+  const next = new Set(sidebarExpandedIds.value)
+  const seen = new Set()
+  let current = byId.get(id)
+  while (current && current.parentId && !seen.has(current.parentId)) {
+    seen.add(current.parentId)
+    next.add(current.parentId)
+    current = byId.get(current.parentId)
+  }
+  sidebarExpandedIds.value = next
+}
+function selectSidebarFolder(id) {
+  handleSelectFolder(id)
+  // P11: below 1024 the sidebar is the drawer — selecting a folder closes it.
+  sidebarOpen.value = false
+}
+
+// Expand one folder without toggling (used after add-subfolder/move so the
+// affected branch is visible, matching the Folders view behaviour).
+function expandSidebarFolder(id) {
+  const next = new Set(sidebarExpandedIds.value)
+  next.add(id)
+  sidebarExpandedIds.value = next
+}
+
+// ---- P12: sidebar folder edit mode (compact management surface) ----
+// Presentation state only. Every mutation goes through the SAME App.vue
+// handlers the Folders view uses (useFolders validation + FOLDER_ERRORS + the
+// delete-subtree dialog), so the sidebar never becomes a second folder
+// management system. FolderManager itself is untouched.
+const sidebarEditMode = ref(false)
+const sidebarEditRowId = ref(null) // row whose action panel is open
+const sidebarRenamingId = ref(null)
+const sidebarRenameName = ref('')
+const sidebarChildParentId = ref(null)
+const sidebarChildName = ref('')
+const sidebarMovingId = ref(null)
+const sidebarFolderError = ref('')
+
+// Function refs: the editors live inside the tree's v-for, where a plain
+// template ref would be collected into an array instead of the element.
+const sidebarRenameInputEl = ref(null)
+const sidebarChildInputEl = ref(null)
+const sidebarMoveSelectEl = ref(null)
+function setSidebarRenameInput(el) { sidebarRenameInputEl.value = el }
+function setSidebarChildInput(el) { sidebarChildInputEl.value = el }
+function setSidebarMoveSelect(el) { sidebarMoveSelectEl.value = el }
+
+function closeSidebarRowEditor() {
+  sidebarEditRowId.value = null
+  sidebarRenamingId.value = null
+  sidebarRenameName.value = ''
+  sidebarChildParentId.value = null
+  sidebarChildName.value = ''
+  sidebarMovingId.value = null
+  sidebarFolderError.value = ''
+}
+function toggleSidebarEditMode() {
+  sidebarEditMode.value = !sidebarEditMode.value
+  closeSidebarRowEditor()
+}
+function toggleSidebarRowEditor(id) {
+  const opening = sidebarEditRowId.value !== id
+  closeSidebarRowEditor()
+  if (opening) sidebarEditRowId.value = id
+}
+async function startSidebarRename(f) {
+  sidebarFolderError.value = ''
+  sidebarRenamingId.value = f.id
+  sidebarRenameName.value = f.name
+  sidebarChildParentId.value = null
+  sidebarMovingId.value = null
+  await nextTick()
+  sidebarRenameInputEl.value?.focus()
+}
+function cancelSidebarRename() { sidebarRenamingId.value = null; sidebarRenameName.value = ''; sidebarFolderError.value = '' }
+function saveSidebarRename(id) {
+  sidebarFolderError.value = ''
+  const name = sidebarRenameName.value.trim()
+  if (!name) { sidebarFolderError.value = 'Folder name required'; return }
+  handleRenameFolder({ id, name }, (result) => {
+    if (result && result.ok) cancelSidebarRename()
+    else sidebarFolderError.value = (result && result.error) || 'Failed'
+  })
+}
+async function startSidebarChildCreate(f) {
+  sidebarFolderError.value = ''
+  sidebarChildParentId.value = f.id
+  sidebarChildName.value = ''
+  sidebarRenamingId.value = null
+  sidebarMovingId.value = null
+  expandSidebarFolder(f.id) // the new child must be visible under its parent
+  await nextTick()
+  sidebarChildInputEl.value?.focus()
+}
+function cancelSidebarChildCreate() { sidebarChildParentId.value = null; sidebarChildName.value = ''; sidebarFolderError.value = '' }
+function saveSidebarChildCreate(parentId) {
+  sidebarFolderError.value = ''
+  const name = sidebarChildName.value.trim()
+  if (!name) { sidebarFolderError.value = 'Folder name required'; return }
+  handleCreateFolder(name, parentId, (result) => {
+    if (result && result.ok) cancelSidebarChildCreate()
+    else sidebarFolderError.value = (result && result.error) || 'Failed'
+  })
+}
+// Valid move destinations only — the canonical folderTree helper (self,
+// descendants and depth-exceeding parents are excluded); useFolders.moveFolder
+// re-validates at runtime, exactly like the Folders view.
+function sidebarMoveOptions(id) {
+  const valid = new Set(validParentIds(folders.value, id))
+  const opts = [{ value: '__root', label: 'Root (top level)' }]
+  for (const { folder, depth } of flattenFolders(folders.value)) {
+    if (folder.id === id || !valid.has(folder.id)) continue
+    opts.push({ value: folder.id, label: '\u00A0\u00A0'.repeat(Math.max(0, depth - 1)) + folder.name })
+  }
+  return opts
+}
+async function startSidebarMove(f) {
+  sidebarFolderError.value = ''
+  sidebarMovingId.value = f.id
+  sidebarRenamingId.value = null
+  sidebarChildParentId.value = null
+  await nextTick()
+  sidebarMoveSelectEl.value?.$el?.querySelector('.asel-trigger')?.focus()
+}
+function cancelSidebarMove() { sidebarMovingId.value = null }
+function moveSidebarFolder(id, value) {
+  if (!value) return
+  const parentId = value === '__root' ? null : value
+  sidebarFolderError.value = ''
+  handleMoveFolder({ id, parentId }, (result) => {
+    if (result && result.ok) {
+      cancelSidebarMove()
+      if (parentId) expandSidebarFolder(parentId)
+    } else {
+      sidebarFolderError.value = (result && result.error) || 'Failed'
+    }
+  })
 }
 
 const toast = ref('')
@@ -967,18 +1132,127 @@ onBeforeUnmount(() => {
           <div class="sidebar-menu-title">Menu</div>
           <ul class="sidebar-menu-list">
             <li class="sidebar-menu-item">
-              <a href="#" class="sidebar-menu-link" :class="{ active: currentView === 'links' }" @click.prevent="go('links')">
+              <a href="#" class="sidebar-menu-link" :class="{ active: allLinksActive }" :aria-current="allLinksActive ? 'page' : undefined" @click.prevent="showAllLinks">
                 <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/></svg>
                 <span>Links</span>
                 <span class="sidebar-menu-badge">{{ total }}</span>
               </a>
             </li>
             <li class="sidebar-menu-item">
-              <a href="#" class="sidebar-menu-link" :class="{ active: currentView === 'folders' }" @click.prevent="go('folders')">
+              <a href="#" class="sidebar-menu-link" :class="{ active: currentView === 'folders' }" :aria-current="currentView === 'folders' ? 'page' : undefined" @click.prevent="go('folders')">
                 <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>
                 <span>Folders</span>
                 <span v-if="folders.length" class="sidebar-menu-badge">{{ folders.length }}</span>
               </a>
+            </li>
+          </ul>
+        </div>
+
+        <!-- Group: Folders (P11 navigation tree + P12 compact edit mode over
+             the real folders ref. Mutations reuse the same App.vue handlers as
+             the Folders view; management UI itself stays in that view.) -->
+        <div v-if="folders.length" class="sidebar-menu-section">
+          <div class="sidebar-menu-title sidebar-section-head">
+            <span>Folders</span>
+            <button
+              type="button"
+              class="sidebar-section-action"
+              data-testid="sidebar-folder-edit-toggle"
+              :aria-pressed="String(sidebarEditMode)"
+              :aria-label="sidebarEditMode ? 'Exit folder editing' : 'Edit folders'"
+              @click="toggleSidebarEditMode"
+            >
+              <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            </button>
+          </div>
+          <ul class="sidebar-folder-tree" data-testid="sidebar-folder-tree" aria-label="Folder navigation">
+            <li v-for="{ folder: f, depth } in sidebarFolderRows" :key="f.id" class="sidebar-folder-node">
+              <div
+                class="sidebar-folder-line"
+                :class="{ active: isSidebarFolderActive(f.id) }"
+                :style="{ paddingInlineStart: (10 + (depth - 1) * 14) + 'px' }"
+              >
+                <button
+                  v-if="sidebarHasChildren(f.id)"
+                  type="button"
+                  class="sidebar-folder-toggle"
+                  data-testid="sidebar-folder-toggle"
+                  :aria-expanded="String(sidebarExpandedIds.has(f.id))"
+                  :aria-label="(sidebarExpandedIds.has(f.id) ? 'Collapse sidebar folder ' : 'Expand sidebar folder ') + f.name"
+                  @click="toggleSidebarFolder(f.id)"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
+                </button>
+                <span v-else class="sidebar-folder-spacer" aria-hidden="true"></span>
+                <button
+                  type="button"
+                  class="sidebar-folder-row"
+                  data-testid="sidebar-folder-row"
+                  :aria-current="isSidebarFolderActive(f.id) ? 'true' : undefined"
+                  @click="selectSidebarFolder(f.id)"
+                >
+                  <svg class="ui-icon sidebar-folder-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>
+                  <span class="sidebar-folder-label">{{ f.name }}</span>
+                </button>
+                <button
+                  v-if="sidebarEditMode"
+                  type="button"
+                  class="sidebar-folder-edit"
+                  data-testid="sidebar-folder-edit-row"
+                  :aria-expanded="String(sidebarEditRowId === f.id)"
+                  :aria-label="`Edit sidebar folder ${f.name}`"
+                  @click="toggleSidebarRowEditor(f.id)"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                </button>
+              </div>
+
+              <!-- Edit panel: the row's real actions, opening the same inline
+                   editors the Folders view uses (same handlers/validation). -->
+              <div
+                v-if="sidebarEditMode && sidebarEditRowId === f.id"
+                class="sidebar-folder-actions"
+                data-testid="sidebar-folder-actions"
+                :style="{ paddingInlineStart: (10 + (depth - 1) * 14) + 'px' }"
+              >
+                <template v-if="sidebarRenamingId !== f.id">
+                  <button type="button" class="sidebar-folder-action" :aria-label="`Rename sidebar folder ${f.name}`" @click="startSidebarRename(f)">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                  </button>
+                  <button v-if="depth < MAX_FOLDER_DEPTH" type="button" class="sidebar-folder-action" :aria-label="`Add subfolder in sidebar ${f.name}`" @click="startSidebarChildCreate(f)">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v4M10 13h4"/></svg>
+                  </button>
+                  <button type="button" class="sidebar-folder-action" :aria-label="`Move sidebar folder ${f.name}`" @click="startSidebarMove(f)">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9l-3 3 3 3"/><path d="M19 9l3 3-3 3"/><path d="M2 12h20"/></svg>
+                  </button>
+                  <button type="button" class="sidebar-folder-action delete" :aria-label="`Delete sidebar folder ${f.name}`" @click="requestDeleteFolder(f.id)">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+                  </button>
+                </template>
+                <template v-else>
+                  <input :ref="setSidebarRenameInput" v-model="sidebarRenameName" class="input sm" :aria-label="`Rename sidebar folder ${f.name}`" @keydown.enter="saveSidebarRename(f.id)" @keydown.escape="cancelSidebarRename" />
+                  <button type="button" class="btn primary sm" aria-label="Save sidebar folder name" @click="saveSidebarRename(f.id)">Save</button>
+                  <button type="button" class="btn ghost sm" aria-label="Cancel sidebar rename" @click="cancelSidebarRename">Cancel</button>
+                </template>
+                <div v-if="sidebarChildParentId === f.id" class="sidebar-folder-subrow">
+                  <input :ref="setSidebarChildInput" v-model="sidebarChildName" class="input sm" :aria-label="`New sidebar subfolder name in ${f.name}`" @keydown.enter="saveSidebarChildCreate(f.id)" @keydown.escape="cancelSidebarChildCreate" />
+                  <button type="button" class="btn primary sm" aria-label="Create sidebar subfolder" @click="saveSidebarChildCreate(f.id)">Create</button>
+                  <button type="button" class="btn ghost sm" aria-label="Cancel new sidebar subfolder" @click="cancelSidebarChildCreate">Cancel</button>
+                </div>
+                <div v-if="sidebarMovingId === f.id" class="sidebar-folder-subrow">
+                  <AppSelect
+                    :ref="setSidebarMoveSelect"
+                    :id="`sidebar-move-${f.id}`"
+                    :model-value="''"
+                    variant="field"
+                    :options="sidebarMoveOptions(f.id)"
+                    :aria-label="`Move sidebar folder ${f.name} to`"
+                    @change="(v) => moveSidebarFolder(f.id, v)"
+                  />
+                  <button type="button" class="btn ghost sm" aria-label="Cancel sidebar move" @click="cancelSidebarMove">Cancel</button>
+                </div>
+                <p v-if="sidebarFolderError" class="sidebar-folder-error" role="alert">{{ sidebarFolderError }}</p>
+              </div>
             </li>
           </ul>
         </div>
