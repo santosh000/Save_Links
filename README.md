@@ -159,15 +159,19 @@ The dev server is available at `http://localhost:5173` by default.
 - `npm run build` - create a production build in `dist/`
 - `npm run preview` - preview the production build locally
 
+### Deployment and release
+
+Deployment and release procedures are documented in [MAINTAINERS.md](MAINTAINERS.md). The supported scripts are:
+
+- `npm run deploy:worker` - build and deploy the production Cloudflare Worker
+- `npm run deploy:pages` - deploy the static build to the Pages project's production branch
+- `npm run deploy:pages:preview` - create a temporary preview deployment
+
 ### Tech stack
 
 Save_Links is built with **Vue 3** and **Vite**, stores data in the browser's **IndexedDB**, and uses a **service worker and PWA manifest** for installation and offline support. Unit tests use **Vitest**, and end-to-end tests use **Playwright**.
 
 Authentication and cloud synchronization use **Cloudflare Workers**, **D1 (SQLite)**, and **OAuth (Google primary, GitHub)**.
-
-## Development with OpenCode
-
-Save_Links is developed with OpenCode as an AI-assisted development tool. Project-specific development instructions, architecture notes, and workflow guidance are maintained in `.opencode/`. Changes are validated with automated unit, end-to-end, and build checks.
 
 ## Roadmap
 
