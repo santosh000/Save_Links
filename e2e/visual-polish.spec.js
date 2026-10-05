@@ -31,7 +31,7 @@ shadowSm: read('--shadow-sm', 'box-shadow'),
 shadowMd: read('--shadow-md', 'box-shadow'),
 shadowLg: read('--shadow-lg', 'box-shadow'),
 accentBorder: read('--accent-border', 'border-top-color'),
-sidebarActiveBg: read('--sidebar-active-bg', 'background-color'),
+accentSoft: read('--accent-soft', 'background-color'),
 sm: read('--radius-sm', 'border-top-left-radius'),
 radius: read('--radius', 'border-top-left-radius'),
 }
@@ -72,7 +72,7 @@ test.describe('Visual polish (Step 2C-6)', () => {
     // fill + accent text + filled count pill (supersedes the 2C-6 rail).
     const active = page.locator('.sidebar-menu-link.active')
     await expect(active).toHaveCSS('border-inline-start-width', '0px')
-    await expect(active).toHaveCSS('background-color', t.sidebarActiveBg)
+    await expect(active).toHaveCSS('background-color', t.accentSoft)
     await expect(active).toHaveCSS('color', t.accent)
     await expect(active).toHaveCSS('border-start-start-radius', t.sm)
     await expect(active).toHaveCSS('border-start-end-radius', t.sm)
@@ -198,7 +198,7 @@ test.describe('Visual polish (Step 2C-6)', () => {
 
     const active = page.locator('.sidebar-menu-link.active')
     await expect(active).toHaveCSS('color', t.accent)
-    await expect(active).toHaveCSS('background-color', t.sidebarActiveBg)
+    await expect(active).toHaveCSS('background-color', t.accentSoft)
 
     const search = page.locator('.navbar-search-input')
     await search.focus()

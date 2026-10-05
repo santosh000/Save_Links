@@ -572,7 +572,7 @@ function onPanelKeydown(e) {
 }
 /* The active mode's action reads as selected with existing tokens only. */
 .detail-top-actions .navbar-action-btn[aria-expanded="true"] {
-  background: var(--accent-bg);
+  background: var(--accent-soft);
   color: var(--accent);
 }
 /* Stable header grid, identical in every mode: the left slot is the only
@@ -616,7 +616,7 @@ function onPanelKeydown(e) {
   font-size: 10px;
   padding: 3px 9px;
   border-radius: 10px;
-  background: var(--accent-bg);
+  background: var(--accent-soft);
   color: var(--accent);
   text-transform: uppercase;
   letter-spacing: .05em;

@@ -277,7 +277,7 @@ async function handleSignOut() {
   transition: all var(--transition-fast);
 }
 @media (hover: hover) and (pointer: fine){
-.local-profile-edit:hover { background: var(--accent-bg); color: var(--accent); }
+.local-profile-edit:hover { background: var(--accent-soft); color: var(--accent); }
 }
 .local-profile-edit:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 2px; }
 .local-profile-edit svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; }

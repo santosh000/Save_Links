@@ -84,12 +84,21 @@
     --border-strong: #CBD5E1;
     --border-subtle: rgba(15, 23, 42, 0.06);
 
-    /* Accent — the scheme layer overrides --accent (and the derived trio);
-       the default is the mockup's indigo. */
+    /* Accent — the scheme layer overrides the accent family. Semantics:
+       --accent            text / icons / links / active nav / focus / pin
+       --accent-strong     filled controls (white text, WCAG AA)
+       --accent-hover      hover + focus fill for --accent-strong
+       --accent-text-hover text-link hover (never a fill)
+       --accent-soft       selected / active / soft accent backgrounds
+       --accent-border     borders only (never a background) */
     --accent: #4F46E5;
+    --accent-strong: var(--accent);
     --accent-hover: #4338CA;
-    --accent-bg: rgba(79, 70, 229, 0.08);
+    --accent-text-hover: #4338CA;
+    --accent-soft: rgba(79, 70, 229, 0.08);
     --accent-border: rgba(79, 70, 229, 0.25);
+    --accent-text-on-strong: #FFFFFF;
+    /* White over the neutral image scrims (not an accent fill). */
     --on-accent: #FFFFFF;
 
     /* Status (only the states the app actually renders) */
@@ -110,7 +119,6 @@
     --sidebar-text: #64748B;
     --sidebar-text-strong: #0F172A;
     --sidebar-hover-bg: #F1F5F9;
-    --sidebar-active-bg: rgba(79, 70, 229, 0.08);
     --sidebar-badge-bg: #F1F5F9;
     --sidebar-badge-text: #64748B;
 
@@ -230,7 +238,6 @@
     --sidebar-text: #8B95A8;
     --sidebar-text-strong: #E6EDF6;
     --sidebar-hover-bg: #1A1F2B;
-    --sidebar-active-bg: rgba(129, 140, 248, 0.12);
     --sidebar-badge-bg: #1A1F2B;
     --sidebar-badge-text: #8B95A8;
 
@@ -239,8 +246,10 @@
     --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.60);
 
     --accent: #818CF8;
-    --accent-hover: #A5B4FC;
-    --accent-bg: rgba(129, 140, 248, 0.12);
+    --accent-strong: #3A4BF4;
+    --accent-hover: #5261F5;
+    --accent-text-hover: #A5B4FC;
+    --accent-soft: rgba(129, 140, 248, 0.12);
     --accent-border: rgba(129, 140, 248, 0.28);
 
     --overlay: rgba(0, 0, 0, 0.6);
@@ -249,17 +258,22 @@
     --favorite: #FBBF24;
 }
 
-/* ---- Scheme accent: light (accent-only; the derived trio follows the hue) ---- */
-[data-color-scheme="ocean"]{ --accent: #5366C9; --accent-hover: color-mix(in srgb, var(--accent) 88%, #000); --accent-bg: color-mix(in srgb, var(--accent) 8%, #FFFFFF); --accent-border: color-mix(in srgb, var(--accent) 30%, var(--border)); }
-[data-color-scheme="forest"]{ --accent: #3F8064; --accent-hover: color-mix(in srgb, var(--accent) 88%, #000); --accent-bg: color-mix(in srgb, var(--accent) 8%, #FFFFFF); --accent-border: color-mix(in srgb, var(--accent) 30%, var(--border)); }
-[data-color-scheme="lavender"]{ --accent: #7969A8; --accent-hover: color-mix(in srgb, var(--accent) 88%, #000); --accent-bg: color-mix(in srgb, var(--accent) 8%, #FFFFFF); --accent-border: color-mix(in srgb, var(--accent) 30%, var(--border)); }
-[data-color-scheme="amber"]{ --accent: #B87824; --accent-hover: color-mix(in srgb, var(--accent) 88%, #000); --accent-bg: color-mix(in srgb, var(--accent) 8%, #FFFFFF); --accent-border: color-mix(in srgb, var(--accent) 30%, var(--border)); }
+/* ---- Scheme accent: light. --accent-strong stays var(--accent) except
+   Warm Amber, whose accent is not dark enough for white text; its approved
+   strong + hover are explicit. --accent-hover is the filled-control hover,
+   --accent-text-hover preserves the text-link hover (no visual change). ---- */
+[data-color-scheme="ocean"]{ --accent: #5366C9; --accent-hover: color-mix(in srgb, var(--accent) 88%, #000); --accent-text-hover: color-mix(in srgb, var(--accent) 88%, #000); --accent-soft: color-mix(in srgb, var(--accent) 8%, #FFFFFF); --accent-border: color-mix(in srgb, var(--accent) 30%, var(--border)); }
+[data-color-scheme="forest"]{ --accent: #3F8064; --accent-hover: color-mix(in srgb, var(--accent) 88%, #000); --accent-text-hover: color-mix(in srgb, var(--accent) 88%, #000); --accent-soft: color-mix(in srgb, var(--accent) 8%, #FFFFFF); --accent-border: color-mix(in srgb, var(--accent) 30%, var(--border)); }
+[data-color-scheme="lavender"]{ --accent: #7969A8; --accent-hover: color-mix(in srgb, var(--accent) 88%, #000); --accent-text-hover: color-mix(in srgb, var(--accent) 88%, #000); --accent-soft: color-mix(in srgb, var(--accent) 8%, #FFFFFF); --accent-border: color-mix(in srgb, var(--accent) 30%, var(--border)); }
+[data-color-scheme="amber"]{ --accent: #B87824; --accent-strong: #905E1C; --accent-hover: #7F5319; --accent-text-hover: color-mix(in srgb, var(--accent) 88%, #000); --accent-soft: color-mix(in srgb, var(--accent) 8%, #FFFFFF); --accent-border: color-mix(in srgb, var(--accent) 30%, var(--border)); }
 
-/* ---- Scheme accent: dark ---- */
-[data-appearance="dark"][data-color-scheme="ocean"]{ --accent: #7C8CF2; --accent-hover: color-mix(in srgb, var(--accent) 88%, #FFFFFF); --accent-bg: color-mix(in srgb, var(--accent) 12%, #000000); --accent-border: color-mix(in srgb, var(--accent) 32%, var(--border)); }
-[data-appearance="dark"][data-color-scheme="forest"]{ --accent: #62A982; --accent-hover: color-mix(in srgb, var(--accent) 88%, #FFFFFF); --accent-bg: color-mix(in srgb, var(--accent) 12%, #000000); --accent-border: color-mix(in srgb, var(--accent) 32%, var(--border)); }
-[data-appearance="dark"][data-color-scheme="lavender"]{ --accent: #A695D4; --accent-hover: color-mix(in srgb, var(--accent) 88%, #FFFFFF); --accent-bg: color-mix(in srgb, var(--accent) 12%, #000000); --accent-border: color-mix(in srgb, var(--accent) 32%, var(--border)); }
-[data-appearance="dark"][data-color-scheme="amber"]{ --accent: #E0A43A; --accent-hover: color-mix(in srgb, var(--accent) 88%, #FFFFFF); --accent-bg: color-mix(in srgb, var(--accent) 12%, #000000); --accent-border: color-mix(in srgb, var(--accent) 32%, var(--border)); }
+/* ---- Scheme accent: dark. Filled controls use the approved darker strong
+   values (white text >= 4.5:1); --accent stays the text/icon colour and
+   --accent-text-hover keeps the link hover lightening. ---- */
+[data-appearance="dark"][data-color-scheme="ocean"]{ --accent: #7C8CF2; --accent-strong: #374FEB; --accent-hover: #4F64ED; --accent-text-hover: color-mix(in srgb, var(--accent) 88%, #FFFFFF); --accent-soft: color-mix(in srgb, var(--accent) 12%, #000000); --accent-border: color-mix(in srgb, var(--accent) 32%, var(--border)); }
+[data-appearance="dark"][data-color-scheme="forest"]{ --accent: #62A982; --accent-strong: #3B6C51; --accent-hover: #537E66; --accent-text-hover: color-mix(in srgb, var(--accent) 88%, #FFFFFF); --accent-soft: color-mix(in srgb, var(--accent) 12%, #000000); --accent-border: color-mix(in srgb, var(--accent) 32%, var(--border)); }
+[data-appearance="dark"][data-color-scheme="lavender"]{ --accent: #A695D4; --accent-strong: #6C50B8; --accent-hover: #7E65C1; --accent-text-hover: color-mix(in srgb, var(--accent) 88%, #FFFFFF); --accent-soft: color-mix(in srgb, var(--accent) 12%, #000000); --accent-border: color-mix(in srgb, var(--accent) 32%, var(--border)); }
+[data-appearance="dark"][data-color-scheme="amber"]{ --accent: #E0A43A; --accent-strong: #835B15; --accent-hover: #926F31; --accent-text-hover: color-mix(in srgb, var(--accent) 88%, #FFFFFF); --accent-soft: color-mix(in srgb, var(--accent) 12%, #000000); --accent-border: color-mix(in srgb, var(--accent) 32%, var(--border)); }
 
 /* ---------------------------------------------------------------------
    3. Base & Typography
@@ -448,7 +462,7 @@ a{
 }
 @media (hover: hover) and (pointer: fine){
 a:hover{
-    color: var(--accent-hover);
+    color: var(--accent-text-hover);
 }
 }
 
@@ -469,7 +483,7 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
 }
 .btn:active:not(:disabled){ transform: scale(0.985); }
 
-::selection{ background: var(--accent-bg); }
+::selection{ background: var(--accent-soft); }
 
 /* Generic content-entrance: cards and empty states rise 6px while fading. */
 @keyframes rise-in {
@@ -667,7 +681,7 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
 /* Active: the mockup's soft accent block + accent text + filled count pill. */
 .sidebar-wrapper .sidebar-menu-link.active{
     color: var(--accent);
-    background-color: var(--sidebar-active-bg);
+    background-color: var(--accent-soft);
     font-weight: var(--weight-medium);
 }
 
@@ -677,8 +691,8 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
 }
 
 .sidebar-wrapper .sidebar-menu-link.active .sidebar-menu-badge{
-    background-color: var(--accent);
-    color: var(--on-accent);
+    background-color: var(--accent-strong);
+    color: var(--accent-text-on-strong);
 }
 
 /* Counts: the mockup's small pill (surface-2, 11px, radius 10). */
@@ -729,7 +743,7 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
 
 /* Selected folder: the same soft accent block as the active nav row. */
 .sidebar-folder-line.active{
-    background-color: var(--sidebar-active-bg);
+    background-color: var(--accent-soft);
     color: var(--accent);
 }
 .sidebar-folder-line.active .sidebar-folder-label{
@@ -960,7 +974,7 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
 }
 .sidebar-folder-more[aria-expanded="true"]{
     opacity: 1;
-    background-color: var(--sidebar-active-bg);
+    background-color: var(--accent-soft);
     color: var(--accent);
 }
 
@@ -1000,7 +1014,7 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
     font-size: 13.5px;
     color: var(--text-h);
     outline: none;
-    box-shadow: 0 0 0 3px var(--accent-bg);
+    box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .sidebar-folder-error{
@@ -1165,7 +1179,7 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
 }
 
 .tag-pill.active{
-    background-color: var(--accent-bg);
+    background-color: var(--accent-soft);
     border-color: var(--accent);
     color: var(--accent);
 }
@@ -1743,7 +1757,7 @@ body.sidebar-minimized .sidebar-menu-link .bi{
 }
 
 .table-footer-control .pagination .page-item.active .page-link{
-    background-color: var(--accent-bg);
+    background-color: var(--accent-soft);
     color: var(--accent);
     font-weight: var(--weight-semibold);
 }
@@ -1975,14 +1989,14 @@ body:has(.dialog-backdrop, .account-backdrop, .import-preview-backdrop, .lp-back
   font-size: var(--text-sm);
 }
 .btn.primary{
-  background-color: var(--accent);
-  border-color: var(--accent);
-  color: var(--on-accent);
+  background-color: var(--accent-strong);
+  border-color: var(--accent-strong);
+  color: var(--accent-text-on-strong);
 }
 .btn.primary:focus-visible{
   background-color: var(--accent-hover);
   border-color: var(--accent-hover);
-  color: var(--on-accent);
+  color: var(--accent-text-on-strong);
 }
 .btn.secondary{
   background-color: var(--card);
@@ -2017,7 +2031,7 @@ body:has(.dialog-backdrop, .account-backdrop, .import-preview-backdrop, .lp-back
 .btn.primary:hover{
   background-color: var(--accent-hover);
   border-color: var(--accent-hover);
-  color: var(--on-accent);
+  color: var(--accent-text-on-strong);
 }
 .btn.secondary:hover{
   background-color: var(--muted-bg);
@@ -2162,9 +2176,9 @@ body:has(.dialog-backdrop, .account-backdrop, .import-preview-backdrop, .lp-back
   transition: background-color var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
 }
 .item-check input:checked + .item-check-box{
-  background-color: var(--accent);
-  border-color: var(--accent);
-  color: var(--on-accent);
+  background-color: var(--accent-strong);
+  border-color: var(--accent-strong);
+  color: var(--accent-text-on-strong);
 }
 .item-check input:focus-visible + .item-check-box{
   outline: var(--focus-ring-width) solid var(--focus-ring);
@@ -2279,7 +2293,7 @@ body:has(.dialog-backdrop, .account-backdrop, .import-preview-backdrop, .lp-back
 }
 /* A filter that actually narrows the list reads as the mockup's active chip. */
 .asel--header.is-active .asel-trigger {
-    background-color: var(--accent-bg);
+    background-color: var(--accent-soft);
     border-color: var(--accent-border);
     color: var(--accent);
 }
@@ -2567,7 +2581,7 @@ select,
     transition: background-color var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
 }
 .type-pill.active{
-    background-color: var(--accent-bg);
+    background-color: var(--accent-soft);
     border-color: var(--accent);
     color: var(--accent);
     font-weight: var(--weight-medium);
@@ -2623,12 +2637,12 @@ select,
     transition: transform .15s ease;
 }
 .switch input:checked + .switch-track{
-    background-color: var(--accent);
-    border-color: var(--accent);
+    background-color: var(--accent-strong);
+    border-color: var(--accent-strong);
 }
 .switch input:checked + .switch-track .switch-thumb{
     transform: translateX(16px);
-    background-color: #fff;
+    background-color: var(--accent-text-on-strong);
 }
 .switch input:focus-visible + .switch-track{
     outline: var(--focus-ring-width) solid var(--focus-ring);
@@ -2641,7 +2655,7 @@ select,
     gap: 6px;
     padding: 0 14px;
     min-height: var(--control-height);
-    background-color: var(--accent-bg);
+    background-color: var(--accent-soft);
     border: 1px solid var(--accent);
     border-radius: var(--radius-sm);
     color: var(--accent);
@@ -2653,8 +2667,8 @@ select,
 }
 @media (hover: hover) and (pointer: fine){
     .fetch-btn:hover:not(:disabled){
-        background-color: var(--accent);
-        color: var(--on-accent);
+        background-color: var(--accent-strong);
+        color: var(--accent-text-on-strong);
     }
 }
 .fetch-btn:disabled{

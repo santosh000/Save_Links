@@ -137,7 +137,7 @@ defineProps({
   place-items: center;
   margin-bottom: var(--space-4);
   border-radius: var(--radius);
-  background: var(--accent-bg);
+  background: var(--accent-soft);
   color: var(--accent);
   flex-shrink: 0;
 }

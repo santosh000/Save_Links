@@ -90,7 +90,7 @@ const schemes = [
 @media (hover: hover) and (pointer: fine){
 .theme-opt:hover { border-color: var(--accent); background: var(--muted-bg); color: var(--text-h); }
 }
-.theme-opt.active { border-color: var(--accent); background: var(--accent-bg); color: var(--accent); }
+.theme-opt.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 .theme-opt:has(input:focus-visible) { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 2px; }
 .theme-opt input[type="radio"] {
   position: absolute; inset: 0; width: 100%; height: 100%;
@@ -125,7 +125,8 @@ const schemes = [
 /* Selected: the dot carries the reference's enlarged ring/scale treatment. */
 .swatch.active .swatch-dot { transform: scale(1.1); outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 4px; }
 /* White check reads on every scheme swatch, including the mid-tone dark
-   accents, so it stays a fixed value rather than following --on-accent. */
+   accents, so it stays a fixed value rather than following
+   --accent-text-on-strong. */
 .swatch-check { color: #fff; stroke-width: 2.5; }
 .swatch-dot.none .swatch-check { color: var(--text-h); }
 .swatch-none { color: var(--muted); }

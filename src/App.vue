@@ -2196,8 +2196,8 @@ onBeforeUnmount(() => {
   height: 54px;
   border-radius: var(--radius-full);
   border: none;
-  background: var(--accent);
-  color: var(--on-accent);
+  background: var(--accent-strong);
+  color: var(--accent-text-on-strong);
   display: none;
   align-items: center;
   justify-content: center;
@@ -2381,20 +2381,21 @@ onBeforeUnmount(() => {
   color: var(--accent);
   font-size: 11.5px;
   font-weight: var(--weight-medium);
-  background: var(--accent-bg);
+  background: var(--accent-soft);
   border-radius: 6px;
   padding: 3px 9px;
   cursor: pointer;
   transition: background-color var(--transition-fast);
 }
 @media (hover: hover) and (pointer: fine) {
-  .select-visible-label:hover { background: var(--accent-border); }
+  /* Border token is never a background: hover deepens the label's text hue. */
+  .select-visible-label:hover { color: var(--accent-text-hover); }
 }
 .select-visible input {
   width: 15px;
   height: 15px;
   margin: 0;
-  accent-color: var(--accent);
+  accent-color: var(--accent-strong);
   cursor: pointer;
 }
 .select-visible input:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 2px; }
@@ -2585,7 +2586,7 @@ onBeforeUnmount(() => {
    when any filter is on so the control reads as state, not decoration. */
 .filterbar .chip.active,
 .filterbar .filter-chip {
-  background: var(--accent-bg);
+  background: var(--accent-soft);
   border-color: var(--accent-border);
   color: var(--accent);
 }
@@ -2608,7 +2609,7 @@ onBeforeUnmount(() => {
   padding: 0;
 }
 @media (hover: hover) and (pointer: fine){
-.chip-clear:hover { background: var(--accent); color: var(--on-accent); }
+.chip-clear:hover { background: var(--accent-strong); color: var(--accent-text-on-strong); }
 }
 .chip-clear-all {
   flex-shrink: 0;
@@ -2688,7 +2689,7 @@ onBeforeUnmount(() => {
   height: 52px;
   margin: 0 auto 10px;
   color: var(--accent);
-  background: var(--accent-bg);
+  background: var(--accent-soft);
   border-radius: var(--radius-full);
   display: grid;
   place-items: center;

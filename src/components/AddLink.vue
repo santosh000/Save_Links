@@ -277,8 +277,8 @@ defineExpose({ open, toggleFrom, close })
   gap: var(--space-1);
   width: auto;
   min-height: var(--control-height-sm);
-  background: var(--accent);
-  color: var(--on-accent);
+  background: var(--accent-strong);
+  color: var(--accent-text-on-strong);
   border: none;
   border-radius: var(--radius-sm);
   cursor: pointer;
@@ -296,9 +296,9 @@ defineExpose({ open, toggleFrom, close })
   width: 18px;
   height: 18px;
   border-radius: var(--radius-full);
-  background: color-mix(in srgb, var(--on-accent) 18%, transparent);
+  background: color-mix(in srgb, var(--accent-text-on-strong) 18%, transparent);
   border: none;
-  color: var(--on-accent);
+  color: var(--accent-text-on-strong);
   display: grid;
   place-items: center;
   flex-shrink: 0;
@@ -306,7 +306,7 @@ defineExpose({ open, toggleFrom, close })
 }
 .add-toggle-icon svg { width: 10px; height: 10px; }
 @media (hover: hover) and (pointer: fine){
-.add-toggle:hover .add-toggle-icon { background: color-mix(in srgb, var(--on-accent) 28%, transparent); color: var(--on-accent); }
+.add-toggle:hover .add-toggle-icon { background: color-mix(in srgb, var(--accent-text-on-strong) 28%, transparent); color: var(--accent-text-on-strong); }
 }
 .add-toggle-label { font-weight: var(--weight-semibold); font-size: var(--text-sm); }
 .add-toggle-hint { font-size: 12.5px; color: var(--muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -303,7 +303,7 @@ const typeIcon = computed(() => linkTypeIcon(props.link.type))
 /* Selection: accent border + soft ring on the mockup's elevated shadow. */
 .card.selected {
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-bg), var(--shadow-md);
+  box-shadow: 0 0 0 2px var(--accent-soft), var(--shadow-md);
 }
 /* Banner: the mockup's fixed-height media surface (100 / 120 / 130px), type
    glyph on a soft accent wash when the link has no real image. */
@@ -393,7 +393,7 @@ const typeIcon = computed(() => linkTypeIcon(props.link.type))
 .tag {
   font-size: 10.5px;
   color: var(--accent);
-  background: var(--accent-bg);
+  background: var(--accent-soft);
   padding: 2px 7px;
   border-radius: 8px;
 }

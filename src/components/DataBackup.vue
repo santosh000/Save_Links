@@ -428,7 +428,7 @@ function handleImportClick() {
 }
 }
 .import-preview-radio input[type="radio"] {
-  accent-color: var(--accent);
+  accent-color: var(--accent-strong);
   width: 16px;
   height: 16px;
   flex-shrink: 0;

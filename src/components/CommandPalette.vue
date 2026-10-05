@@ -166,7 +166,7 @@ function activeId() {
   text-align: left;
   cursor: pointer;
 }
-.command-item.active { background: var(--accent-bg); color: var(--accent); }
+.command-item.active { background: var(--accent-soft); color: var(--accent); }
 .command-label { flex: 1 1 auto; min-width: 0; }
 .command-group { flex-shrink: 0; font-size: var(--text-xs); color: var(--muted); }
 .command-item.active .command-group { color: var(--accent); }

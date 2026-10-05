@@ -288,7 +288,7 @@ function saveEdit(patch) {
    — soft accent fill + the same reserved accent edge. Declared after .selected
    so the open row stays visible when it is also checked. */
 .link-row.inspected {
-  background-color: var(--accent-bg);
+  background-color: var(--accent-soft);
   border-inline-start-color: var(--accent);
 }
 /* Row checkbox: quiet at rest, no hover restyle, accent check when selected.
