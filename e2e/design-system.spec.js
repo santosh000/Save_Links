@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { openView, saveLink } from './helpers.js'
+import { openView, saveLink, selectColorScheme } from './helpers.js'
 
 const css = (page, sel, prop) =>
   page.evaluate(([s, p]) => {
@@ -20,9 +20,11 @@ test('dropdown: custom menu is neutral, drives value, and keeps native semantics
   await saveLink(page, { url: 'https://example.com/b', title: 'Beta' })
   await openView(page, 'links')
 
-  const trigger = page.locator('#filter-sort').locator('xpath=following-sibling::button')
+  // P15.10: the type chip is the filter bar's header-variant AppSelect (the
+  // old sort select is gone with the sort UI).
+  const trigger = page.locator('#filter-type').locator('xpath=following-sibling::button')
   await expect(trigger).toBeVisible()
-  await expect(trigger.locator('.asel-value')).toHaveText('Newest')
+  await expect(trigger.locator('.asel-value')).toHaveText('Types')
 
   // open -> neutral menu, no accent-tinted rows
   await trigger.click()
@@ -41,14 +43,14 @@ test('dropdown: custom menu is neutral, drives value, and keeps native semantics
   }) || menuBg)
 
   // pick an option with the mouse
-  await menu.getByRole('option', { name: 'Z–A' }).click()
-  await expect(trigger.locator('.asel-value')).toHaveText('Z–A')
-  expect(await page.inputValue('#filter-sort')).toBe('title-za')
+  await menu.getByRole('option', { name: 'Video' }).click()
+  await expect(trigger.locator('.asel-value')).toHaveText('Video')
+  expect(await page.inputValue('#filter-type')).toBe('video')
 
   // legacy automation path still works (hidden native select is the value carrier)
-  await page.selectOption('#filter-sort', 'title-az')
-  await expect(trigger.locator('.asel-value')).toHaveText('A–Z')
-  expect(await page.inputValue('#filter-sort')).toBe('title-az')
+  await page.selectOption('#filter-type', 'docs')
+  await expect(trigger.locator('.asel-value')).toHaveText('Docs')
+  expect(await page.inputValue('#filter-type')).toBe('docs')
 
   // keyboard: open + arrow + enter
   await trigger.focus()
@@ -74,17 +76,17 @@ test('dropdown + overlay stay neutral in every scheme (light and dark)', async (
     for (const [label, attr] of schemes) {
       await openView(page, 'settings')
       await page.getByLabel(`${appearance} theme`).click()
-      await page.getByLabel(`${label} color scheme`).click()
+      await selectColorScheme(page, label)
       await expect(page.locator('html')).toHaveAttribute('data-color-scheme', attr)
 
       // dropdown menu must be neutral: its background equals the raised surface
       await openView(page, 'links')
-      const trigger = page.locator('#filter-status').locator('xpath=following-sibling::button')
+      const trigger = page.locator('#filter-type').locator('xpath=following-sibling::button')
       await trigger.click()
       await expect(page.getByRole('listbox')).toBeVisible()
       const menuBg = parseRgb(await css(page, '.asel-menu', 'background-color'))
       // hover row uses the neutral inset surface, not the accent
-      await page.getByRole('option', { name: 'Favorites' }).hover()
+      await page.getByRole('option', { name: 'Video' }).hover()
       const rowBg = parseRgb(await css(page, '.asel-option.is-active', 'background-color'))
       const accent = parseRgb(await page.evaluate(() => {
         const probe = document.createElement('div')
@@ -145,8 +147,9 @@ test('light surfaces and the dark page match the mockup palette', async ({ page 
   expect(await css(page, 'html', '--border')).toBe('#232A38')
   expect(await css(page, 'html', '--text-h')).toBe('#E6EDF6')
   expect(await css(page, 'html', '--accent')).toBe('#818CF8')
-  const darkBody = parseRgb(await css(page, 'body', 'background-color'))
-  expect(darkBody.slice(0, 3).join(',')).toBe('11,14,20') // #0B0E14
+  // The page canvas animates to dark (~200ms); poll for the final value.
+  await expect.poll(async () => parseRgb(await css(page, 'body', 'background-color')).slice(0, 3).join(','))
+    .toBe('11,14,20') // #0B0E14
 })
 
 test('all three dropdown variants are token-driven and consistent', async ({ page }) => {
@@ -162,6 +165,7 @@ test('all three dropdown variants are token-driven and consistent', async ({ pag
 
   // field (Add link form): inset surface, fills its field
   await page.locator('.content-head .add-toggle').click()
+  await page.getByRole('button', { name: 'More options', exact: true }).click()
   await expect(page.locator('#save-category')).toBeAttached()
   const fieldBg = parseRgb(await css(page, '.asel--field .asel-trigger', 'background-color'))
   const mutedBg = parseRgb(await page.evaluate(() => {

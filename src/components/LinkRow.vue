@@ -1,9 +1,11 @@
 <script setup>
-import { ref, watch, computed, nextTick } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import { CATEGORIES } from '../utils/categorize.js'
+import { linkTypeIcon } from '../utils/linkTypeIcon.js'
 import { useAnchoredPopover } from '../utils/anchoredPopover.js'
 import EditLinkForm from './EditLinkForm.vue'
 import AppSelect from './AppSelect.vue'
+import Icon from './Icon.vue'
 
 // Intl.DateTimeFormat construction is costly; build once per page load
 // instead of once per row per render (matters at 500–1000 links).
@@ -16,14 +18,17 @@ const props = defineProps({
   link: { type: Object, required: true },
   folders: { type: Array, default: () => [] },
   mode: { type: String, default: 'list' }, // 'list' | 'compact'
-  selected: { type: Boolean, default: false }
+  selected: { type: Boolean, default: false },
+  // Detail-panel inspection (separate from bulk selection): the row whose
+  // record is currently open in the right-hand panel.
+  inspected: { type: Boolean, default: false }
 })
-const emit = defineEmits(['toggle-important', 'toggle-must-have', 'toggle-favorite', 'toggle-pin', 'set-status', 'delete', 'edit', 'set-folder', 'copy', 'share', 'select', 'inspect'])
+const emit = defineEmits(['toggle-favorite', 'toggle-pin', 'delete', 'edit', 'set-folder', 'copy', 'share', 'select', 'inspect'])
 
-// Quick-action menu (Open / Copy link / Share / Category / Folder / Delete):
-// the same anchored-popover infrastructure and neutral menu surface as LinkCard
-// and the app's mobile "More" menu. Category/Folder apply through the existing
-// App.vue handlers and close the menu immediately.
+// Quick-action menu (Open / Details / Edit / Copy link / Share / Category /
+// Folder / Delete): the same anchored-popover infrastructure and neutral menu
+// surface as LinkCard. Edit opens the shared edit form anchored to this menu's
+// trigger, so inline editing stays one explicit action away.
 const moreOpen = ref(false)
 const moreTriggerEl = ref(null)
 const morePopoverEl = ref(null)
@@ -49,8 +54,9 @@ function changeFolder(value) { emit('set-folder', props.link.id, value); closeMo
 function copyLink() { emit('copy', props.link.id); closeMore() }
 function shareLink() { emit('share', props.link.id); closeMore() }
 
-// P5: clicking the row body (anywhere that is not an existing control or the
-// row link) opens the detail panel; every control keeps its own behaviour.
+// P5/P15.10: clicking the row body opens the detail panel. The body is not an
+// external link — opening the site happens from the detail panel (Open link)
+// or this menu (Open), so a stray click can never navigate away.
 function onInspectClick(e) {
   if (e.target.closest('a, button, input, select, label')) return
   emit('inspect', props.link.id)
@@ -77,6 +83,9 @@ const domainText = computed(() => {
   try { return new URL(navUrl()).host } catch { return '' }
 })
 
+// The mockup's per-type glyph (shared mapping with the detail panel/cards).
+const typeIcon = computed(() => linkTypeIcon(props.link.type))
+
 function savedDate() {
   const c = props.link.createdAt
   if (!c) return ''
@@ -85,14 +94,13 @@ function savedDate() {
   return DATE_FMT.format(d)
 }
 
-// Inline edit is presented as an anchored popover (same helper + shared form
-// as Card mode) so the row never expands or pushes surrounding rows. Below the
-// mobile shell breakpoint it is presented centred, like the Add form.
+// Inline edit: the shared form anchored to this row's menu trigger, opened from
+// the ⋮ menu (the mockup row keeps a quiet action cluster, so the form is one
+// explicit menu action away instead of a fifth permanent control).
 const editing = ref(false)
-const editTriggerEl = ref(null)
 const editPopoverEl = ref(null)
 useAnchoredPopover({
-  trigger: editTriggerEl,
+  trigger: moreTriggerEl,
   popover: editPopoverEl,
   isOpen: editing,
   onOutside: () => { editing.value = false },
@@ -101,95 +109,81 @@ useAnchoredPopover({
   ignoreSelector: '.asel-menu',
   mode: 'auto'
 })
-
-function startEdit() { editing.value = true }
-function cancelEdit() { editing.value = false }
-function toggleEdit() {
-  if (editing.value) cancelEdit()
-  else startEdit()
+function startEdit() {
+  closeMore()
+  editing.value = true
 }
+function cancelEdit() { editing.value = false }
 function saveEdit(patch) {
   emit('edit', props.link.id, patch)
   editing.value = false
 }
-
-watch(() => props.link.title, () => { if (editing.value) editing.value = false })
 </script>
 
 <template>
-  <article class="link-row" :class="[mode, { editing, selected }]" @click="onInspectClick">
-    <label class="row-check">
+  <article class="link-row" :class="[mode, { selected, inspected }]" :aria-current="inspected ? 'true' : undefined" @click="onInspectClick">
+    <label class="item-check row-check">
       <input
         type="checkbox"
         :checked="selected"
         :aria-label="'Select ' + (link.title || 'link')"
         @change="emit('select', link.id, $event.target.checked)"
       />
+      <span class="item-check-box" aria-hidden="true"><Icon name="check" size="xs" /></span>
     </label>
-    <a :href="navUrl()" target="_blank" rel="noopener noreferrer" class="row-main" :title="link.title">
-      <span class="row-favicon" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.9 5.7 3.9 9S14.5 18.4 12 21c-2.5-2.6-3.9-5.7-3.9-9S9.5 5.6 12 3z"/></svg>
-      </span>
+    <span class="row-main" :title="link.title">
+      <span class="row-favicon" aria-hidden="true"><Icon :name="typeIcon" size="xs" /></span>
       <span class="row-text">
         <span class="row-title">{{ link.title }}</span>
-        <span class="row-meta">
+        <!-- Mockup .row-sub: domain · date, then up to two tags (list only). -->
+        <span v-if="mode === 'list'" class="row-meta">
           <span class="row-domain">{{ domainText }}</span>
-          <span v-if="mode === 'list'" class="row-chips" aria-hidden="false">
-            <span v-if="savedDate()" class="chip chip-date">{{ savedDate() }}</span>
-            <span v-if="link.tags && link.tags.length" class="chip chip-tags">#{{ link.tags.slice(0, 3).join(' · #') }}</span>
-          </span>
+          <template v-if="savedDate()">
+            <span class="row-dot" aria-hidden="true">·</span>
+            <time class="row-date" :datetime="link.createdAt">{{ savedDate() }}</time>
+          </template>
+          <span v-for="t in (link.tags || []).slice(0, 2)" :key="t" class="row-tag">#{{ t }}</span>
         </span>
       </span>
-    </a>
+    </span>
 
     <!-- P9 (G5): compact rows replace the meta line with a right-aligned,
          truncated domain column (mockup .row-domain-inline). -->
     <span class="row-domain-inline">{{ domainText }}</span>
 
+    <!-- P15.11: the mockup's quiet action cluster — favourite (mockup --amber
+         when on), pin (accent when on) and the item menu. -->
     <div class="row-actions">
       <button
-        class="row-toggle"
-        :class="{ active: link.important }"
-        :aria-pressed="String(!!link.important)"
-        aria-label="Toggle Important"
-        title="Important"
-        @click="emit('toggle-important', link.id)"
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v4.5"/><path d="M12 15.5v.2"/></svg>
-      </button>
-      <button
-        class="row-toggle"
-        :class="{ active: link.favorite }"
+        class="item-action favorite-toggle"
+        :class="{ on: link.favorite }"
         :aria-pressed="String(!!link.favorite)"
         aria-label="Toggle Favorite"
         title="Favorite"
         @click="emit('toggle-favorite', link.id)"
       >
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21C7 16.8 3 13.6 3 9.6 3 7 5 5 7.4 5c1.8 0 3.4 1 4.6 2.6C13.2 6 14.8 5 16.6 5 19 5 21 7 21 9.6c0 4-4 7.2-9 11.4z" /></svg>
+        <Icon name="star" size="sm" />
       </button>
       <button
-        class="row-toggle"
-        :class="{ active: link.pinned }"
+        class="item-action pin-toggle"
+        :class="{ on: link.pinned }"
         :aria-pressed="String(!!link.pinned)"
         aria-label="Toggle Pin"
         title="Pin"
         @click="emit('toggle-pin', link.id)"
       >
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6"/><path d="M10 4v6l-2 3h8l-2-3V4"/><path d="M12 13v7"/></svg>
-      </button>
-      <button ref="editTriggerEl" class="icon-btn" @click="toggleEdit" aria-label="Edit link" title="Edit">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        <Icon name="pin" size="sm" />
       </button>
       <button
         ref="moreTriggerEl"
-        class="icon-btn"
+        class="item-action"
         :aria-expanded="String(moreOpen)"
         :aria-controls="'row-menu-' + link.id"
         aria-label="More actions"
         @click="toggleMore"
         @keydown.esc="closeMore(true)"
       >
-        <svg class="more-dots" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg>
+        <Icon name="more-vertical" size="sm" />
       </button>
     </div>
 
@@ -203,31 +197,35 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
           @keydown.esc="closeMore(true)"
         >
           <a class="more-item" :href="navUrl()" target="_blank" rel="noopener noreferrer" @click="closeMore()">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>
+            <Icon name="external-link" size="sm" />
             <span>Open</span>
           </a>
           <button type="button" class="more-item" @click="inspectFromMenu">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 16v-5"/><path d="M12 8v.2"/></svg>
+            <Icon name="info" size="sm" />
             <span>Details</span>
           </button>
+          <button type="button" class="more-item" aria-label="Edit link" @click="startEdit">
+            <Icon name="pencil" size="sm" />
+            <span>Edit</span>
+          </button>
           <button type="button" class="more-item" @click="copyLink">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            <Icon name="copy" size="sm" />
             <span>Copy link</span>
           </button>
           <button type="button" class="more-item" @click="shareLink">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+            <Icon name="share-2" size="sm" />
             <span>Share</span>
           </button>
           <div class="more-field">
             <span class="more-field-label">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+              <Icon name="tag" size="sm" />
               Category
             </span>
             <AppSelect :id="'row-cat-' + link.id" :model-value="link.category" variant="inline" :options="CATEGORIES" aria-label="Change category" @change="changeCategory" />
           </div>
           <div class="more-field">
             <span class="more-field-label">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+              <Icon name="folder-input" size="sm" />
               Folder
             </span>
             <AppSelect
@@ -239,19 +237,8 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
               @change="changeFolder"
             />
           </div>
-          <button
-            type="button"
-            class="more-item"
-            :class="{ active: link.mustHave }"
-            :aria-pressed="String(!!link.mustHave)"
-            aria-label="Toggle Must Have"
-            @click="emit('toggle-must-have', link.id)"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2 20.8 12 12 20.8 3.2 12z" /></svg>
-            <span>Must Have</span>
-          </button>
           <button type="button" class="more-item danger" @click="deleteLink">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+            <Icon name="trash-2" size="sm" />
             <span>Delete</span>
           </button>
         </div>
@@ -272,8 +259,7 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
 .link-row {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 6px 12px;
+  gap: 10px;
   padding: 10px 14px;
   min-height: 52px;
   background: transparent;
@@ -281,51 +267,64 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
   /* Reserved inline-start rail: the selected accent edge never shifts the row
      (the mockup marks the open row with a 3px accent edge + soft fill). */
   border-inline-start: 3px solid transparent;
-  border-bottom: 1px solid var(--border-subtle);
-  border-radius: 0;
   transition: background-color var(--transition-fast), border-color var(--transition-fast);
   min-width: 0;
   max-width: 100%;
   box-sizing: border-box;
   cursor: pointer;
 }
+/* Mockup hover: the row lifts to the surface colour (the list sits on the
+   canvas), not a darker inset tint. */
 @media (hover: hover) and (pointer: fine){
-.link-row:hover { background-color: var(--muted-bg); }
+.link-row:hover { background-color: var(--card); }
 }
-.link-row.editing { background-color: var(--muted-bg); }
-/* Bulk-selection state: the mockup's soft accent fill + accent edge. */
+/* Bulk-selection state: a quiet inset surface plus the reserved accent edge.
+   The checkbox carries the primary selection signal, not the row fill. */
 .link-row.selected {
+  background-color: var(--muted-bg);
+  border-inline-start-color: var(--accent);
+}
+/* Detail-panel inspection (not bulk selection): the mockup's open-row language
+   — soft accent fill + the same reserved accent edge. Declared after .selected
+   so the open row stays visible when it is also checked. */
+.link-row.inspected {
   background-color: var(--accent-bg);
   border-inline-start-color: var(--accent);
 }
-/* Selection checkbox: a sibling of the row link (never inside the anchor), so
-   selecting can never navigate. Padding keeps a comfortable hit area without
-   growing the dense layouts. */
-.row-check { display: inline-flex; align-items: center; padding: 6px 4px; }
-.row-check input {
-  width: 16px;
-  height: 16px;
-  margin: 0;
-  accent-color: var(--accent);
-  cursor: pointer;
+/* Row checkbox: quiet at rest, no hover restyle, accent check when selected.
+   The shared .item-check recipe keeps the size, hit area and focus ring; only
+   the surface emphasis is tuned here (cards keep their banner variant). */
+.row-check .item-check-box {
+  border-color: var(--border);
+  background-color: transparent;
+  transition: background-color var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
 }
-.row-check input:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 2px; }
+/* Touch has no hover to reveal it, so keep it subtly visible at rest. */
 @media (pointer: coarse) {
-  .row-check { padding: 8px 4px; }
+  .row-check .item-check-box { border-color: var(--border-strong); }
 }
+/* Checked: just the accent checkmark — no visible container, readable without
+   hover. The box keeps its 18px hit area and the shared focus ring. */
+.row-check input:checked + .item-check-box {
+  background-color: transparent;
+  border-color: transparent;
+  color: var(--accent);
+}
+/* Selection checkbox: a sibling of the row body (never inside an anchor), so
+   selecting can never navigate. The painted box is the shared .item-check
+   recipe (src/app-overrides.css). */
 .row-main {
   display: flex;
   align-items: center;
   gap: 10px;
   flex: 1;
   min-width: 0;
-  text-decoration: none;
   color: inherit;
 }
-/* List rows carry chips + the full action set; when the row is narrow the
-   actions drop to their own line instead of squeezing the metadata column.
-   Compact rows stay single-line (scoped out). */
-.link-row:not(.compact) .row-main { flex: 1 1 280px; }
+/* List rows carry the meta line; when the row is narrow the actions drop to
+   their own line instead of squeezing the metadata column. Compact rows stay
+   single-line (scoped out). */
+.link-row:not(.compact) .row-main { flex: 1 1 0; }
 .row-favicon {
   width: 24px;
   height: 24px;
@@ -336,7 +335,6 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
   place-items: center;
   flex-shrink: 0;
 }
-.row-favicon svg { width: 12px; height: 12px; }
 .row-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .row-title {
   font-weight: 400;
@@ -349,6 +347,7 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
 @media (hover: hover) and (pointer: fine){
 .link-row:hover .row-title { color: var(--accent); }
 }
+/* Mockup .row-sub: one quiet 11.5px line — domain · date + tags. */
 .row-meta {
   display: flex;
   align-items: center;
@@ -358,6 +357,10 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
   min-width: 0;
 }
 .row-domain { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row-dot { opacity: .5; }
+.row-date { white-space: nowrap; }
+/* Tags carry the accent, like the mockup's .row-sub .tag. */
+.row-tag { color: var(--accent); white-space: nowrap; }
 /* P9 (G5): mockup compact parity — a right-aligned, truncated domain column
    (max 120px, faint) shown only in compact, where the meta line is hidden. */
 .row-domain-inline {
@@ -371,61 +374,15 @@ watch(() => props.link.title, () => { if (editing.value) editing.value = false }
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.row-chips { display: inline-flex; gap: 4px var(--space-2); align-items: center; min-width: 0; flex-wrap: wrap; }
-/* Metadata reads as quiet text, not as stacked pills (the row stays one object) */
-.chip {
-  color: var(--muted);
-  font-size: 11.5px;
-  white-space: nowrap;
-}
-.chip-date { color: var(--muted); }
-/* Tags carry the accent, like the mockup's .row-sub .tag. */
-.chip-tags { color: var(--accent); }
-/* Quick-action trigger: three round dots in the shared stroke-icon language. */
-svg.more-dots { fill: currentColor; stroke: none; }
-.row-actions { display: flex; align-items: center; gap: 5px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; min-width: 0; }
-/* Status toggles and item actions (.row-toggle / .icon-btn, incl. the accent
-   active state and the destructive hover) are defined once in the global
-   control language (src/app-overrides.css), so List/Compact rows and Card items
-   share one action treatment. Compact keeps only its density overrides below. */
-.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+/* Mockup .row-tail: a quiet, tight action cluster (.item-action recipe). */
+.row-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; justify-content: flex-end; min-width: 0; }
 
-/* COMPACT: the mockup's dense scanning row (same fields, tighter rhythm) */
+/* COMPACT: the mockup's dense scanning row — density only (same favicon, same
+   action recipe), no second visual language. */
 .link-row.compact {
   padding: 9px 14px;
   min-height: 46px;
-  gap: 3px 8px;
 }
-.compact .row-favicon { width: 20px; height: 20px; border-radius: 5px; }
-.compact .row-favicon svg { width: 11px; height: 11px; }
-.compact .row-title { font-size: 13px; }
 .compact .row-meta { display: none; }
 .compact .row-domain-inline { display: block; }
-.compact .row-chips { display: none; }
-.compact .row-check { padding: 4px 2px; }
-.compact .row-toggle { width: 24px; height: 24px; }
-.compact .row-toggle svg { width: 12px; height: 12px; }
-.compact .icon-btn { width: 24px; height: 24px; }
-.compact .icon-btn svg { width: 12px; height: 12px; }
-
-@media (max-width: 768px) {
-  .compact .row-toggle, .compact .icon-btn { width: 26px; height: 26px; }
-}
-@media (max-width: 480px) {
-  .row-favicon { display: none; }
-  /* Mobile List: full-width title/domain line, then ONE action line of
-     status toggles + edit + the quick-action menu. Category and Folder are
-     changed from that menu (the same fields, one tap away), so the row keeps
-     a single glanceable metadata line. Compact (scan mode) is untouched. */
-  .link-row:not(.compact) .chip-date,
-  .link-row:not(.compact) .chip-tags { display: none; }
-}
-@media (max-width: 400px) {
-  /* Very narrow compact rows: keep the action row inside the card. */
-  .compact .row-actions { gap: 3px; }
-  .compact .row-toggle,
-  .compact .icon-btn { width: 22px; height: 22px; }
-  .compact .row-toggle svg,
-  .compact .icon-btn svg { width: 11px; height: 11px; }
-}
 </style>

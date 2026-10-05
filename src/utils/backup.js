@@ -302,3 +302,39 @@ export function mergeImportData(existingLinks, existingFolders, importedLinks, i
     },
   }
 }
+
+// P15.3: shared import preparation — raw file text -> validated, normalized
+// data plus the duplicate preview. The Backup view and the topbar both call
+// this, so the import pipeline exists exactly once.
+export function prepareImport(text, { links, folders } = {}) {
+  const { data, error } = parseBackupText(text)
+  if (error) return { error }
+  const validation = validateBackupPayload(data)
+  if (!validation.valid) return { error: validation.error }
+  let normalized
+  try {
+    normalized = normalizeBackupData(data)
+  } catch {
+    return { error: 'Invalid backup: malformed records' }
+  }
+  const preview = mergeImportData(links || [], folders || [], normalized.links, normalized.folders)
+  return { data: normalized, preview }
+}
+
+// P15.3: shared export — one payload builder + file download used by the
+// Backup view and the topbar. Returns the payload that was written.
+export function downloadBackupFile({ links, profile, folders, appearance, colorScheme }) {
+  const payload = createBackupPayload({ links, profile, folders, appearance, colorScheme })
+  const json = JSON.stringify(payload, null, 2)
+  const blob = new Blob([json], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `save-links-backup-${new Date().toISOString().slice(0, 10)}.json`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+  setLastBackupAt(new Date().toISOString())
+  return payload
+}

@@ -71,8 +71,8 @@ describe('LinkDetailPanel — presentation', () => {
     expect(panel.getAttribute('role')).toBe('complementary')
     expect(document.querySelector('.detail-empty-title').textContent).toBe('No link selected')
     expect(document.querySelector('.detail-empty-text')).not.toBeNull()
-    // no real detail controls and no fake data in the placeholder state
-    expect(document.querySelector('.detail-actions')).toBeNull()
+    // no real detail content and no fake data in the placeholder state
+    expect(document.querySelector('.detail-preview')).toBeNull()
     expect(document.querySelector('.detail-title')).toBeNull()
     cleanup(w)
   })
@@ -147,16 +147,43 @@ describe('LinkDetailPanel — presentation', () => {
     cleanup(w)
   })
 
-  it('marks the real pin / important / must-have state on the actions', async () => {
-    const w = open({ link: { ...LINK, important: true, mustHave: true, pinned: false } })
+  it('renders the approved top action order with one control family', () => {
+    const w = open()
+    const actions = [...document.querySelectorAll('.detail-top-actions [aria-label]')]
+    expect(actions.map((el) => el.getAttribute('aria-label'))).toEqual([
+      'Open link', 'Copy link', 'Edit link', 'Share link', 'Move to folder', 'Delete link',
+    ])
+    // one recipe for every top action; Close is NOT part of the group
+    for (const el of actions) expect(el.classList.contains('navbar-action-btn')).toBe(true)
+    expect(document.querySelector('.detail-top-actions [aria-label="Close details"]')).toBeNull()
+    const close = document.querySelector('.detail-close')
+    expect(close.getAttribute('aria-label')).toBe('Close details')
+    expect(close.classList.contains('navbar-action-btn')).toBe(true)
+    // the old large Open CTA is gone
+    expect(document.querySelector('.detail-open')).toBeNull()
+    // Favorite/Pinned are not in the action row; they sit after title + URL and
+    // before the metadata.
+    expect(document.querySelector('.detail-top-actions [aria-label="Toggle Favorite"]')).toBeNull()
+    expect(document.querySelectorAll('.detail-state .type-pill')).toHaveLength(2)
+    const url = document.querySelector('.detail-url')
+    const state = document.querySelector('.detail-state')
+    const meta = document.querySelector('.detail-meta')
+    expect(url.compareDocumentPosition(state) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(state.compareDocumentPosition(meta) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    cleanup(w)
+  })
+
+  it('marks the real favorite / pin state on the dedicated state controls', async () => {
+    const w = open({ link: { ...LINK, favorite: true, pinned: false } })
     const pin = document.querySelector('[aria-label="Toggle Pin"]')
-    const important = document.querySelector('[aria-label="Toggle Important"]')
-    const mustHave = document.querySelector('[aria-label="Toggle Must Have"]')
+    const favorite = document.querySelector('[aria-label="Toggle Favorite"]')
     expect(pin.getAttribute('aria-pressed')).toBe('false')
-    expect(important.getAttribute('aria-pressed')).toBe('true')
-    expect(mustHave.getAttribute('aria-pressed')).toBe('true')
-    expect(important.classList.contains('is-on')).toBe(true)
-    expect(pin.classList.contains('is-on')).toBe(false)
+    expect(favorite.getAttribute('aria-pressed')).toBe('true')
+    expect(favorite.classList.contains('active')).toBe(true)
+    expect(pin.classList.contains('active')).toBe(false)
+    // Important / Must Have left the detail UI entirely (data stays persisted).
+    expect(document.querySelector('[aria-label="Toggle Important"]')).toBeNull()
+    expect(document.querySelector('[aria-label="Toggle Must Have"]')).toBeNull()
     cleanup(w)
   })
 })
@@ -171,19 +198,15 @@ describe('LinkDetailPanel — actions', () => {
     cleanup(w)
   })
 
-  it('emits pin / favorite / important / must-have / copy / share / delete with the link id', () => {
+  it('emits pin / favorite / copy / share / delete with the link id', () => {
     const w = open()
     document.querySelector('[aria-label="Toggle Pin"]').click()
     document.querySelector('[aria-label="Toggle Favorite"]').click()
-    document.querySelector('[aria-label="Toggle Important"]').click()
-    document.querySelector('[aria-label="Toggle Must Have"]').click()
     document.querySelector('[aria-label="Copy link"]').click()
     document.querySelector('[aria-label="Share link"]').click()
     document.querySelector('[aria-label="Delete link"]').click()
     expect(w.emitted('pin')[0]).toEqual(['l1'])
     expect(w.emitted('favorite')[0]).toEqual(['l1'])
-    expect(w.emitted('important')[0]).toEqual(['l1'])
-    expect(w.emitted('must-have')[0]).toEqual(['l1'])
     expect(w.emitted('copy')[0]).toEqual(['l1'])
     expect(w.emitted('share')[0]).toEqual(['l1'])
     expect(w.emitted('delete')[0]).toEqual(['l1'])
@@ -216,15 +239,66 @@ describe('LinkDetailPanel — actions', () => {
     cleanup(w)
   })
 
-  it('the Add tag affordance opens the same edit form', async () => {
+  it('Edit and Move toggle back to detail from their own action (one mode at a time)', async () => {
     const w = open()
-    document.querySelector('.detail-tag-add').click()
+    const editBtn = document.querySelector('[aria-label="Edit link"]')
+    const moveBtn = document.querySelector('[aria-label="Move to folder"]')
+
+    // Edit -> Edit again: detail mode, draft discarded, nothing saved.
+    editBtn.click()
     await flushPromises()
     expect(document.querySelector('.edit-form')).not.toBeNull()
+    expect(editBtn.getAttribute('aria-expanded')).toBe('true')
+    editBtn.click()
+    await flushPromises()
+    expect(document.querySelector('.edit-form')).toBeNull()
+    expect(w.emitted('edit')).toBeUndefined()
+    expect(editBtn.getAttribute('aria-expanded')).toBe('false')
+
+    // Move -> Move again: detail mode, picker closed, nothing moved.
+    moveBtn.click()
+    await flushPromises()
+    expect(document.querySelector('#detail-move-folder')).not.toBeNull()
+    moveBtn.click()
+    await flushPromises()
+    expect(document.querySelector('#detail-move-folder')).toBeNull()
+    expect(w.emitted('move')).toBeUndefined()
+
+    // Single mode: opening Move while editing replaces the editor.
+    editBtn.click()
+    await flushPromises()
+    moveBtn.click()
+    await flushPromises()
+    expect(document.querySelector('.edit-form')).toBeNull()
+    expect(document.querySelector('#detail-move-folder')).not.toBeNull()
+    expect(moveBtn.getAttribute('aria-expanded')).toBe('true')
+    expect(editBtn.getAttribute('aria-expanded')).toBe('false')
     cleanup(w)
   })
 
-  it('Move reveals the folder picker and emits the chosen folder id', async () => {
+  it('the Add tag affordance opens the inline tag editor (not the edit form)', async () => {
+    const w = open()
+    document.querySelector('.detail-tag-add').click()
+    await flushPromises()
+    expect(document.querySelector('.edit-form')).toBeNull()
+    expect(document.querySelector('#detail-tag-editor').className).toMatch(/\bopen\b/)
+
+    const input = document.querySelector('#detail-tag-input')
+    input.value = 'three'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    await flushPromises()
+    expect(w.emitted('edit')[0]).toEqual(['l1', { tags: ['react', 'javascript', 'three'] }])
+
+    // collapsing returns to the plain detail view
+    document.querySelector('.detail-tag-add').click()
+    await flushPromises()
+    expect(document.querySelector('#detail-tag-editor').className).not.toMatch(/\bopen\b/)
+    cleanup(w)
+  })
+
+  it('Move reveals the folder picker and commits the chosen folder id', async () => {
     const w = open()
     document.querySelector('[aria-label="Move to folder"]').click()
     await flushPromises()
@@ -232,6 +306,11 @@ describe('LinkDetailPanel — actions', () => {
     expect(select).not.toBeNull()
     select.value = 'f1'
     select.dispatchEvent(new Event('change', { bubbles: true }))
+    await flushPromises()
+    // Move mode commits through its explicit Move button.
+    const move = [...document.querySelectorAll('.detail-move button')].find((b) => b.textContent.trim() === 'Move')
+    expect(move).not.toBeUndefined()
+    move.click()
     await flushPromises()
     expect(w.emitted('move')[0]).toEqual(['l1', 'f1'])
     cleanup(w)

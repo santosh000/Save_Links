@@ -160,6 +160,60 @@ test.describe('Link detail panel — desktop rail', () => {
     expect(await page.evaluate(() => document.activeElement === document.body || document.activeElement === null)).toBe(true)
   })
 
+  test('the inspected row follows the open record (duplicates stay distinct) and clears on close', async ({ page }) => {
+    // Two records with the identical title + URL but distinct ids, seeded
+    // directly (the UI dedupes same-URL saves): identity must be the record id.
+    const base = (id) => ({
+      id, originalUrl: 'https://example.com/dup', normalizedUrl: 'https://example.com/dup', url: 'https://example.com/dup',
+      domain: 'example.com', title: 'Dup Link', description: '', image: '', category: 'Other', tags: [],
+      important: false, mustHave: false, favorite: false, pinned: false, type: 'article', folderId: null, status: null,
+      createdAt: '2026-01-01T00:00:00.000Z', savedFrom: 'Unknown',
+    })
+    await page.goto('/')
+    await seedIndexedDB(page, [base('dup-1'), base('dup-2')])
+    await page.reload()
+    await setViewMode(page, 'List')
+    const rows = visibleLinkRows(page)
+    await expect(rows).toHaveCount(2)
+
+    // Open the first record: only its row is marked (and marked as current).
+    await rows.nth(0).click({ position: { x: 4, y: 4 } })
+    await expect(detail(page).locator('.detail-title')).toHaveText('Dup Link')
+    await expect(rows.nth(0)).toHaveClass(/inspected/)
+    await expect(rows.nth(1)).not.toHaveClass(/inspected/)
+    await expect(rows.nth(0)).toHaveAttribute('aria-current', 'true')
+    await expect(rows.nth(1)).not.toHaveAttribute('aria-current', 'true')
+
+    // Opening the other record moves the inspected state to that row.
+    await rows.nth(1).click({ position: { x: 4, y: 4 } })
+    await expect(rows.nth(0)).not.toHaveClass(/inspected/)
+    await expect(rows.nth(1)).toHaveClass(/inspected/)
+    await expect(page.locator('.link-row.inspected')).toHaveCount(1)
+
+    // Closing the panel clears the inspected row state entirely.
+    await detail(page).locator('.detail-close').click()
+    await expectDetailClosed(page)
+    await expect(page.locator('.link-row.inspected')).toHaveCount(0)
+    await expect(page.locator('.link-row[aria-current="true"]')).toHaveCount(0)
+  })
+
+  test('the inspected row state works in Compact and List and never touches bulk selection', async ({ page }) => {
+    await saveTwoLinks(page)
+    for (const mode of ['Compact', 'List']) {
+      await setViewMode(page, mode)
+      const alphaRow = row(page, 'Alpha Guide')
+      await alphaRow.click({ position: { x: 4, y: 4 } })
+      await expect(detail(page).locator('.detail-title')).toHaveText('Alpha Guide')
+      await expect(alphaRow).toHaveClass(/inspected/)
+      // inspection is not bulk selection: the checkbox stays untouched
+      await expect(alphaRow.locator('input[type="checkbox"]')).not.toBeChecked()
+      await expect(page.locator('.link-row.selected')).toHaveCount(0)
+      await page.keyboard.press('Escape')
+      await expectDetailClosed(page)
+      await expect(page.locator('.link-row.inspected')).toHaveCount(0)
+    }
+  })
+
   test('inspecting another link updates the same panel without closing it', async ({ page }) => {
     await saveTwoLinks(page)
     await openDetailFromCard(page, 'Alpha Guide')
@@ -183,7 +237,7 @@ test.describe('Link detail panel — desktop rail', () => {
     await expect(card(page, 'Alpha Guide (edited)')).toBeVisible()
   })
 
-  test('favorite, pin, important and must-have toggle from the panel and stay in sync with the item', async ({ page }) => {
+  test('favorite and pin toggle from the panel and stay in sync with the item', async ({ page }) => {
     await saveTwoLinks(page)
     await openDetailFromCard(page, 'Alpha Guide')
     const panel = detail(page)
@@ -196,11 +250,6 @@ test.describe('Link detail panel — desktop rail', () => {
     await panel.getByRole('button', { name: 'Toggle Pin' }).click()
     await expect(panel.getByRole('button', { name: 'Toggle Pin' })).toHaveAttribute('aria-pressed', 'true')
     await expect(alphaCard.getByRole('button', { name: 'Toggle Pin' })).toHaveAttribute('aria-pressed', 'true')
-
-    await panel.getByRole('button', { name: 'Toggle Important' }).click()
-    await expect(panel.getByRole('button', { name: 'Toggle Important' })).toHaveAttribute('aria-pressed', 'true')
-    await panel.getByRole('button', { name: 'Toggle Must Have' }).click()
-    await expect(panel.getByRole('button', { name: 'Toggle Must Have' })).toHaveAttribute('aria-pressed', 'true')
 
     // Toggling off keeps working.
     await panel.getByRole('button', { name: 'Toggle Favorite' }).click()
@@ -231,6 +280,8 @@ test.describe('Link detail panel — desktop rail', () => {
     await detail(page).getByRole('button', { name: 'Move to folder' }).click()
     await detail(page).locator('#detail-move-folder + .asel-trigger').click()
     await page.locator('.asel-menu').getByRole('option').filter({ hasText: 'Reading' }).click()
+    // Move mode commits through its explicit Move button.
+    await detail(page).getByRole('button', { name: 'Move', exact: true }).click()
     await expect(page.locator('.sl-toast')).toContainText('Folder updated')
     await expect(detail(page).locator('.detail-meta')).toContainText('Reading')
   })
@@ -391,17 +442,17 @@ test.describe('Link detail panel — responsive overflow sweep', () => {
     await clearStorage(page)
     await saveLink(page, { url: 'https://example.com/sweep', title: 'Sweep Link', description: 'Overflow sweep.' })
     await ensureCardView(page) // P8: the library boots in Compact
-    for (const width of [375, 390, 480, 640, 768, 820, 1024, 1200, 1280, 1440]) {
+    for (const width of [375, 390, 480, 640, 768, 820, 1024, 1199, 1200, 1280, 1440]) {
       await page.setViewportSize({ width, height: 900 })
-      // P8: >=1024 the rail is always present (placeholder); below it is a sheet.
-      if (width >= 1024) await expectDetailClosed(page)
+      // >=1200 the rail is always present (placeholder); below it is a sheet.
+      if (width >= 1200) await expectDetailClosed(page)
       else await expect(detail(page)).toHaveCount(0)
       await card(page, 'Sweep Link').locator('.desc').click()
       await expect(detail(page)).toBeVisible()
       await expect(detail(page).locator('.detail-title')).toHaveText('Sweep Link')
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), `overflow at ${width}`).toBe(true)
       await page.keyboard.press('Escape')
-      if (width >= 1024) await expectDetailClosed(page)
+      if (width >= 1200) await expectDetailClosed(page)
       else await expect(detail(page)).toHaveCount(0)
     }
   })

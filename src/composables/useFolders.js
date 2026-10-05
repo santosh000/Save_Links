@@ -170,8 +170,12 @@ export function useFolders() {
     // P4: the requested parent must exist and fit within the depth limit.
     const parent = validateParent(folders.value, null, parentId)
     if (!parent.ok) throw new Error(parent.reason)
-    // prevent duplicate name case-insensitive (existing rule, unchanged)
-    const exists = folders.value.some(f => f.name.toLowerCase() === trimmed.toLowerCase())
+    // prevent duplicate name case-insensitive (existing rule) — scoped to the
+    // target parent: the same name under a different parent is a different
+    // folder, while duplicate siblings (including roots, parentId null) stay
+    // rejected.
+    const parentKey = parent.parentId ?? null
+    const exists = folders.value.some(f => (f.parentId ?? null) === parentKey && f.name.toLowerCase() === trimmed.toLowerCase())
     if (exists) throw new Error('Folder already exists')
     const folder = { id: generateId(), name: trimmed, parentId: parent.parentId, createdAt: new Date().toISOString(), revision: 0 }
     folders.value.push(folder)
@@ -234,8 +238,10 @@ export function useFolders() {
     if (!trimmed) throw new Error('Folder name required')
     const idx = folders.value.findIndex(f => f.id === id)
     if (idx === -1) throw new Error('Folder not found')
-    // duplicate check excluding self
-    const dup = folders.value.some(f => f.id !== id && f.name.toLowerCase() === trimmed.toLowerCase())
+    // duplicate check excluding self and scoped to the folder's own siblings
+    // (same rule as createFolder: different parents may share a name).
+    const siblingParent = folders.value[idx].parentId ?? null
+    const dup = folders.value.some(f => f.id !== id && (f.parentId ?? null) === siblingParent && f.name.toLowerCase() === trimmed.toLowerCase())
     if (dup) throw new Error('Folder already exists')
     return replaceFolder({ ...folders.value[idx], name: trimmed })
   }

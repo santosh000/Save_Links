@@ -81,21 +81,26 @@ function onMove(value) {
 </template>
 
 <style scoped>
+/* Contextual band on the normal app surface (not a solid accent strip): the
+   selected count carries the context, the controls stay quiet, Delete keeps
+   the error colour, and the close control anchors the right edge. */
 .bulk-bar {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  /* Fixed band in the Links scroll model: it must not scroll with the list. */
+  flex-shrink: 0;
   padding: 8px 14px;
-  background: var(--accent);
-  border-bottom: 1px solid var(--accent);
-  color: var(--on-accent);
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
   font-size: 12.5px;
   min-width: 0;
 }
 .bulk-count {
   font-weight: var(--weight-semibold);
-  color: var(--on-accent);
+  color: var(--text-h);
   white-space: nowrap;
 }
 .bulk-btn {
@@ -104,35 +109,46 @@ function onMove(value) {
   gap: 6px;
   min-height: var(--control-height-sm);
   padding: 5px 12px;
+  /* Resting: no persistent outline — the control surface appears on hover. */
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, .16);
-  color: var(--on-accent);
+  background: transparent;
+  color: var(--text-h);
   font-size: 12.5px;
   font-weight: var(--weight-medium);
   cursor: pointer;
-  transition: background var(--transition-fast), color var(--transition-fast);
+  transition: background-color var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
   white-space: nowrap;
 }
-.bulk-btn.disabled { color: rgba(255, 255, 255, .6); background: transparent; cursor: default; }
+.bulk-btn.disabled { color: var(--text-subtle); cursor: default; }
 @media (hover: hover) and (pointer: fine) {
-  .bulk-btn:not(.disabled):hover { background: rgba(255, 255, 255, .26); }
+  .bulk-btn:not(.disabled):hover { background: var(--muted-bg); border-color: var(--border-strong); }
 }
-.bulk-btn:active { transform: scale(0.98); }
-.bulk-btn.danger { color: var(--on-accent); }
+.bulk-btn.danger { color: var(--error); }
+@media (hover: hover) and (pointer: fine) {
+  .bulk-btn.danger:not(.disabled):hover { background: var(--error-bg); border-color: var(--error); }
+}
 .bulk-btn:focus-visible,
 .bulk-clear:focus-visible {
-  outline: var(--focus-ring-width) solid var(--on-accent);
+  outline: var(--focus-ring-width) solid var(--focus-ring);
   outline-offset: 1px;
 }
 .bulk-icon { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-/* The move picker inside the accent bar reads as a translucent control. */
+/* The move picker joins the bar's single control family: same height, radius
+   and resting-vs-hover treatment as the action buttons. */
 .bulk-move { display: flex; align-items: center; min-width: 0; }
 .bulk-move :deep(.asel--header .asel-trigger) {
-  background: rgba(255, 255, 255, .16);
+  height: var(--control-height-sm);
+  border-radius: var(--radius-sm);
+  background-color: transparent;
   border-color: transparent;
-  color: var(--on-accent);
-  height: 28px;
+  color: var(--text-h);
+}
+@media (hover: hover) and (pointer: fine) {
+  .bulk-move :deep(.asel--header .asel-trigger:hover) {
+    background-color: var(--muted-bg);
+    border-color: var(--border-strong);
+  }
 }
 .bulk-clear {
   margin-left: auto;
@@ -140,14 +156,14 @@ function onMove(value) {
   height: var(--control-height-sm);
   display: grid;
   place-items: center;
-  border: none;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: rgba(255, 255, 255, .85);
+  color: var(--muted);
   cursor: pointer;
 }
 @media (hover: hover) and (pointer: fine) {
-  .bulk-clear:hover { background: rgba(255, 255, 255, .2); color: var(--on-accent); }
+  .bulk-clear:hover { background: var(--muted-bg); color: var(--text-h); }
 }
 
 /* Narrow screens: labels collapse to icons, controls stay tappable (≥32px)

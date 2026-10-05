@@ -1,34 +1,40 @@
-// P4 — Nested folders (parentId tree): create, indent, expand/collapse, rename,
-// move (invalid destinations excluded), depth limit, subtree filtering and
-// deletion, link selectors, persistence and backup export.
+// P4 — Nested folders (parentId tree) through the sidebar tree — the app's
+// folder surface since the standalone Folders page was removed: create, indent,
+// expand/collapse, rename, move (invalid destinations excluded), depth limit,
+// subtree filtering and deletion, link selectors, persistence and backup export.
 import { test, expect } from '@playwright/test'
 import {
-  clearStorage, openView, ensureAddLinkOpen, saveLink, visibleLinkRows,
+  clearStorage, openView, createFolder, createSubfolder, ensureAddLinkOpen, saveLink, visibleLinkRows,
   installBackupCapture, clickExportAndCaptureBackup, expectNoHorizontalScroll,
 } from './helpers.js'
 
 // ---- local helpers -------------------------------------------------------
 
-async function createRoot(page, name) {
-  await page.getByLabel('New folder name').fill(name)
-  await page.getByRole('button', { name: 'Create folder', exact: true }).click()
-  await expect(page.locator('.folder-item', { hasText: name })).toBeVisible()
-}
-
-async function createChild(page, parentName, name) {
-  await page.getByRole('button', { name: `Add subfolder to ${parentName}` }).click()
-  await page.getByLabel(`New subfolder name in ${parentName}`).fill(name)
-  await page.getByRole('button', { name: `Create subfolder in ${parentName}` }).click()
-  await expect(page.locator('.folder-item', { hasText: name })).toBeVisible()
-}
-
-function folderItem(page, name) {
-  return page.locator('.folder-item', { hasText: name })
-}
+const row = (page, name) => page.locator('[data-testid="sidebar-folder-row"]').filter({ hasText: name })
+const toggle = (page, name) => page.locator(
+  `[data-testid="sidebar-folder-toggle"][aria-label="Expand sidebar folder ${name}"], [data-testid="sidebar-folder-toggle"][aria-label="Collapse sidebar folder ${name}"]`
+)
+const more = (page, name) => page.getByRole('button', { name: `Folder options for ${name}` })
+const menu = (page) => page.getByRole('menu', { name: 'Folder options' })
+const count = (page, name) => page.locator('.sidebar-folder-line')
+  .filter({ has: page.locator('[data-testid="sidebar-folder-row"]', { hasText: name }) })
+  .locator('.sidebar-folder-count')
 
 // Read the inline tree indentation (paddingInlineStart is set per depth).
 function indentOf(page, name) {
-  return folderItem(page, name).evaluate((el) => el.style.paddingInlineStart)
+  return row(page, name).evaluate((el) => el.closest('.sidebar-folder-line').style.paddingInlineStart)
+}
+
+// Creation auto-expands the parent branch (the new row must be visible for the
+// inline rename). Tests that need the collapsed state collapse explicitly.
+async function ensureExpanded(page, name) {
+  if ((await toggle(page, name).getAttribute('aria-expanded')) !== 'true') await toggle(page, name).click()
+}
+
+async function menuAction(page, name, itemLabel) {
+  await more(page, name).click()
+  await expect(menu(page)).toBeVisible()
+  await menu(page).getByRole('menuitem', { name: itemLabel }).click()
 }
 
 async function pickFromOpenMenu(page, text) {
@@ -54,11 +60,10 @@ test.describe('Nested folders (P4)', () => {
   })
 
   test('creates a nested tree, indents by depth, and expand/collapse works', async ({ page }) => {
-    await openView(page, 'folders')
-    await createRoot(page, 'Work')
-    await createRoot(page, 'Personal')
-    await createChild(page, 'Work', 'Engineering')
-    await createChild(page, 'Engineering', 'Frontend')
+    await createFolder(page, 'Work')
+    await createFolder(page, 'Personal')
+    await createSubfolder(page, 'Work', 'Engineering')
+    await createSubfolder(page, 'Engineering', 'Frontend')
 
     // Depth is expressed as indentation: 8px root, +14px per level.
     expect(await indentOf(page, 'Work')).toBe('8px')
@@ -66,44 +71,41 @@ test.describe('Nested folders (P4)', () => {
     expect(await indentOf(page, 'Frontend')).toBe('36px')
 
     // Collapsing a parent hides its whole subtree; expanding brings it back.
-    await page.getByRole('button', { name: 'Collapse folder Work' }).click()
-    await expect(folderItem(page, 'Engineering')).toHaveCount(0)
-    await expect(folderItem(page, 'Frontend')).toHaveCount(0)
-    await page.getByRole('button', { name: 'Expand folder Work' }).click()
-    await expect(folderItem(page, 'Engineering')).toBeVisible()
-    await expect(folderItem(page, 'Frontend')).toBeVisible()
+    await toggle(page, 'Work').click()
+    await expect(row(page, 'Engineering')).toHaveCount(0)
+    await expect(row(page, 'Frontend')).toHaveCount(0)
+    await toggle(page, 'Work').click()
+    await expect(row(page, 'Engineering')).toBeVisible()
+    await expect(row(page, 'Frontend')).toBeVisible()
 
     // A leaf has no caret.
-    await expect(page.getByRole('button', { name: 'Expand folder Frontend' })).toHaveCount(0)
-    await expect(page.getByRole('button', { name: 'Collapse folder Frontend' })).toHaveCount(0)
+    await expect(toggle(page, 'Frontend')).toHaveCount(0)
   })
 
   test('renames a nested folder and keeps the hierarchy', async ({ page }) => {
-    await openView(page, 'folders')
-    await createRoot(page, 'Work')
-    await createChild(page, 'Work', 'Engineering')
-    await createChild(page, 'Engineering', 'Frontend')
+    await createFolder(page, 'Work')
+    await createSubfolder(page, 'Work', 'Engineering')
+    await createSubfolder(page, 'Engineering', 'Frontend')
 
-    await page.getByRole('button', { name: 'Rename folder Engineering' }).click()
-    await page.getByLabel('Rename folder Engineering').fill('Platform')
-    await page.getByRole('button', { name: 'Save folder name' }).click()
-    await expect(folderItem(page, 'Platform')).toBeVisible()
+    await menuAction(page, 'Engineering', 'Rename sidebar folder Engineering')
+    await page.locator('.sidebar-folder-rename').fill('Platform')
+    await page.keyboard.press('Enter')
+    await expect(row(page, 'Platform')).toBeVisible()
     // The child stays nested under the renamed parent.
     expect(await indentOf(page, 'Platform')).toBe('22px')
     expect(await indentOf(page, 'Frontend')).toBe('36px')
   })
 
   test('moves a folder to the root and under another folder; invalid destinations are excluded', async ({ page }) => {
-    await openView(page, 'folders')
-    await createRoot(page, 'Alpha')
-    await createRoot(page, 'Beta')
-    await createChild(page, 'Alpha', 'SubOne')
-    await createChild(page, 'SubOne', 'LeafX')
+    await createFolder(page, 'Alpha')
+    await createFolder(page, 'Beta')
+    await createSubfolder(page, 'Alpha', 'SubOne')
+    await createSubfolder(page, 'SubOne', 'LeafX')
 
     // SubOne's own move menu must not offer itself or its descendant (LeafX).
-    await page.getByRole('button', { name: 'Move folder SubOne' }).click()
-    const moveAsel = folderItem(page, 'SubOne').locator('.move-row .asel-trigger')
-    await moveAsel.click()
+    await menuAction(page, 'SubOne', 'Move sidebar folder SubOne')
+    const combo = page.getByRole('combobox', { name: 'Move sidebar folder SubOne to' })
+    await combo.click()
     await expect(page.locator('.asel-menu')).toBeVisible()
     await expect(page.locator('.asel-menu .asel-option').filter({ hasText: 'SubOne' })).toHaveCount(0)
     await expect(page.locator('.asel-menu .asel-option').filter({ hasText: 'LeafX' })).toHaveCount(0)
@@ -114,56 +116,56 @@ test.describe('Nested folders (P4)', () => {
     expect(await indentOf(page, 'LeafX')).toBe('22px')
 
     // Move Beta under Alpha.
-    await page.getByRole('button', { name: 'Move folder Beta' }).click()
-    await folderItem(page, 'Beta').locator('.move-row .asel-trigger').click()
+    await menuAction(page, 'Beta', 'Move sidebar folder Beta')
+    await page.getByRole('combobox', { name: 'Move sidebar folder Beta to' }).click()
     await pickFromOpenMenu(page, 'Alpha')
     await expect(page.getByText('Folder moved')).toBeVisible()
     expect(await indentOf(page, 'Beta')).toBe('22px')
   })
 
   test('depth limit: four levels are allowed, a fifth is not offered', async ({ page }) => {
-    await openView(page, 'folders')
-    await createRoot(page, 'L1')
-    await createChild(page, 'L1', 'L2')
-    await createChild(page, 'L2', 'L3')
-    await createChild(page, 'L3', 'L4')
+    await createFolder(page, 'L1')
+    await createSubfolder(page, 'L1', 'L2')
+    await createSubfolder(page, 'L2', 'L3')
+    await createSubfolder(page, 'L3', 'L4')
+    for (const name of ['L1', 'L2', 'L3']) await ensureExpanded(page, name)
     expect(await indentOf(page, 'L4')).toBe('50px')
-    // Depth 4 has no "add subfolder" affordance.
-    await expect(page.getByRole('button', { name: 'Add subfolder to L4' })).toHaveCount(0)
-    await expect(page.getByRole('button', { name: 'Add subfolder to L3' })).toHaveCount(1)
+
+    // Depth 4 has no "new subfolder" affordance.
+    await more(page, 'L4').click()
+    await expect(menu(page)).toBeVisible()
+    await expect(menu(page).getByRole('menuitem', { name: 'New subfolder in L4' })).toHaveCount(0)
+    await page.keyboard.press('Escape')
+
+    await more(page, 'L3').click()
+    await expect(menu(page).getByRole('menuitem', { name: 'New subfolder in L3' })).toBeVisible()
+    await page.keyboard.press('Escape')
   })
 
   test('selecting a folder filters its whole subtree', async ({ page }) => {
-    await openView(page, 'folders')
-    await createRoot(page, 'Parent')
-    await createChild(page, 'Parent', 'ChildF')
+    await createFolder(page, 'Parent')
+    await createSubfolder(page, 'Parent', 'ChildF')
     await saveLinkInFolder(page, { url: 'https://example.com/childf', title: 'ChildF Link', folderName: 'ChildF' })
     await saveLinkInFolder(page, { url: 'https://example.com/parent', title: 'Parent Link', folderName: 'Parent' })
     await saveLink(page, { url: 'https://example.com/unfiled', title: 'Unfiled Link' })
 
-    await openView(page, 'folders')
-    await page.getByRole('button', { name: 'Show folder Parent' }).click()
+    await ensureExpanded(page, 'Parent')
+    await row(page, 'Parent').click()
     await expect(visibleLinkRows(page)).toHaveCount(2)
-    await openView(page, 'folders')
-    await page.getByRole('button', { name: 'Show folder ChildF' }).click()
+    await row(page, 'ChildF').click()
     await expect(visibleLinkRows(page)).toHaveCount(1)
     await expect(visibleLinkRows(page).first()).toContainText('ChildF Link')
-    await openView(page, 'folders')
-    await page.getByRole('button', { name: 'Show Unfiled links' }).click()
-    await expect(visibleLinkRows(page)).toHaveCount(1)
-    await expect(visibleLinkRows(page).first()).toContainText('Unfiled Link')
   })
 
   test('nested folders are offered in the item folder menu and bulk move', async ({ page }) => {
-    await openView(page, 'folders')
-    await createRoot(page, 'Work')
-    await createChild(page, 'Work', 'Engineering')
+    await createFolder(page, 'Work')
+    await createSubfolder(page, 'Work', 'Engineering')
     await saveLink(page, { url: 'https://example.com/one', title: 'Bulk One' })
     await saveLink(page, { url: 'https://example.com/two', title: 'Bulk Two' })
 
     // Per-item menu: pick the nested folder through the shared AppSelect.
-    const row = visibleLinkRows(page).filter({ hasText: 'Bulk One' }).first()
-    await row.getByRole('button', { name: 'More actions' }).click()
+    const itemRow = visibleLinkRows(page).filter({ hasText: 'Bulk One' }).first()
+    await itemRow.getByRole('button', { name: 'More actions' }).click()
     const moreMenu = page.locator('.more-menu')
     await expect(moreMenu).toBeVisible()
     await moreMenu.locator('.more-field', { hasText: 'Folder' }).locator('.asel-trigger').click()
@@ -181,53 +183,52 @@ test.describe('Nested folders (P4)', () => {
     await expect(page.getByText('Folder updated')).toBeVisible()
 
     // Both links now surface under the parent folder (subtree filter).
-    await openView(page, 'folders')
-    await expect(folderItem(page, 'Engineering').locator('.folder-count')).toHaveText('2')
-    await page.getByRole('button', { name: 'Show folder Work' }).click()
+    await expect(count(page, 'Engineering')).toHaveText('2')
+    await row(page, 'Work').click()
     await expect(visibleLinkRows(page)).toHaveCount(2)
   })
 
   test('deleting a folder deletes its subtree and their links (with confirmation)', async ({ page }) => {
-    await openView(page, 'folders')
-    await createRoot(page, 'RootSub')
-    await createChild(page, 'RootSub', 'LeafSub')
+    await createFolder(page, 'RootSub')
+    await createSubfolder(page, 'RootSub', 'LeafSub')
     await saveLinkInFolder(page, { url: 'https://example.com/rootsub', title: 'RootSub Link', folderName: 'RootSub' })
     await saveLinkInFolder(page, { url: 'https://example.com/leafsub', title: 'LeafSub Link', folderName: 'LeafSub' })
 
-    await openView(page, 'folders')
-    await page.getByRole('button', { name: 'Delete folder RootSub' }).click()
-    const dialog = page.getByRole('dialog')
-    await expect(dialog).toBeVisible()
-    // Scope is explicit: the subfolder and the links inside are named.
-    await expect(dialog).toContainText('Delete "RootSub" and its 1 subfolder?')
-    await expect(dialog).toContainText('2 folders and 2 links inside will be deleted. This cannot be undone.')
-    await dialog.getByRole('button', { name: 'Cancel' }).click()
-    await expect(dialog).toBeHidden()
-    await expect(folderItem(page, 'RootSub')).toBeVisible()
-    await expect(folderItem(page, 'LeafSub')).toBeVisible()
+    // The tree confirms inside the ⋮ menu (no dialog).
+    await more(page, 'RootSub').click()
+    await menu(page).getByRole('menuitem', { name: 'Delete sidebar folder RootSub' }).click()
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+    await expect(menu(page)).toContainText('Delete this folder and its subfolders?')
+    await menu(page).getByRole('button', { name: 'Cancel delete sidebar folder RootSub' }).click()
+    await expect(row(page, 'RootSub')).toBeVisible()
+    await expect(row(page, 'LeafSub')).toBeVisible()
+    await page.keyboard.press('Escape')
 
-    await page.getByRole('button', { name: 'Delete folder RootSub' }).click()
-    await dialog.getByRole('button', { name: 'Delete', exact: true }).click()
+    await more(page, 'RootSub').click()
+    await menu(page).getByRole('menuitem', { name: 'Delete sidebar folder RootSub' }).click()
+    await menu(page).getByRole('button', { name: 'Confirm delete sidebar folder RootSub' }).click()
     await expect(page.getByText('2 folders deleted')).toBeVisible()
-    await expect(folderItem(page, 'RootSub')).toHaveCount(0)
-    await expect(folderItem(page, 'LeafSub')).toHaveCount(0)
+    await expect(row(page, 'RootSub')).toHaveCount(0)
+    await expect(row(page, 'LeafSub')).toHaveCount(0)
+    // the two links survive in Unfiled
     await openView(page, 'links')
-    await expect(visibleLinkRows(page)).toHaveCount(0)
+    await expect(visibleLinkRows(page)).toHaveCount(2)
   })
 
   test('nested hierarchy survives reload and is exported in the backup', async ({ page }) => {
     await installBackupCapture(page)
-    await openView(page, 'folders')
-    await createRoot(page, 'Work')
-    await createChild(page, 'Work', 'Engineering')
+    await createFolder(page, 'Work')
+    await createSubfolder(page, 'Work', 'Engineering')
 
     await page.reload()
     await openView(page, 'folders')
+    // After reload the tree starts collapsed; expand to observe the nested row.
+    await toggle(page, 'Work').click()
     expect(await indentOf(page, 'Engineering')).toBe('22px')
-    await page.getByRole('button', { name: 'Collapse folder Work' }).click()
-    await expect(folderItem(page, 'Engineering')).toHaveCount(0)
-    await page.getByRole('button', { name: 'Expand folder Work' }).click()
-    await expect(folderItem(page, 'Engineering')).toBeVisible()
+    await toggle(page, 'Work').click()
+    await expect(row(page, 'Engineering')).toHaveCount(0)
+    await toggle(page, 'Work').click()
+    await expect(row(page, 'Engineering')).toBeVisible()
 
     await openView(page, 'backup')
     const json = await clickExportAndCaptureBackup(page)
@@ -238,21 +239,24 @@ test.describe('Nested folders (P4)', () => {
   })
 
   test('nested tree is usable on mobile and in dark mode without horizontal scroll', async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 844 })
-    await openView(page, 'folders')
-    await createRoot(page, 'Work')
-    await createChild(page, 'Work', 'Engineering')
-    expect(await indentOf(page, 'Engineering')).toBe('22px')
-    await expect(folderItem(page, 'Engineering')).toBeVisible()
-    await expectNoHorizontalScroll(page)
-
+    // Dark mode first (the Settings sheet closes cleanly at desktop width),
+    // then the same nested tree is exercised through the mobile drawer.
+    await page.setViewportSize({ width: 1280, height: 900 })
     await openView(page, 'settings')
     await page.getByLabel('Dark theme').click()
     await expect(page.locator('html')).toHaveAttribute('data-appearance', 'dark')
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.reload()
     await openView(page, 'folders')
-    await expect(folderItem(page, 'Engineering')).toBeVisible()
-    await page.getByRole('button', { name: 'Collapse folder Work' }).click()
-    await expect(folderItem(page, 'Engineering')).toHaveCount(0)
+    await createFolder(page, 'Work')
+    await createSubfolder(page, 'Work', 'Engineering')
+    expect(await indentOf(page, 'Engineering')).toBe('22px')
+    await expect(row(page, 'Engineering')).toBeVisible()
+    await expectNoHorizontalScroll(page)
+
+    await toggle(page, 'Work').click()
+    await expect(row(page, 'Engineering')).toHaveCount(0)
     await expectNoHorizontalScroll(page)
   })
 })

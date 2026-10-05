@@ -86,6 +86,30 @@ describe('useFolders', () => {
     expect(() => createFolder('personal')).toThrow('Folder already exists')
   })
 
+  it('scopes duplicate names to the same parent (siblings only)', async () => {
+    const { useFolders } = await import('./useFolders.js')
+    const { createFolder, renameFolder } = useFolders()
+    const work = createFolder('Work')
+    const personal = createFolder('Personal')
+
+    const workDesign = createFolder(' Design ', work.id)
+    expect(workDesign.name).toBe('Design')
+    // the same name under a different parent is a different folder
+    const personalDesign = createFolder('design', personal.id)
+    expect(personalDesign.parentId).toBe(personal.id)
+
+    // duplicate siblings are still rejected (nested and at the root)
+    expect(() => createFolder('DESIGN', work.id)).toThrow('Folder already exists')
+    expect(() => createFolder('work')).toThrow('Folder already exists')
+
+    // rename follows the same sibling scope
+    createFolder('Finance', personal.id)
+    const renamed = renameFolder(workDesign.id, 'Finance')
+    expect(renamed.name).toBe('Finance')
+    const workEng = createFolder('Engineering', work.id)
+    expect(() => renameFolder(workEng.id, 'Finance')).toThrow('Folder already exists')
+  })
+
   it('rename folder', async () => {
     const { useFolders } = await import('./useFolders.js')
     const { folders, createFolder, renameFolder } = useFolders()

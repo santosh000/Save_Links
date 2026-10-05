@@ -109,7 +109,8 @@ test.describe('Large-library baseline (500–1,000 links)', () => {
     // Search runs against real records.
     await timed(testInfo, 'search (1000 links)', async () => {
       await page.getByLabel('Search links').fill('Seed Link 0500')
-      await expect(page.locator('.library-results-count')).toHaveText(/^Showing 1 of 1 links$/)
+      // P15.10: one page of results -> "1 of 1000 links" (no pagination language)
+      await expect(page.locator('.library-results-count')).toHaveText(/^1 of 1000 links$/)
     })
     await expect(visibleLinkRows(page)).toHaveCount(1)
     await page.getByLabel('Search links').fill('')
@@ -179,16 +180,16 @@ test.describe('Large-library baseline (500–1,000 links)', () => {
     await page.locator('#filter-type').selectOption('video')
     await expect(page.locator('.library-results-count')).toHaveText(/^Showing 1–10 of 250 links$/)
     await expect(visibleLinkRows(page)).toHaveCount(PAGE_SIZE)
-    await expect(page.locator('.filter-chip', { hasText: 'Type: Video' })).toBeVisible()
+    await expect(page.locator('#filter-type')).toHaveValue('video') // the type chip carries the value
 
     // Compose with search: a single known video seed
     await page.getByLabel('Search links').fill('Seed Link 0001')
-    await expect(page.locator('.library-results-count')).toHaveText(/^Showing 1 of 1 links$/)
+    await expect(page.locator('.library-results-count')).toHaveText(/^1 of 1000 links$/)
     await page.getByLabel('Search links').fill('')
 
     // Pinned-only (no type filter): 100 pinned
-    await page.locator('.filter-chip', { hasText: 'Type: Video' }).getByRole('button', { name: 'Clear type filter' }).click()
-    await page.locator('.pinned-toggle').click()
+    await page.locator('#filter-type').selectOption('')
+    await page.getByRole('button', { name: 'Show pinned links only' }).click()
     await expect(page.locator('.library-results-count')).toHaveText(/^Showing 1–10 of 100 links$/)
 
     // Compose type + pinned: pinned indices are multiples of 10, and every
@@ -223,7 +224,7 @@ test.describe('Large-library baseline (500–1,000 links)', () => {
 
     await timed(testInfo, 'search (500 links)', async () => {
       await page.getByLabel('Search links').fill('Seed Link 0499')
-      await expect(page.locator('.library-results-count')).toHaveText(/^Showing 1 of 1 links$/)
+      await expect(page.locator('.library-results-count')).toHaveText(/^1 of 500 links$/)
     })
   })
 

@@ -1,14 +1,18 @@
 <script setup>
+import Icon from './Icon.vue'
+
 const props = defineProps({
   appearance: { type: String, required: true },
   colorScheme: { type: String, required: true }
 })
 const emit = defineEmits(['update:appearance', 'update:colorScheme'])
 
+// Registry icon per theme option (the inline SVG recipes are gone; the shared
+// registry is the single icon language).
 const appearances = [
-  { value: 'light', label: 'Light theme', name: 'Light' },
-  { value: 'dark', label: 'Dark theme', name: 'Dark' },
-  { value: 'system', label: 'System theme', name: 'System' }
+  { value: 'light', label: 'Light theme', name: 'Light', icon: 'sun' },
+  { value: 'dark', label: 'Dark theme', name: 'Dark', icon: 'moon' },
+  { value: 'system', label: 'System theme', name: 'System', icon: 'monitor' }
 ]
 // Color schemes are optional accents; "None" uses the base neutral accent.
 // `color` mirrors the scheme accent tokens in src/app-overrides.css so each
@@ -23,65 +27,65 @@ const schemes = [
 </script>
 
 <template>
-  <section class="settings-card" aria-label="Appearance settings">
-    <h4>Appearance</h4>
-    <p class="muted">Choose theme and color scheme. System follows OS preference.</p>
+  <!-- P15.10: Settings keeps its view/route but adopts the shared modal-panel
+       surface language (centred 560px panel on desktop, full-width sheet-like
+       panel on mobile). Every capability and label is unchanged. -->
+  <section class="settings-card" aria-label="Settings">
+    <div class="settings-body">
+      <h4>Appearance</h4>
+      <p class="muted">Choose theme and color scheme. System follows OS preference.</p>
 
-    <fieldset class="field">
-      <legend>Theme</legend>
-      <div class="theme-row" role="radiogroup" aria-label="Appearance">
-        <label v-for="opt in appearances" :key="opt.value" class="theme-opt" :class="{ active: appearance === opt.value }">
-          <input type="radio" name="appearance" :value="opt.value" :checked="appearance === opt.value" @change="emit('update:appearance', opt.value)" :aria-label="opt.label" />
-          <svg class="opt-icon ui-icon" viewBox="0 0 24 24" aria-hidden="true">
-            <template v-if="opt.value === 'light'">
-              <circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>
-            </template>
-            <template v-else-if="opt.value === 'dark'">
-              <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>
-            </template>
-            <template v-else>
-              <rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/>
-            </template>
-          </svg>
-          <span class="opt-name">{{ opt.name }}</span>
-        </label>
-      </div>
-    </fieldset>
+      <fieldset class="field">
+        <legend>Theme</legend>
+        <div class="theme-row" role="radiogroup" aria-label="Appearance">
+          <label v-for="opt in appearances" :key="opt.value" class="theme-opt" :class="{ active: appearance === opt.value }">
+            <input type="radio" name="appearance" :value="opt.value" :checked="appearance === opt.value" @change="emit('update:appearance', opt.value)" :aria-label="opt.label" />
+            <Icon class="opt-icon" :name="opt.icon" size="lg" />
+            <span class="opt-name">{{ opt.name }}</span>
+          </label>
+        </div>
+      </fieldset>
 
-    <fieldset class="field">
-      <legend>Color Scheme</legend>
-      <div class="swatch-row" role="radiogroup" aria-label="Color scheme">
-        <label v-for="opt in schemes" :key="opt.value" class="swatch" :class="{ active: colorScheme === opt.value }">
-          <input type="radio" name="colorScheme" :value="opt.value" :checked="colorScheme === opt.value" @change="emit('update:colorScheme', opt.value)" :aria-label="opt.label + ' color scheme'" />
-          <span class="swatch-dot" :class="{ none: !opt.color }" :style="opt.color ? { background: opt.color } : null" aria-hidden="true">
-            <svg v-if="colorScheme === opt.value" class="swatch-check" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12.5 9.5 18 20 7" /></svg>
-            <svg v-else-if="!opt.color" class="swatch-none" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 18 18 6" /></svg>
-          </span>
-          <span class="swatch-name">{{ opt.label }}</span>
-        </label>
-      </div>
-    </fieldset>
+      <fieldset class="field">
+        <legend>Color Scheme</legend>
+        <div class="swatch-row" role="radiogroup" aria-label="Color scheme">
+          <label v-for="opt in schemes" :key="opt.value" class="swatch" :class="{ active: colorScheme === opt.value }">
+            <input type="radio" name="colorScheme" :value="opt.value" :checked="colorScheme === opt.value" @change="emit('update:colorScheme', opt.value)" :aria-label="opt.label + ' color scheme'" />
+            <span class="swatch-dot" :class="{ none: !opt.color }" :style="opt.color ? { background: opt.color } : null" aria-hidden="true">
+              <Icon v-if="colorScheme === opt.value" class="swatch-check" name="check" size="md" />
+              <Icon v-else-if="!opt.color" class="swatch-none" name="x" size="md" />
+            </span>
+            <span class="swatch-name">{{ opt.label }}</span>
+          </label>
+        </div>
+      </fieldset>
+    </div>
   </section>
 </template>
 
 <style scoped>
+/* P15.12: the appearance pane lives inside the Settings modal, so it brings no
+   surface of its own — the modal provides the card/radius/shadow. */
 .settings-card {
-  background: transparent;
-  padding: 0;
+  width: 100%;
+  min-width: 0;
 }
-.settings-card h4 { margin: 0 0 6px; font-size: var(--text-md); font-weight: var(--weight-semibold); color: var(--text-h); }
-.muted { color: var(--muted); font-size: var(--text-sm); margin: 0 0 18px; line-height: 1.4; }
-.field { border: none; padding: 0; margin: 0 0 18px; }
-.field legend { font-size: var(--text-xs); font-weight: var(--weight-semibold); color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 10px; }
+.settings-body { padding: 0; }
+.settings-card h4 { margin: 0 0 var(--space-1); font-size: var(--text-2xl); font-weight: var(--weight-semibold); line-height: 1.2; color: var(--text-h); }
+.muted { color: var(--muted); font-size: var(--text-sm); margin: 0 0 40px; line-height: 1.4; }
+.field { border: none; padding: 0; margin: 0 0 48px; }
+.field:last-child { margin-bottom: 0; }
+/* Reference group label: 11px bold, wide tracking, 16px below. */
+.field legend { font-size: 11px; font-weight: var(--weight-bold); color: var(--muted); text-transform: uppercase; letter-spacing: .1em; margin-bottom: var(--space-4); }
 
-.theme-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.theme-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-4); }
 .theme-opt {
   position: relative;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-2);
-  min-width: 0; padding: 14px 10px;
-  border: 1px solid var(--border); background: transparent; border-radius: var(--radius-sm);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-3);
+  min-width: 0; padding: 20px;
+  border: 1px solid var(--border); background: transparent; border-radius: var(--radius-lg);
   color: var(--muted); cursor: pointer;
-  transition: border-color var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
+  transition: border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1), background 0.3s cubic-bezier(0.4, 0, 0.2, 1), color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 @media (hover: hover) and (pointer: fine){
 .theme-opt:hover { border-color: var(--accent); background: var(--muted-bg); color: var(--text-h); }
@@ -92,15 +96,15 @@ const schemes = [
   position: absolute; inset: 0; width: 100%; height: 100%;
   margin: 0; opacity: 0; cursor: pointer;
 }
-.opt-icon { width: 22px; height: 22px; }
-.opt-icon.ui-icon { stroke-width: 1.8; }
-.opt-name { font-size: 12.5px; font-weight: var(--weight-semibold); }
+.opt-icon { stroke-width: 1.8; transition: color 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+.opt-name { font-size: var(--text-sm); font-weight: var(--weight-medium); transition: color 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
 
-.swatch-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(76px, 1fr)); gap: 10px 6px; }
+/* Reference swatch row: 40px gaps, 48px dots, 12px label gap. */
+.swatch-row { display: flex; flex-wrap: wrap; gap: 40px; }
 .swatch {
   position: relative;
-  display: flex; flex-direction: column; align-items: center; gap: 6px;
-  min-width: 0; padding: 6px 0; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; gap: var(--space-3);
+  min-width: 0; cursor: pointer;
 }
 .swatch input[type="radio"] {
   position: absolute; inset: 0; width: 100%; height: 100%;
@@ -108,17 +112,28 @@ const schemes = [
 }
 .swatch:has(input:focus-visible) { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 2px; border-radius: var(--radius-sm); }
 .swatch-dot {
-  width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0;
+  width: calc(var(--control-height) + var(--space-2)); height: calc(var(--control-height) + var(--space-2)); border-radius: 50%; flex-shrink: 0;
   display: grid; place-items: center;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-h) 14%, transparent);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), outline-color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+@media (hover: hover) and (pointer: fine){
+.swatch:hover .swatch-dot { transform: scale(1.1); }
+.swatch:hover .swatch-name { color: var(--text-h); }
 }
 .swatch-dot.none { background: var(--muted-bg); }
-.swatch-dot.none .swatch-check { stroke: var(--text-h); }
-.swatch-none { width: 18px; height: 18px; fill: none; stroke: var(--muted); stroke-width: 2; stroke-linecap: round; }
-.swatch.active .swatch-dot { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 2px; }
+/* Selected: the dot carries the reference's enlarged ring/scale treatment. */
+.swatch.active .swatch-dot { transform: scale(1.1); outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 4px; }
 /* White check reads on every scheme swatch, including the mid-tone dark
    accents, so it stays a fixed value rather than following --on-accent. */
-.swatch-check { width: 18px; height: 18px; fill: none; stroke: #fff; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
-.swatch-name { font-size: 11.5px; line-height: 1.3; text-align: center; color: var(--muted); }
+.swatch-check { color: #fff; stroke-width: 2.5; }
+.swatch-dot.none .swatch-check { color: var(--text-h); }
+.swatch-none { color: var(--muted); }
+.swatch-name { font-size: var(--text-xs); line-height: 1.3; text-align: center; color: var(--muted); transition: color 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
 .swatch.active .swatch-name { color: var(--accent); font-weight: var(--weight-semibold); }
+
+/* Reduced motion: no hover/selected scaling. */
+@media (prefers-reduced-motion: reduce) {
+  .swatch:hover .swatch-dot, .swatch.active .swatch-dot { transform: none; }
+}
 </style>

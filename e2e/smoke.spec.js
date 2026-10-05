@@ -37,6 +37,12 @@ test.describe('Application smoke', () => {
     // navigation and asserts the view's page title).
     for (const view of ['folders', 'backup', 'settings', 'about', 'links']) {
       await openView(page, view)
+      // P15.12: Settings/About open the shared modal; close it before the next
+      // destination so the overlay never blocks navigation.
+      if (view === 'settings' || view === 'about') {
+        await page.keyboard.press('Escape')
+        await expect(page.getByRole('dialog')).toHaveCount(0)
+      }
     }
 
     // /api/me 404s in dev/test mode (no Worker backend running) and the external

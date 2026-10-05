@@ -1,20 +1,18 @@
 import { test, expect } from '@playwright/test'
-import { clearStorage, openView, saveLink, ensureCardView } from './helpers.js'
+import { clearStorage, openView, createFolder, saveLink, seedLinks, linkRecord, visibleLinkRows, ensureCardView, readStoredLinks } from './helpers.js'
 
 // Step 2C-1 contract: the Saved Link card leads with the title, keeps the URL
 // on one visual line (fading its painted tail, never its value), and keeps the
-// metadata line — category, folder, domain, saved date and provenance — as
-// quiet supporting text. Assertions are behavioural (computed style, DOM order,
-// scroll extents), never pixel coordinates.
-const LONG_URL =
-  'https://example.com/a/really/long/path/that/keeps/going/into/segments/with/query-params?utm_source=newsletter&utm_campaign=launch&ref=homepage'
+// card body — domain, title, description and the footer (tags + date) — as the
+// mockup's information hierarchy. Assertions are behavioural (computed style,
+// DOM order, scroll extents), never pixel coordinates.
 
 test.describe('Card information hierarchy (Step 2C-1)', () => {
   test.beforeEach(async ({ page }) => {
     await clearStorage(page)
   })
 
-  test('title leads the card; URL and quiet metadata follow it', async ({ page }) => {
+  test('the card body follows the mockup hierarchy: domain, title, description, footer', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.goto('/')
     await saveLink(page, { url: 'https://example.com/alpha', title: 'Alpha Link' })
@@ -22,60 +20,54 @@ test.describe('Card information hierarchy (Step 2C-1)', () => {
 
     const card = page.locator('.grid > .card').first()
     await expect(card.locator('.title')).toHaveText('Alpha Link')
+    await expect(card.locator('.card-domain')).toContainText('example.com')
 
+    // P15.11 mockup order: domain → title → description → footer (tags + date).
     const order = await card.locator('.body > *').evaluateAll((els) => els.map((el) => el.className.split(' ')[0]))
-    expect(order.indexOf('title')).toBeLessThan(order.indexOf('url-row'))
-    expect(order.indexOf('url-row')).toBeLessThan(order.indexOf('meta'))
-    expect(order.indexOf('meta')).toBeLessThan(order.indexOf('actions'))
+    expect(order).toEqual(['card-domain', 'title', 'desc', 'card-foot'])
   })
 
-  test('metadata line keeps the saved date and provenance, not category/folder/domain', async ({ page }) => {
+  test('card footer keeps the real saved date (right-aligned) beside the tags only', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.goto('/')
-    await saveLink(page, { url: 'https://example.com/alpha', title: 'Alpha Link' })
+    await saveLink(page, { url: 'https://example.com/alpha', title: 'Alpha Link', tags: 'react, css', category: 'GitHub' })
     await ensureCardView(page) // P8: the library boots in Compact
 
-    const meta = page.locator('.grid > .card .meta').first()
-    await expect(meta).toBeVisible()
+    const card = page.locator('.grid > .card').first()
+    const foot = card.locator('.card-foot')
+    await expect(foot).toBeVisible()
     // the saved date is still a real <time datetime> (one visible form per width)
-    const times = meta.locator('time[datetime]')
+    const times = foot.locator('time[datetime]')
     await expect(times.first()).toBeVisible()
     expect(await times.first().getAttribute('datetime')).toBeTruthy()
-    // provenance renders from the existing savedFrom value (hidden only when Unknown)
-    expect((await meta.innerText()).trim().length).toBeGreaterThan(0)
-    // category / folder / domain are no longer permanent metadata (they moved to
-    // the quick-action menu / the URL itself)
-    expect(await meta.locator('.meta-item').count()).toBeLessThanOrEqual(2)
+    // the real date is pushed to the footer's right edge (mockup margin-left:auto)
+    const footBox = await foot.boundingBox()
+    const dateBox = await card.locator('.card-date').boundingBox()
+    expect(Math.abs((dateBox.x + dateBox.width) - (footBox.x + footBox.width))).toBeLessThanOrEqual(1)
+    // tags live on the left of the footer; category/folder never appear in the card
+    await expect(foot.locator('.tag').first()).toHaveText('#react')
+    await expect(card).not.toContainText('GitHub')
+    await expect(foot).not.toContainText('GitHub')
   })
 
-  test('a long URL stays on one visual line without overflowing the page', async ({ page }) => {
+  test('a long domain truncates on one visual line without overflowing the page', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.goto('/')
-    await saveLink(page, { url: LONG_URL, title: 'Long URL card' })
+    await saveLink(page, { url: 'https://alpha-beta-gamma-delta-epsilon-zeta-eta-theta.example.com/path', title: 'Long domain card' })
     await ensureCardView(page) // P8: the library boots in Compact
 
-    const url = page.locator('.grid > .card .url').first()
-    await expect(url).toBeVisible()
-    const m = await url.evaluate((el) => {
-      const cs = getComputedStyle(el)
-      const line = el.closest('.url-line')
-      const lineCs = getComputedStyle(line)
-      return {
-        whiteSpace: cs.whiteSpace,
-        height: Math.round(el.getBoundingClientRect().height),
-        lineHeight: parseFloat(cs.lineHeight) || 0,
-        text: el.textContent,
-        title: el.getAttribute('title'),
-        clipped: line.scrollWidth > line.clientWidth + 1,
-        masked: lineCs.webkitMaskImage !== 'none' && lineCs.webkitMaskImage !== '',
-      }
-    })
-    expect(m.whiteSpace).toBe('nowrap') // never wraps to a second line
-    expect(m.height).toBeLessThan(m.lineHeight * 2) // one visual line
-    expect(m.clipped).toBe(true) // the tail is visually truncated
-    expect(m.masked).toBe(true) // by the mask fade, not a painted colour
-    expect(m.text).toBe(LONG_URL) // the full value is preserved in the DOM
-    expect(m.title).toBe(LONG_URL) // and exposed as the accessible title
+    const domain = page.locator('.grid > .card .card-domain-text').first()
+    await expect(domain).toBeVisible()
+    const m = await domain.evaluate((el) => ({
+      overflow: getComputedStyle(el).textOverflow,
+      clipped: el.scrollWidth > el.clientWidth + 1,
+      text: el.textContent,
+      title: el.getAttribute('title'),
+    }))
+    expect(m.overflow).toBe('ellipsis') // the tail is visually truncated
+    expect(m.clipped).toBe(true)
+    expect(m.text).toBe('alpha-beta-gamma-delta-epsilon-zeta-eta-theta.example.com') // full value preserved
+    expect(m.title).toBe(m.text) // and exposed as the accessible title
 
     const noHorizontalOverflow = await page.evaluate(
       () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
@@ -94,19 +86,24 @@ test.describe('Card information hierarchy (Step 2C-1)', () => {
     await expect(favorite).toHaveAttribute('aria-pressed', 'false')
     await favorite.click()
     await expect(favorite).toHaveAttribute('aria-pressed', 'true')
-    const important = card.getByRole('button', { name: 'Toggle Important' })
-    await important.click()
-    await expect(important).toHaveAttribute('aria-pressed', 'true')
-    // Step 2C-3: Must Have is no longer a permanent card control (it moved into
-    // the quick-action menu); the permanent status area is Important + Favorite
-    // (+ Pin, added in P3 as its own persistent flag).
+    // P15.10: Important is gone from the item surfaces; P15.11 puts the mockup
+    // banner cluster (favourite + pin + item menu) on the banner itself.
+    await expect(card.getByRole('button', { name: 'Toggle Important' })).toHaveCount(0)
     await expect(card.getByRole('button', { name: 'Toggle Must Have' })).toHaveCount(0)
-    expect(await card.locator('.status-group button').count()).toBe(3)
-    await expect(card.getByRole('button', { name: 'Toggle Pin' })).toBeVisible()
+    const cluster = card.locator('.thumb-wrap .banner-actions')
+    await expect(cluster).toBeVisible()
+    expect(await cluster.locator('button').count()).toBe(3)
+    const pin = cluster.getByRole('button', { name: 'Toggle Pin' })
+    await expect(pin).toBeVisible()
+    await pin.click()
+    await expect(pin).toHaveAttribute('aria-pressed', 'true')
+    // the selection box lives on the banner too (mockup .card-check)
+    await expect(card.locator('.thumb-wrap .card-check input')).toHaveCount(1)
 
-    // Card / List / Compact all render the saved link
-    for (const [index, mode] of [['0', 'card'], ['1', 'list'], ['2', 'compact']]) {
-      await page.locator('.view-btn').nth(Number(index)).click()
+    // Card / List / Compact all render the saved link (P15.3: the mockup
+    // topbar view tabs are ordered compact -> list -> card; click by label).
+    for (const [label, mode] of [['Compact', 'compact'], ['List', 'list'], ['Card', 'card']]) {
+      await page.locator('.view-btn').filter({ hasText: label }).click()
       const item = mode === 'card' ? '.grid > .card' : '.row-list > .link-row'
       await expect(page.locator(item)).toHaveCount(1)
       await expect(page.locator(item).first()).toContainText('Alpha Link')
@@ -147,7 +144,7 @@ test.describe('Card quick-action menu (Step 2C-2)', () => {
     await expect(trigger).toHaveAttribute('aria-expanded', 'false')
 
     await openMenu(page)
-    await page.locator('.page-title').click()
+    await page.locator('.navbar-custom').click({ position: { x: 4, y: 4 } })
     await expect(menu).toBeHidden()
 
     // keyboard: the trigger is reachable and opens the menu
@@ -179,10 +176,7 @@ test.describe('Card quick-action menu (Step 2C-2)', () => {
     await ensureCardView(page) // P8: the library boots in Compact
 
     // create a folder to move the link into
-    await openView(page, 'folders')
-    await page.getByLabel('New folder name').fill('Reading')
-    await page.getByRole('button', { name: 'Create folder', exact: true }).click()
-    await expect(page.locator('.folder-item', { hasText: 'Reading' })).toBeVisible()
+    await createFolder(page, 'Reading')
     await openView(page, 'links')
 
     // category
@@ -204,8 +198,9 @@ test.describe('Card quick-action menu (Step 2C-2)', () => {
     ;({ menu } = await openMenu(page))
     await expect(menu.getByRole('combobox', { name: 'Change category' })).toContainText('GitHub')
     await expect(menu.getByRole('combobox', { name: 'Move to folder' })).toContainText('Reading')
-    await expect(page.locator('.grid > .card .meta')).not.toContainText('GitHub')
-    await expect(page.locator('.grid > .card .meta')).not.toContainText('Reading')
+    await expect(page.locator('.grid > .card .card-foot')).not.toContainText('GitHub')
+    await expect(page.locator('.grid > .card .card-foot')).not.toContainText('Reading')
+    await expect(page.locator('.grid > .card .card-domain')).not.toContainText('GitHub')
 
     // survives a reload (the same persisted record)
     await page.reload()
@@ -306,7 +301,7 @@ test.describe('Card quick-action menu (Step 2C-2)', () => {
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('https://example.com/alpha')
   })
 
-  test('Important and Favorite stay direct card actions and still work', async ({ page }) => {
+  test('Favorite and Pin stay direct card actions and still work', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.goto('/')
     await saveLink(page, { url: 'https://example.com/alpha', title: 'Alpha Link' })
@@ -315,72 +310,62 @@ test.describe('Card quick-action menu (Step 2C-2)', () => {
     const favorite = card.getByRole('button', { name: 'Toggle Favorite' })
     await favorite.click()
     await expect(favorite).toHaveAttribute('aria-pressed', 'true')
-    const important = card.getByRole('button', { name: 'Toggle Important' })
-    await important.click()
-    await expect(important).toHaveAttribute('aria-pressed', 'true')
-    // Edit stays on the card (the deliberate exception) and opens the shared form
-    await card.getByRole('button', { name: 'Edit link' }).click()
+    // P15.10: Important left the card surface; Pin replaced it as the second
+    // permanent state toggle.
+    const pin = card.getByRole('button', { name: 'Toggle Pin' })
+    await pin.click()
+    await expect(pin).toHaveAttribute('aria-pressed', 'true')
+    // P15.11: the shared edit form opens from the item's own menu (the mockup
+    // banner carries a quiet action cluster, not a permanent pencil)
+    await card.getByRole('button', { name: 'More actions' }).click()
+    await page.locator('.more-menu').getByRole('button', { name: 'Edit link' }).click()
     await expect(page.locator('.edit-popover')).toBeVisible()
   })
 })
 
-// Step 2C-3 contract: Must Have is no longer permanent card chrome — it toggles
-// in context from the existing quick-action menu, while the persisted field,
-// the existing status filter and the sync/storage layer stay untouched.
-test.describe('Must Have in the quick-action menu (Step 2C-3)', () => {
+// P15.10 contract: the item surfaces carry Favorite + Pin only — Important and
+// Must Have are gone from Card/List/Compact (they remain real persisted fields
+// toggled from any UI surface anymore; they remain real persisted fields,
+// asserted at the store level below).
+test.describe('Item status surfaces (P15.10)', () => {
   test.beforeEach(async ({ page }) => {
     await clearStorage(page)
   })
 
-  test('toggles from the menu without leaving the card, and drives the existing status filter', async ({ page }) => {
+  test('Must Have and Important leave the item surfaces but keep their data', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
-    await page.goto('/')
-    await saveLink(page, { url: 'https://example.com/alpha', title: 'Alpha Link' })
+    // The flags have no UI control; seed the real data field through the
+    // legacy-storage migration path and assert the surfaces + the store.
+    await seedLinks(page, [linkRecord({ id: 'alpha', url: 'https://example.com/alpha', title: 'Alpha Link', mustHave: true })])
+    await expect(visibleLinkRows(page)).toHaveCount(1)
+    await ensureCardView(page)
 
     const card = page.locator('.grid > .card').first()
     await expect(card.getByRole('button', { name: 'Toggle Must Have' })).toHaveCount(0)
+    await expect(card.getByRole('button', { name: 'Toggle Important' })).toHaveCount(0)
 
-    // the same in List and Compact: no permanent Must Have control
-    for (const index of [1, 2]) {
-      await page.locator('.view-btn').nth(index).click()
+    // the same in List and Compact: no permanent Must Have/Important control
+    for (const label of ['List', 'Compact']) {
+      await page.locator('.view-btn').filter({ hasText: label }).click()
       const item = page.locator('.row-list > .link-row').first()
       await expect(item.getByRole('button', { name: 'Toggle Must Have' })).toHaveCount(0)
+      await expect(item.getByRole('button', { name: 'Toggle Important' })).toHaveCount(0)
       await expect(item.getByRole('button', { name: 'Toggle Favorite' })).toBeVisible()
+      await expect(item.getByRole('button', { name: 'Toggle Pin' })).toBeVisible()
     }
-    await page.locator('.view-btn').nth(0).click()
+    await page.locator('.view-btn').filter({ hasText: 'Card' }).click()
 
-    // reachable from the menu, toggles in place and keeps the menu open
+    // the quick-action menu no longer carries the Must Have toggle either
     await card.getByRole('button', { name: 'More actions' }).click()
     const menu = page.locator('.more-menu').first()
-    const mustHave = menu.getByRole('button', { name: 'Toggle Must Have' })
-    await expect(mustHave).toBeVisible()
-    await expect(mustHave).toHaveAttribute('aria-pressed', 'false')
-    await mustHave.click()
-    await expect(mustHave).toHaveAttribute('aria-pressed', 'true')
     await expect(menu).toBeVisible()
-    // the active state is not colour-only: the icon takes the filled treatment
-    const fill = await mustHave.locator('svg').evaluate((el) => getComputedStyle(el).fill)
-    expect(fill).not.toBe('none')
+    await expect(menu.getByRole('button', { name: 'Toggle Must Have' })).toHaveCount(0)
     await page.keyboard.press('Escape')
 
-    // the existing status filter still resolves it as Must Have (data intact)
-    await page.locator('#filter-status').selectOption('must-have')
-    await expect(page.locator('.grid > .card')).toHaveCount(1)
-    await page.locator('#filter-status').selectOption('')
-
-    // the toggle writes the same persisted field: a reload keeps it…
-    await page.reload()
-    await expect(page.locator('.grid > .card').first()).toContainText('Alpha Link')
-    await page.getByRole('button', { name: 'More actions' }).first().click()
-    const afterReload = page.locator('.more-menu').getByRole('button', { name: 'Toggle Must Have' })
-    await expect(afterReload).toHaveAttribute('aria-pressed', 'true')
-
-    // …and turning it off there removes it from the Must Have filter again
-    await afterReload.click()
-    await expect(afterReload).toHaveAttribute('aria-pressed', 'false')
-    await page.keyboard.press('Escape')
-    await page.locator('#filter-status').selectOption('must-have')
-    await expect(page.locator('.grid > .card')).toHaveCount(0)
+    // …while the persisted field stays real data (the UI has no Important/
+    // Must Have control and no status filter anymore; assert the store).
+    const stored = await readStoredLinks(page)
+    expect(stored.find((l) => l.title === 'Alpha Link')?.mustHave).toBe(true)
   })
 })
 

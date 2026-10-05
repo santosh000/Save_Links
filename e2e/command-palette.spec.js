@@ -25,7 +25,7 @@ test.describe('Command palette', () => {
   test('Ctrl+K opens; Escape closes and restores focus', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.goto('/')
-    const trigger = page.locator('.btn-date-picker')
+    const trigger = page.locator('.content-head .add-toggle')
     await trigger.focus()
     await openPalette(page)
     await expect(paletteInput(page)).toBeFocused()

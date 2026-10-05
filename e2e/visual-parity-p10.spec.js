@@ -1,7 +1,6 @@
-// P10 — Option D: at >=1024 the filter toolbar is one horizontally scrollable
-// row (mockup filterbar behaviour). Covers the single-row contract, the scroll
-// reachability of the off-screen controls, the real filter pipeline and the
-// untouched <=768 disclosure.
+// P15.10 — the filter bar is one horizontally scrollable chip row at every
+// width (mockup .filterbar): real filter dimensions, the pinned toggle, the
+// contextual clearable chips and the truthful result count below it.
 import { test, expect } from '@playwright/test'
 import { clearStorage, saveLink, visibleLinkRows, expectNoHorizontalScroll } from './helpers.js'
 
@@ -11,25 +10,26 @@ async function seed(page, count = 3) {
   }
 }
 
-const toolbarMetrics = (page) => page.evaluate(() => {
+const metrics = (page) => page.evaluate(() => {
   const head = document.querySelector('.content-head')
-  const visible = [...head.children].filter((c) => c.getBoundingClientRect().width > 0)
-  const rows = new Set(visible.map((c) => Math.round(c.getBoundingClientRect().top))).size
-  const controls = document.querySelector('.toolbar-controls')
-  const r = controls.getBoundingClientRect()
+  const visibleHead = [...head.children].filter((c) => c.getBoundingClientRect().width > 0)
+  const rows = new Set(visibleHead.map((c) => Math.round(c.getBoundingClientRect().top))).size
+  const bar = document.querySelector('.filterbar')
+  const r = bar.getBoundingClientRect()
   return {
     rows,
-    headH: Math.round(head.getBoundingClientRect().height),
-    clientW: Math.round(controls.clientWidth),
-    scrollW: Math.round(controls.scrollWidth),
-    box: { left: Math.round(r.left), right: Math.round(r.right) },
+    barBox: { left: Math.round(r.left), right: Math.round(r.right) },
+    clientW: Math.round(bar.clientWidth),
+    scrollW: Math.round(bar.scrollWidth),
     overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
   }
 })
 
-test.describe('P10 — desktop filter toolbar', () => {
-  test('single row at >=1024; scrolls at 1024/1100; no page overflow (light + dark)', async ({ page }) => {
-    for (const width of [1024, 1100, 1200, 1280, 1440]) {
+test.describe('P15.10 — filter bar', () => {
+  test('one toolbar row + one scrollable chip row at >=1200; no page overflow (light + dark)', async ({ page }) => {
+    // The Library Controls toolbar band is a desktop-grid (>=1200) contract;
+    // below 1200 the filter bar is the workspace top and the FAB owns Add.
+    for (const width of [1200, 1280, 1440]) {
       await page.setViewportSize({ width, height: 900 })
       await clearStorage(page)
       await seed(page)
@@ -39,71 +39,63 @@ test.describe('P10 — desktop filter toolbar', () => {
           else document.documentElement.removeAttribute('data-appearance')
         }, dark)
         await page.waitForTimeout(80)
-        const m = await toolbarMetrics(page)
+        const m = await metrics(page)
         const where = `@${width}${dark ? ' dark' : ''}`
         expect(m.rows, `${where} toolbar rows`).toBe(1)
         expect(m.overflowX, `${where} page overflow`).toBe(false)
-        // P10: the row scrolls whenever the controls exceed the available
-        // width (1024/1100 by a wide margin; nearly all visible at 1440).
+        // the chip row never compresses its chips; it scrolls when needed
         expect(m.scrollW, `${where} never compressed`).toBeGreaterThanOrEqual(m.clientW)
-        if (width <= 1100) expect(m.scrollW, `${where} scrollable`).toBeGreaterThan(m.clientW)
-        if (width === 1440) expect(m.scrollW - m.clientW, `${where} nearly all visible`).toBeLessThanOrEqual(80)
       }
       await page.evaluate(() => document.documentElement.removeAttribute('data-appearance'))
     }
     await expectNoHorizontalScroll(page)
   })
 
-  test('off-screen controls are reachable by focus/scroll and the real filter pipeline works', async ({ page }) => {
+  test('every chip is reachable and the real filter pipeline works', async ({ page }) => {
     await page.setViewportSize({ width: 1024, height: 900 })
     await clearStorage(page)
     await seed(page)
 
-    // one real favorite so the status filter has a target
-    await visibleLinkRows(page).first().getByRole('button', { name: 'Toggle Favorite' }).click()
+    // Scroll the chip row to its far end and reach the last control.
+    await page.evaluate(() => { const c = document.querySelector('.filterbar'); c.scrollLeft = c.scrollWidth })
+    const { barBox } = await metrics(page)
+    const last = page.locator('.filterbar .chip').last()
+    const lastBox = await last.boundingBox()
+    expect(lastBox.x).toBeLessThanOrEqual(barBox.right + 1)
 
-    // The last control starts off-screen; focusing it scrolls it into view.
-    const exportBtn = page.locator('.toolbar-export')
-    const { box } = await toolbarMetrics(page)
-    const before = await exportBtn.boundingBox()
-    expect(before.x + before.width, 'export starts off-screen @1024').toBeGreaterThan(box.right)
-    await exportBtn.focus()
-    const after = await exportBtn.boundingBox()
-    expect(after.x, 'focused control scrolled into view').toBeGreaterThanOrEqual(box.left - 1)
-    expect(after.x + after.width).toBeLessThanOrEqual(box.right + 1)
+    // the dimension chips are all present and usable
+    for (const name of ['Filter by date', 'Filter by category', 'Filter by type']) {
+      await expect(page.getByRole('combobox', { name })).toBeAttached()
+    }
+    await page.locator('#filter-type').selectOption('video')
+    await expect(visibleLinkRows(page)).toHaveCount(0)
+    await page.locator('#filter-type').selectOption('')
+    await expect(visibleLinkRows(page)).toHaveCount(3)
 
-    // Scrolling the row by hand reaches the far end as well.
-    await page.evaluate(() => { const c = document.querySelector('.toolbar-controls'); c.scrollLeft = c.scrollWidth })
-    const pinned = page.locator('.pinned-toggle')
-    const pinnedBox = await pinned.boundingBox()
-    expect(pinnedBox.x + pinnedBox.width).toBeLessThanOrEqual(box.right + 1)
-
-    // Real filters still run through the scrollable toolbar.
-    await page.locator('#filter-status').selectOption('favorite')
-    await expect(visibleLinkRows(page)).toHaveCount(1)
-    await page.locator('#filter-status').selectOption('')
+    // the pinned toggle is a real chip with the shared language
+    const pinned = page.getByRole('button', { name: 'Show pinned links only' })
+    await pinned.click()
+    await expect(pinned).toHaveAttribute('aria-pressed', 'true')
+    await expect(visibleLinkRows(page)).toHaveCount(0)
+    await pinned.click()
     await expect(visibleLinkRows(page)).toHaveCount(3)
   })
 
-  test('the <=768 filter disclosure is untouched', async ({ page }) => {
+  test('the chip row scrolls on mobile and no disclosure is needed', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
     await clearStorage(page)
     await seed(page)
 
-    const trigger = page.getByRole('button', { name: 'Sort & Filter', exact: true })
-    const panel = page.locator('#sort-filter-panel')
-    await expect(trigger).toBeVisible()
-    await expect(trigger).toHaveAttribute('aria-expanded', 'false')
-    await expect(panel).toBeHidden()
+    // No sort control / disclosure trigger remains.
+    await expect(page.locator('#filter-sort')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: /sort\s*(&|and)?\s*filter/i })).toHaveCount(0)
 
-    await trigger.click()
-    await expect(panel).toBeVisible()
-    // the real sort control inside the disclosure still drives the list
-    await page.locator('#filter-sort').selectOption('title-az')
-    await expect(visibleLinkRows(page).first()).toContainText('P10 Link 0')
-    await page.keyboard.press('Escape')
-    await expect(panel).toBeHidden()
-    await expect(trigger).toBeFocused()
+    const m = await metrics(page)
+    expect(m.scrollW).toBeGreaterThan(m.clientW) // the row scrolls
+    await page.locator('#filter-type').selectOption('video')
+    await expect(visibleLinkRows(page)).toHaveCount(0)
+    await page.locator('#filter-type').selectOption('')
+    await expect(visibleLinkRows(page)).toHaveCount(3)
     await expectNoHorizontalScroll(page)
   })
 })

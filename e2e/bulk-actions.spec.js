@@ -128,7 +128,6 @@ test.describe('Bulk selection and actions', () => {
     await saveLink(page, { url: 'https://example.com/c', title: 'Gamma' })
     await ensureCardView(page) // P8: the library boots in Compact
 
-    await openView(page, 'folders')
     await createFolder(page, 'Reading')
     await openView(page, 'links')
 
@@ -217,7 +216,7 @@ test.describe('Bulk selection and actions', () => {
     await page.getByRole('dialog').getByRole('button', { name: 'Delete', exact: true }).click()
 
     // The empty page 2 no longer exists: the view returns to a full page 1.
-    await expect(page.locator('.library-results-count')).toHaveText(/^Showing 1\u201310 of 10 links$/)
+    await expect(page.locator('.library-results-count')).toHaveText(/^10 links$/)
     await expect(page.locator('.grid > .card')).toHaveCount(10)
     await expect(bulkBar(page)).toBeHidden()
   })

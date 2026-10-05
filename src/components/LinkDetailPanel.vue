@@ -5,15 +5,17 @@
 // handlers (edit/copy/share/delete/pin/important/must-have/move).
 //
 // One component serves both mockup presentations:
-//   · overlay (mobile/tablet, mockup <1024): bottom sheet <768, centred sheet
+//   · overlay (mobile/tablet, mockup <1200): bottom sheet <768, centred sheet
 //     >=768 — slide-in transform + backdrop + drag handle
 //   · rail    (desktop >=1200, mockup grid column 3): fixed right rail, no
 //     backdrop, no handle
 import { ref, computed, watch, nextTick } from 'vue'
 import { folderPath } from '../utils/folderTree.js'
+import { linkTypeIcon } from '../utils/linkTypeIcon.js'
 import { LINK_TYPE_LABELS } from '../domain/link.js'
 import AppSelect from './AppSelect.vue'
 import EditLinkForm from './EditLinkForm.vue'
+import Icon from './Icon.vue'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -22,19 +24,36 @@ const props = defineProps({
   folders: { type: Array, default: () => [] },
   // Indented { value, label } options for the Move picker.
   folderOptions: { type: Array, default: () => [] },
+  // Unique library tags (App's collectTags order) for the inline tag editor.
+  availableTags: { type: Array, default: () => [] },
   // true below the desktop shell breakpoint: sheet + backdrop + handle.
   overlay: { type: Boolean, default: true },
 })
 
-const emit = defineEmits(['close', 'edit', 'copy', 'share', 'delete', 'pin', 'favorite', 'important', 'must-have', 'move'])
+const emit = defineEmits(['close', 'edit', 'copy', 'share', 'delete', 'pin', 'favorite', 'move'])
 
 const DATE_FMT = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
 
-const editing = ref(false)
-const moving = ref(false)
+// One panel mode drives the body: 'detail' | 'edit' | 'move'. Edit and Move
+// toggle from their own action (clicking the action again returns to detail and
+// discards the open editor/picker), so the two modes can never be open at once.
+const mode = ref('detail')
+const editing = computed(() => mode.value === 'edit')
+const moving = computed(() => mode.value === 'move')
+const modeTitle = computed(() => (mode.value === 'edit' ? 'Edit Link' : 'Move Link'))
+// Move-mode draft: the picker only changes this; the existing `move` emit runs
+// on confirm, so an unconfirmed selection is discarded by Cancel/toggle.
+const moveDraft = ref('')
+// Inline tag editor inside detail mode: expanding it never hides the rest of
+// the detail content. Tag changes commit immediately through the existing
+// `edit` emit (App.handleEdit -> useLinks.updateLink), so the visible list and
+// the stored record stay in sync.
+const isAddingTag = ref(false)
+const tagInput = ref('')
 const imageFailed = ref(false)
 const closeBtn = ref(null)
 const panelEl = ref(null)
+const scrollEl = ref(null)
 
 const href = computed(() => props.link ? (props.link.normalizedUrl || props.link.url || '') : '')
 const displayUrl = computed(() => props.link ? (props.link.originalUrl || props.link.url || '') : '')
@@ -51,6 +70,8 @@ const savedLabel = computed(() => {
 })
 const typeValue = computed(() => (props.link && props.link.type) || 'other')
 const typeLabel = computed(() => LINK_TYPE_LABELS[typeValue.value] || LINK_TYPE_LABELS.other)
+// Type -> registry glyph, via the mapping shared with the item surfaces.
+const previewGlyph = computed(() => linkTypeIcon(typeValue.value))
 const folderLabel = computed(() => {
   if (!props.link || !props.link.folderId) return 'Unfiled'
   return folderPath(props.folders, props.link.folderId) || 'Unfiled'
@@ -60,18 +81,51 @@ const showImage = computed(() => !!(props.link && props.link.image) && !imageFai
 watch(() => props.link?.image, () => { imageFailed.value = false })
 watch(() => props.link?.normalizedUrl, () => { imageFailed.value = false })
 // Switching the inspected link must never carry a draft form or an open picker.
-watch(() => props.link?.id, () => { editing.value = false; moving.value = false; resetDrag() })
+watch(() => props.link?.id, () => { mode.value = 'detail'; isAddingTag.value = false; tagInput.value = ''; resetDrag() })
 
-function startEdit() { editing.value = true; moving.value = false }
+// Top-bar Edit / Move toggle their own mode; all three share this one mode ref.
+function toggleEdit() { mode.value = mode.value === 'edit' ? 'detail' : 'edit' }
+function cancelEdit() { mode.value = 'detail' }
 function saveEdit(patch) {
-  editing.value = false
+  mode.value = 'detail'
   if (props.link) emit('edit', props.link.id, patch)
 }
-function startMove() { moving.value = true; editing.value = false }
-function onMove(value) {
-  moving.value = false
+function toggleMove() {
+  if (mode.value === 'move') { mode.value = 'detail'; return }
+  moveDraft.value = props.link?.folderId || ''
+  mode.value = 'move'
+}
+function cancelMove() { mode.value = 'detail' }
+function confirmMove() {
+  const value = moveDraft.value
+  mode.value = 'detail'
   if (props.link) emit('move', props.link.id, value)
 }
+// The "+ Add" control toggles the inline editor; Done collapses it without
+// leaving detail mode. Neither opens the full Edit Link form.
+function toggleTags() { isAddingTag.value = !isAddingTag.value }
+function doneTags() { isAddingTag.value = false }
+function currentTags() { return props.link?.tags || [] }
+function addTag(tag) {
+  if (!tag || !props.link || currentTags().includes(tag)) return
+  emit('edit', props.link.id, { tags: [...currentTags(), tag] })
+}
+function addTagFromInput() {
+  const tag = tagInput.value.trim()
+  if (!tag || currentTags().includes(tag)) return
+  tagInput.value = ''
+  addTag(tag)
+}
+function removeTag(tag) {
+  if (!props.link) return
+  emit('edit', props.link.id, { tags: currentTags().filter((t) => t !== tag) })
+}
+function toggleTag(tag) {
+  if (currentTags().includes(tag)) removeTag(tag)
+  else addTag(tag)
+}
+// A mode owns the panel from the top: never inherit the previous scroll offset.
+watch(mode, async () => { await nextTick(); if (scrollEl.value) scrollEl.value.scrollTop = 0 })
 
 // ---- Overlay focus management (mockup sheet: focus in, restore on close) ----
 let previouslyFocused = null
@@ -162,67 +216,81 @@ function onPanelKeydown(e) {
         @pointercancel="onDragEnd"
       ></div>
 
-      <!-- P8 desktop rail placeholder: the column is structurally present
-           before a selection; no fake data, only the real empty state. -->
+      <!-- Desktop rail empty state: the column stays structurally present
+           between inspections (mobile sheets only mount while open). -->
       <div v-if="!link" class="detail-empty">
         <div class="detail-empty-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M15 3v18"/></svg>
+          <Icon name="panel-right" class="detail-empty-glyph" />
         </div>
         <p class="detail-empty-title">No link selected</p>
         <p class="detail-empty-text">Select a link from the list to see its details here.</p>
       </div>
 
-      <div v-else class="detail-scroll">
-        <div class="detail-preview" :class="{ 'has-image': showImage }">
-          <img
-            v-if="showImage"
-            :src="link.image"
-            :alt="link.title"
-            class="detail-image"
-            loading="lazy"
-            @error="imageFailed = true"
-          />
-          <svg v-else class="preview-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <template v-if="typeValue === 'video'">
-              <polygon points="23 7 16 12 23 17 23 7" />
-              <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-            </template>
-            <template v-else-if="typeValue === 'docs'">
-              <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
-              <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
-            </template>
-            <template v-else-if="typeValue === 'repo'">
-              <polyline points="16 18 22 12 16 6" />
-              <polyline points="8 6 2 12 8 18" />
-            </template>
-            <template v-else-if="typeValue === 'tutorial'">
-              <path d="M22 10 12 5 2 10l10 5 10-5z" />
-              <path d="M6 12v5c3 3 9 3 12 0v-5" />
-            </template>
-            <template v-else>
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-              <polyline points="14 2 14 8 20 8" />
-              <line x1="16" y1="13" x2="8" y2="13" />
-              <line x1="16" y1="17" x2="8" y2="17" />
-            </template>
-          </svg>
-          <span class="detail-badge">{{ typeLabel }}</span>
-          <a v-if="href" class="detail-open" :href="href" target="_blank" rel="noopener noreferrer" aria-label="Open link">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>
-            <span>Open</span>
-          </a>
+      <div v-else ref="scrollEl" class="detail-scroll">
+        <!-- Preview surface: the type badge and the link actions live on the
+             same surface as the image/glyph (one visual region, no header bar). -->
+        <div class="detail-preview" :class="{ 'has-image': showImage && mode === 'detail', 'detail-preview--mode': mode !== 'detail' }">
+          <div class="detail-preview-top">
+            <span v-if="mode === 'detail'" class="detail-badge">{{ typeLabel }}</span>
+            <h2 v-else class="detail-mode-title">{{ modeTitle }}</h2>
+            <div class="detail-top-actions">
+              <a v-if="href" class="navbar-action-btn" :href="href" target="_blank" rel="noopener noreferrer" aria-label="Open link" title="Open">
+                <Icon name="external-link" size="sm" />
+              </a>
+              <button type="button" class="navbar-action-btn" aria-label="Copy link" title="Copy" @click="emit('copy', link.id)">
+                <Icon name="copy" size="sm" />
+              </button>
+              <button type="button" class="navbar-action-btn" aria-label="Edit link" title="Edit" :aria-expanded="String(editing)" @click="toggleEdit">
+                <Icon name="pencil" size="sm" />
+              </button>
+              <button type="button" class="navbar-action-btn" aria-label="Share link" title="Share" @click="emit('share', link.id)">
+                <Icon name="share-2" size="sm" />
+              </button>
+              <button type="button" class="navbar-action-btn" aria-label="Move to folder" title="Move" :aria-expanded="String(moving)" @click="toggleMove">
+                <Icon name="folder-input" size="sm" />
+              </button>
+              <button type="button" class="navbar-action-btn detail-danger" aria-label="Delete link" title="Delete" @click="emit('delete', link.id)">
+                <Icon name="trash-2" size="sm" />
+              </button>
+            </div>
+            <button ref="closeBtn" type="button" class="navbar-action-btn detail-close" aria-label="Close details" title="Close" @click="emit('close')">
+              <Icon name="x" size="sm" />
+            </button>
+          </div>
+          <div v-if="mode === 'detail'" class="detail-preview-media">
+            <img
+              v-if="showImage"
+              :src="link.image"
+              :alt="link.title"
+              class="detail-image"
+              loading="lazy"
+              @error="imageFailed = true"
+            />
+            <Icon v-else :name="previewGlyph" class="preview-glyph" />
+          </div>
         </div>
 
-        <div class="detail-body">
+        <!-- DETAIL MODE: the normal link details. -->
+        <div v-if="mode === 'detail'" class="detail-body">
           <div class="detail-head">
             <h2 class="detail-title">{{ link.title }}</h2>
-            <button ref="closeBtn" type="button" class="detail-close" aria-label="Close details" @click="emit('close')">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
-            </button>
           </div>
 
           <a v-if="href" class="detail-url" :href="href" target="_blank" rel="noopener noreferrer">{{ displayUrl }}</a>
           <span v-else class="detail-url">{{ displayUrl }}</span>
+
+          <!-- Favorite / Pinned: dedicated state controls directly below the
+               title + URL (never in the top action row). -->
+          <div class="detail-state">
+            <button type="button" class="type-pill" :class="{ active: link.favorite }" :aria-pressed="String(!!link.favorite)" aria-label="Toggle Favorite" @click="emit('favorite', link.id)">
+              <Icon name="star" size="xs" />
+              <span>Favorite</span>
+            </button>
+            <button type="button" class="type-pill" :class="{ active: link.pinned }" :aria-pressed="String(!!link.pinned)" aria-label="Toggle Pin" @click="emit('pin', link.id)">
+              <Icon name="pin" size="xs" />
+              <span>Pinned</span>
+            </button>
+          </div>
 
           <dl class="detail-meta">
             <dt>Domain</dt><dd>{{ domainText || '—' }}</dd>
@@ -236,10 +304,75 @@ function onPanelKeydown(e) {
             <h4>Tags</h4>
             <div class="detail-tags">
               <span v-for="t in link.tags || []" :key="t" class="detail-tag">#{{ t }}</span>
-              <button type="button" class="detail-tag-add" aria-label="Edit tags" @click="startEdit">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+              <button
+                type="button"
+                class="detail-tag-add"
+                aria-label="Edit tags"
+                aria-controls="detail-tag-editor"
+                :aria-expanded="String(isAddingTag)"
+                @click="toggleTags"
+              >
+                <Icon name="plus" size="xs" />
                 <span>Add</span>
               </button>
+            </div>
+
+            <!-- Inline tag editor: expands under TAGS; the rest of the detail
+                 stays visible. Height+opacity reveal, opt-out under reduced motion. -->
+            <div id="detail-tag-editor" class="detail-tags-editor" :class="{ open: isAddingTag }">
+              <div class="detail-tags-editor-inner">
+                <div class="detail-tags-editor-body">
+                  <div class="detail-tags-editor-group">
+                    <h4>Current tags</h4>
+                    <div class="detail-tags">
+                      <span v-for="t in link.tags || []" :key="t" class="tag-pill tag-pill--current">
+                        #{{ t }}
+                        <button type="button" class="tag-pill-remove" :aria-label="'Remove tag ' + t" @click="removeTag(t)">
+                          <Icon name="x" size="xs" />
+                        </button>
+                      </span>
+                      <p v-if="!(link.tags || []).length" class="detail-tags-empty">No tags yet.</p>
+                    </div>
+                  </div>
+
+                  <div class="detail-tags-editor-group">
+                    <h4>Add tag</h4>
+                    <div class="detail-tag-add-row">
+                      <input
+                        id="detail-tag-input"
+                        v-model="tagInput"
+                        class="input"
+                        type="text"
+                        placeholder="New tag"
+                        aria-label="New tag"
+                        autocapitalize="none"
+                        autocorrect="off"
+                        @keydown.enter.prevent="addTagFromInput"
+                      />
+                      <button type="button" class="btn primary sm" :disabled="!tagInput.trim()" @click="addTagFromInput">Add</button>
+                    </div>
+                  </div>
+
+                  <div v-if="availableTags.length" class="detail-tags-editor-group">
+                    <h4>Available tags</h4>
+                    <div class="detail-tags">
+                      <button
+                        v-for="t in availableTags"
+                        :key="t"
+                        type="button"
+                        class="tag-pill"
+                        :class="{ active: (link.tags || []).includes(t) }"
+                        :aria-pressed="String((link.tags || []).includes(t))"
+                        @click="toggleTag(t)"
+                      >#{{ t }}</button>
+                    </div>
+                  </div>
+
+                  <div class="detail-mode-actions">
+                    <button type="button" class="btn primary sm" @click="doneTags">Done</button>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -247,62 +380,32 @@ function onPanelKeydown(e) {
             <h4>Description</h4>
             <p class="detail-desc">{{ link.description || '—' }}</p>
           </div>
+        </div>
 
-          <div class="detail-section">
-            <h4>Actions</h4>
-            <div class="detail-actions">
-              <button type="button" aria-label="Edit link" @click="startEdit">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                <span>Edit</span>
-              </button>
-              <button type="button" aria-label="Copy link" @click="emit('copy', link.id)">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                <span>Copy</span>
-              </button>
-              <button type="button" aria-label="Share link" @click="emit('share', link.id)">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
-                <span>Share</span>
-              </button>
-              <button type="button" aria-label="Move to folder" :aria-expanded="String(moving)" @click="startMove">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-                <span>Move</span>
-              </button>
-              <button type="button" :class="{ 'is-on': link.pinned }" :aria-pressed="String(!!link.pinned)" aria-label="Toggle Pin" @click="emit('pin', link.id)">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6"/><path d="M10 4v6l-2 3h8l-2-3V4"/><path d="M12 13v7"/></svg>
-                <span>Pin</span>
-              </button>
-              <button type="button" :class="{ 'is-on': link.favorite }" :aria-pressed="String(!!link.favorite)" aria-label="Toggle Favorite" @click="emit('favorite', link.id)">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21C7 16.8 3 13.6 3 9.6 3 7 5 5 7.4 5c1.8 0 3.4 1 4.6 2.6C13.2 6 14.8 5 16.6 5 19 5 21 7 21 9.6c0 4-4 7.2-9 11.4z"/></svg>
-                <span>Favorite</span>
-              </button>
-              <button type="button" :class="{ 'is-on': link.important }" :aria-pressed="String(!!link.important)" aria-label="Toggle Important" @click="emit('important', link.id)">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v4.5"/><path d="M12 15.5v.2"/></svg>
-                <span>Important</span>
-              </button>
-              <button type="button" :class="{ 'is-on': link.mustHave }" :aria-pressed="String(!!link.mustHave)" aria-label="Toggle Must Have" @click="emit('must-have', link.id)">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2 20.8 12 12 20.8 3.2 12z"/></svg>
-                <span>Must Have</span>
-              </button>
-              <button type="button" class="danger" aria-label="Delete link" @click="emit('delete', link.id)">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
-                <span>Delete</span>
-              </button>
-            </div>
+        <!-- EDIT MODE: the shared editor owns the panel body — no details behind it. -->
+        <div v-else-if="mode === 'edit'" class="detail-body">
+          <EditLinkForm :link="link" :folders="folderOptions" @save="saveEdit" @cancel="cancelEdit" />
+        </div>
 
-            <div v-if="moving" class="detail-move">
-              <AppSelect
-                :id="'detail-move-folder'"
-                :model-value="link.folderId || ''"
-                variant="field"
-                :options="[{ value: '', label: 'Unfiled' }, ...folderOptions]"
-                aria-label="Move link to folder"
-                @change="onMove"
-              />
-            </div>
+        <!-- MOVE MODE: destination draft + confirm; nothing else. -->
+        <div v-else class="detail-body detail-move">
+          <div class="detail-move-row">
+            <span class="detail-move-label">Current folder</span>
+            <span class="detail-move-current">{{ folderLabel }}</span>
           </div>
-
-          <div v-if="editing" class="detail-edit">
-            <EditLinkForm :link="link" :folders="folderOptions" @save="saveEdit" @cancel="editing = false" />
+          <label class="detail-move-field" for="detail-move-folder">
+            <span>Destination</span>
+            <AppSelect
+              id="detail-move-folder"
+              v-model="moveDraft"
+              variant="field"
+              :options="[{ value: '', label: 'Unfiled' }, ...folderOptions]"
+              aria-label="Move link to folder"
+            />
+          </label>
+          <div class="detail-mode-actions">
+            <button type="button" class="btn ghost sm" @click="cancelMove">Cancel</button>
+            <button type="button" class="btn primary sm" @click="confirmMove">Move</button>
           </div>
         </div>
       </div>
@@ -323,27 +426,30 @@ function onPanelKeydown(e) {
   overflow: hidden;
   z-index: calc(var(--z-sidebar) + 5);
 }
-/* Sheet (<1200): bottom sheet <768, centred sheet >=768 (mockup .detail). */
+/* Sheet (<1200): the shared modal family's bottom sheet — full width up to the
+   modal width (AppDialog max 560px), centred above it; all corners at >=768. */
 .detail--sheet {
-  left: 0;
-  right: 0;
+  left: 50%;
+  right: auto;
   bottom: 0;
+  width: 100%;
+  max-width: 560px;
   height: 88dvh;
   max-height: 88dvh;
   border-bottom: none;
-  border-top-left-radius: 16px;
-  border-top-right-radius: 16px;
+  border-top-left-radius: var(--radius-lg);
+  border-top-right-radius: var(--radius-lg);
   padding-bottom: var(--safe-area-bottom);
   box-shadow: var(--shadow-lg);
   will-change: transform;
   /* --drag-y carries the live drag offset so the transform composition stays
-     in CSS (the centred sheet must keep its translateX(-50%)). */
-  transform: translateY(var(--drag-y, 0px));
+     in CSS (the centred sheet keeps its translateX(-50%)). */
+  transform: translate(-50%, var(--drag-y, 0px));
   transition: transform .3s cubic-bezier(.4, 0, .2, 1);
 }
-/* Rail (>=1024): the mockup's static third grid column. The column exists
+/* Rail (>=1200): the mockup's static third grid column. The column exists
    before any selection; the placeholder fills it until a link is inspected. */
-@media (min-width: 1024px) {
+@media (min-width: 1200px) {
   .detail--rail {
     position: static;
     grid-column: 3;
@@ -380,7 +486,7 @@ function onPanelKeydown(e) {
   background: var(--muted-bg);
   color: var(--muted);
 }
-.detail-empty-icon svg { width: 20px; height: 20px; }
+.detail-empty-glyph { width: 20px; height: 20px; stroke-width: 1.5; }
 .detail-empty-title { margin: 0; font-size: 14px; font-weight: var(--weight-semibold); color: var(--text-h); }
 .detail-empty-text { margin: 0; max-width: 220px; font-size: 12.5px; line-height: 1.5; color: var(--muted); }
 
@@ -402,25 +508,111 @@ function onPanelKeydown(e) {
 }
 .detail-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 
-/* Preview: mockup 140px (180px on the desktop rail) */
+/* Preview surface: badge + actions on top, media below — one visual region. */
 .detail-preview {
   height: 140px;
   background: var(--muted-bg);
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-direction: column;
   color: var(--muted);
-  position: relative;
   flex-shrink: 0;
   border-bottom: 1px solid var(--border);
 }
 .detail-preview.has-image { background: var(--card); }
+/* With an image the image fills the preview and the badge/actions overlay it
+   with the shared scrim/blur tokens — one continuous surface, no header strip. */
+.detail-preview.has-image { position: relative; }
+.detail-preview.has-image .detail-preview-media { position: absolute; inset: 0; }
+.detail-preview.has-image .detail-preview-top { position: absolute; inset: 0 0 auto 0; z-index: 1; }
+.detail-preview.has-image .detail-badge {
+  background: var(--overlay);
+  color: var(--on-accent);
+  -webkit-backdrop-filter: blur(var(--overlay-blur));
+  backdrop-filter: blur(var(--overlay-blur));
+}
+.detail-preview.has-image .detail-top-actions {
+  background: var(--overlay);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1);
+  -webkit-backdrop-filter: blur(var(--overlay-blur));
+  backdrop-filter: blur(var(--overlay-blur));
+}
+.detail-preview.has-image .detail-top-actions .navbar-action-btn { color: var(--on-accent); }
+.detail-preview.has-image .detail-top-actions .detail-danger { color: var(--error); }
+/* The fixed close slot stays readable over an image (same scrim/blur language
+   as the action group). */
+.detail-preview.has-image .detail-close {
+  color: var(--on-accent);
+  background: var(--overlay);
+  -webkit-backdrop-filter: blur(var(--overlay-blur));
+  backdrop-filter: blur(var(--overlay-blur));
+}
+@media (hover: hover) and (pointer: fine) {
+  .detail-preview.has-image .detail-top-actions .navbar-action-btn:hover {
+    background: color-mix(in srgb, var(--on-accent) 20%, transparent);
+    color: var(--on-accent);
+  }
+  .detail-preview.has-image .detail-top-actions .detail-danger:hover {
+    background: var(--error-bg);
+    color: var(--error);
+  }
+}
+/* Edit/Move mode: the preview surface becomes a compact header (mode title,
+   actions, close) and the media is gone — the body below is the mode's alone. */
+.detail-preview.detail-preview--mode { height: auto; }
+.detail-mode-title {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  color: var(--text-h);
+}
+/* The active mode's action reads as selected with existing tokens only. */
+.detail-top-actions .navbar-action-btn[aria-expanded="true"] {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+/* Stable header grid, identical in every mode: the left slot is the only
+   flexible track, so the badge/mode title can never move the fixed action and
+   close slots. Same padding/gaps/button sizes everywhere => no icon jump. */
+.detail-preview-top {
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+}
+.detail-top-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+}
+.detail-top-actions .detail-danger { color: var(--error); }
+@media (hover: hover) and (pointer: fine) {
+  .detail-top-actions .detail-danger:hover { background: var(--error-bg); color: var(--error); }
+}
+.detail-preview-media {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 .detail-image { width: 100%; height: 100%; object-fit: cover; display: block; }
-.preview-glyph { width: 44px; height: 44px; opacity: .5; fill: none; }
+/* Preview glyph: the mockup's 44px faint mark (CSS overrides the Icon's
+   inline size/stroke attributes — no second icon recipe). */
+.preview-glyph { width: 44px; height: 44px; opacity: .5; stroke-width: 1.2; }
 .detail-badge {
-  position: absolute;
-  top: 12px;
-  left: 12px;
+  justify-self: start;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 10px;
   padding: 3px 9px;
   border-radius: 10px;
@@ -430,29 +622,10 @@ function onPanelKeydown(e) {
   letter-spacing: .05em;
   font-weight: var(--weight-semibold);
 }
-.detail-open {
-  position: absolute;
-  bottom: 12px;
-  right: 12px;
-  background: var(--accent);
-  color: var(--on-accent);
-  padding: 8px 14px;
-  border-radius: 8px;
-  font-size: 12.5px;
-  font-weight: var(--weight-medium);
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  text-decoration: none;
-  min-height: 36px;
-}
-.detail-open svg { width: 13px; height: 13px; fill: none; stroke: currentColor; }
-@media (hover: hover) and (pointer: fine) {
-  .detail-open:hover { background: var(--accent-hover); }
-}
 
 .detail-body { padding: 16px; }
 .detail-head { display: flex; align-items: flex-start; gap: var(--space-2); }
+.detail-close { flex-shrink: 0; }
 .detail-title {
   flex: 1;
   min-width: 0;
@@ -463,36 +636,116 @@ function onPanelKeydown(e) {
   color: var(--text-h);
   overflow-wrap: anywhere;
 }
-/* Obvious close action (P5 requirement; the mockup relies on Escape/backdrop). */
-.detail-close {
-  flex-shrink: 0;
-  width: var(--control-height-sm);
-  height: var(--control-height-sm);
-  display: grid;
-  place-items: center;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-}
-.detail-close svg { width: 15px; height: 15px; }
-@media (hover: hover) and (pointer: fine) {
-  .detail-close:hover { background: var(--muted-bg); color: var(--text-h); }
-}
-.detail-close:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 1px; }
 
 .detail-url {
   display: block;
   font-size: 12px;
   color: var(--accent);
-  margin-bottom: 16px;
+  margin-bottom: var(--space-4);
   word-break: break-all;
   line-height: 1.4;
   text-decoration: none;
 }
 @media (hover: hover) and (pointer: fine) {
   .detail-url:hover { text-decoration: underline; }
+}
+/* Favorite / Pinned: dedicated state controls directly below title + URL. */
+.detail-state {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+/* Weight stays constant across states so toggling cannot reflow the row; the
+   accent treatment (shared .type-pill.active) carries the state. */
+.detail-state .type-pill { display: inline-flex; align-items: center; gap: var(--space-1); font-weight: var(--weight-medium); }
+
+/* Move mode: current folder + destination draft + confirm actions. */
+.detail-move-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: var(--space-4);
+}
+.detail-move-label {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--muted);
+}
+.detail-move-current { font-size: var(--text-sm); color: var(--text-h); }
+.detail-move-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--text-h);
+}
+.detail-mode-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-5);
+}
+/* Inline tag editor under TAGS: expands in place, details stay visible.
+   Height+opacity reveal only; reduced motion opts out (see below). */
+.detail-tags-editor {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  visibility: hidden;
+  transition: grid-template-rows 0.2s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1), visibility 0s linear 0.2s;
+}
+.detail-tags-editor.open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  visibility: visible;
+  transition: grid-template-rows 0.2s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1), visibility 0s;
+}
+.detail-tags-editor-inner { min-height: 0; overflow: hidden; }
+/* Compact inline utility: 12px section rhythm, no card/containers. */
+.detail-tags-editor-body { padding-top: var(--space-3); }
+.detail-tags-editor-group + .detail-tags-editor-group { margin-top: var(--space-3); }
+.detail-tags-editor .detail-mode-actions { margin-top: var(--space-3); }
+/* Done sits close to the last tag group; Description follows 16px after. */
+.detail-section:has(.detail-tags-editor.open) { margin-bottom: var(--space-4); }
+/* Current tags carry an immediate remove control; the add row and the
+   available-tag pills reuse the shared .tag-pill recipe/tokens. */
+.tag-pill--current { gap: 4px; padding-right: 4px; cursor: default; }
+.tag-pill-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+@media (hover: hover) and (pointer: fine) {
+  .tag-pill-remove:hover { background: var(--muted-bg); color: var(--text-h); }
+}
+.detail-tags-empty { margin: 0; font-size: var(--text-sm); color: var(--muted); }
+.detail-tag-add-row { display: flex; align-items: stretch; gap: var(--space-2); }
+.detail-tag-add-row .input { flex: 1; min-width: 0; }
+/* One height for both controls: the shared control-height token (the input's
+   own height), regardless of the dense .btn.sm size. */
+.detail-tag-add-row .btn { flex: 0 0 auto; min-height: var(--control-height); }
+@media (max-width: 768px) {
+  /* Same mobile form treatment as the Add/Edit forms: comfortable targets and
+     16px control text (no iOS zoom-on-focus). Both controls stay equal. */
+  .detail-tag-add-row .input,
+  .detail-tag-add-row .btn {
+    min-height: calc(var(--control-height) + var(--space-1));
+  }
+  .detail-tag-add-row .input { font-size: var(--text-lg); }
+  .tag-pill-remove { width: 22px; height: 22px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .detail-tags-editor { transition: none; }
 }
 
 .detail-meta {
@@ -535,43 +788,13 @@ function onPanelKeydown(e) {
   gap: 4px;
   min-height: 28px;
 }
-.detail-tag-add svg { width: 11px; height: 11px; fill: none; stroke: currentColor; }
 @media (hover: hover) and (pointer: fine) {
   .detail-tag-add:hover { color: var(--text-h); border-color: var(--muted); }
 }
 .detail-desc { font-size: 13px; color: var(--muted); line-height: 1.6; margin: 0; overflow-wrap: anywhere; }
 
-.detail-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.detail-actions button {
-  padding: 11px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--muted-bg);
-  color: var(--text-h);
-  font-size: 13px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-height: 44px;
-  cursor: pointer;
-  transition: border-color var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
-}
-.detail-actions button svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
-@media (hover: hover) and (pointer: fine) {
-  .detail-actions button:hover { border-color: var(--accent-border); }
-}
-.detail-actions button:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 1px; }
-.detail-actions button.is-on { color: var(--accent); border-color: var(--accent-border); background: var(--accent-bg); font-weight: var(--weight-semibold); }
-.detail-actions button.danger { color: var(--error); border-color: var(--error-bg); }
-@media (hover: hover) and (pointer: fine) {
-  .detail-actions button.danger:hover { background: var(--error-bg); }
-}
-.detail-move { margin-top: 8px; }
-.detail-edit { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
-
 /* ---------------------------------------------------------------------
-   Responsive — mockup breakpoints (768 centred sheet, 1024 rail rules).
+   Responsive — mockup breakpoints (768 centred sheet, 1200 rail rules).
 --------------------------------------------------------------------- */
 @media (min-width: 768px) {
   .detail--sheet {
@@ -585,23 +808,19 @@ function onPanelKeydown(e) {
     border-bottom-left-radius: 0;
     border-bottom-right-radius: 0;
   }
-  .detail-actions { grid-template-columns: 1fr 1fr 1fr; }
 }
+/* Mockup: the rail's taller preview switches at the desktop shell breakpoint
+   (1200), not 1024. */
 @media (min-width: 1200px) {
   .detail-preview { height: 180px; }
-  .detail-actions { grid-template-columns: 1fr 1fr; }
 }
 
 /* Slide/settle motion (mockup cubic-bezier(.4,0,.2,1) .3s). */
 .detail-enter-active, .detail-leave-active { transition: transform .3s cubic-bezier(.4, 0, .2, 1), opacity var(--transition-normal); }
-.detail--sheet.detail-enter-from, .detail--sheet.detail-leave-to { transform: translateY(105%); }
-.detail--sheet.detail-enter-to, .detail--sheet.detail-leave-from { transform: translateY(0); }
+.detail--sheet.detail-enter-from, .detail--sheet.detail-leave-to { transform: translate(-50%, 105%); }
+.detail--sheet.detail-enter-to, .detail--sheet.detail-leave-from { transform: translate(-50%, 0); }
 .detail--rail.detail-enter-active, .detail--rail.detail-leave-active { transition: opacity var(--transition-normal); }
 .detail--rail.detail-enter-from, .detail--rail.detail-leave-to { opacity: 0; }
-@media (min-width: 768px) {
-  .detail--sheet.detail-enter-from, .detail--sheet.detail-leave-to { transform: translate(-50%, 105%); }
-  .detail--sheet.detail-enter-to, .detail--sheet.detail-leave-from { transform: translate(-50%, 0); }
-}
 /* While dragging, the inline transform owns the position. */
 .detail.dragging { transition: none; }
 
@@ -612,8 +831,8 @@ function onPanelKeydown(e) {
   position: fixed;
   inset: 0;
   background: var(--overlay);
-  backdrop-filter: blur(2px);
-  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(var(--overlay-blur));
+  -webkit-backdrop-filter: blur(var(--overlay-blur));
   z-index: var(--z-overlay);
 }
 </style>

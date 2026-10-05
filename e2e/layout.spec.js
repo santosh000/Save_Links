@@ -23,9 +23,19 @@ test.describe('Application layout', () => {
     await page.goto('/')
 
     await expect(page.locator('.sidebar-brand')).toContainText('Save Links')
-    for (const label of ['Links', 'Folders', 'Backup & restore', 'Settings', 'About']) {
+    // Tools left the sidebar: Library + folder tree + tags, with Settings as
+    // the single app-level item pinned to the bottom footer.
+    for (const label of ['All Links', 'Favorites', 'Recently Added']) {
       await expect(page.locator('.sidebar-menu-link', { hasText: label })).toBeVisible()
     }
+    for (const label of ['Folders', 'Backup & restore', 'About']) {
+      await expect(page.locator('.sidebar-menu-link', { hasText: label })).toHaveCount(0)
+    }
+    const settingsLink = page.locator('.sidebar-settings .sidebar-menu-link')
+    await expect(settingsLink).toHaveCount(1)
+    const sidebarBox = await page.locator('.sidebar-wrapper').boundingBox()
+    const settingsBox = await settingsLink.boundingBox()
+    expect(Math.abs(sidebarBox.y + sidebarBox.height - (settingsBox.y + settingsBox.height))).toBeLessThanOrEqual(20)
     await expect(page.locator('.page-title')).toHaveText('Links')
 
     await ensureAddLinkOpen(page)
@@ -74,21 +84,32 @@ test.describe('Application layout', () => {
     await page.setViewportSize({ width: 1280, height: 800 })
     await page.goto('/')
 
+    // The standalone Folders page is gone: its old destination now just reveals
+    // the sidebar folder tree (the library stays the underlying view).
     await openView(page, 'folders')
-    await expect(page.locator('.page-title')).toHaveText('Folders')
-    await expect(page.locator('.folder-sidebar')).toBeVisible()
+    await expect(page.locator('.page-title')).toHaveText('Links')
+    await expect(page.locator('[data-testid="sidebar-folder-new"]')).toBeVisible()
 
     await openView(page, 'backup')
-    await expect(page.locator('.page-title')).toHaveText('Backup & restore')
+    // Backup & restore is the Settings modal's Data section now.
+    await expect(page.getByRole('dialog').locator('.dialog-title')).toHaveText('Settings')
+    await expect(page.getByRole('dialog').locator('.settings-nav-item.active')).toHaveText('Data')
     await expect(page.locator('.backup-card')).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('dialog')).toHaveCount(0)
 
     await openView(page, 'settings')
-    await expect(page.locator('.page-title')).toHaveText('Settings')
+    // P15.12: Settings is the shared modal, not a page.
+    await expect(page.getByRole('dialog').locator('.dialog-title')).toHaveText('Settings')
     await expect(page.locator('.settings-card')).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('dialog')).toHaveCount(0)
 
     await openView(page, 'about')
-    await expect(page.locator('.page-title')).toHaveText('About')
+    await expect(page.getByRole('dialog').locator('.dialog-title')).toHaveText('About')
     await expect(page.locator('.about-card')).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('dialog')).toHaveCount(0)
 
   await openView(page, 'links')
   await expect(page.locator('.page-title')).toHaveText('Links')
@@ -113,11 +134,11 @@ test.describe('Application layout', () => {
     await page.locator('.sidebar-overlay').click({ position: { x: 500, y: 100 } })
     await expect(page.locator('.sidebar-wrapper')).not.toHaveClass(/show/)
 
-    // Reopen and pick a view: the drawer closes after the selection (current nav)
+    // Reopen and pick a destination: the drawer closes after the selection
     await page.locator('#sidebar-toggle').click()
     await expect(page.locator('.sidebar-wrapper')).toHaveClass(/\bshow\b/)
-    await openView(page, 'folders')
-    await expect(page.locator('.page-title')).toHaveText('Folders')
+    await page.locator('.sidebar-wrapper .sidebar-menu-link', { hasText: 'All Links' }).click()
+    await expect(page.locator('.page-title')).toHaveText('Links')
     await expect(page.locator('.sidebar-wrapper')).not.toHaveClass(/show/)
 
     await expectNoHorizontalScroll(page)

@@ -14,12 +14,12 @@ async function assignFolder(page, title, folderName) {
   await expect(menu).toBeHidden()
 }
 
-test.describe('Folders view + sidebar navigation', () => {
+test.describe('Folders (sidebar tree) + sidebar navigation', () => {
   test.beforeEach(async ({ page }) => {
     await clearStorage(page)
   })
 
-  test('Folders view lists folders with counts and the sidebar badge shows the total', async ({ page }) => {
+  test('the sidebar tree lists folders with real subtree counts', async ({ page }) => {
     await openView(page, 'folders')
     await createFolder(page, 'Work')
     await createFolder(page, 'Personal')
@@ -32,51 +32,72 @@ test.describe('Folders view + sidebar navigation', () => {
     await assignFolder(page, 'Personal Link', 'Personal')
 
     await openView(page, 'folders')
-    await expect(page.locator('.folder-item', { hasText: 'Unfiled' }).locator('.folder-count')).toHaveText('1')
-    await expect(page.locator('.folder-item', { hasText: 'Work' }).locator('.folder-count')).toHaveText('1')
-    await expect(page.locator('.folder-item', { hasText: 'Personal' }).locator('.folder-count')).toHaveText('1')
+    await expect(page.locator('.sidebar-folder-node', { hasText: 'Work' }).locator('.sidebar-folder-count')).toHaveText('1')
+    await expect(page.locator('.sidebar-folder-node', { hasText: 'Personal' }).locator('.sidebar-folder-count')).toHaveText('1')
 
     await expect(page.locator('.sidebar-menu-link', { hasText: 'Links' }).locator('.sidebar-menu-badge')).toContainText('3')
-    await expect(page.locator('.sidebar-menu-link', { hasText: 'Folders' }).locator('.sidebar-menu-badge')).toContainText('2')
   })
 
-  test('View navigation marks the current sidebar item and updates the page title', async ({ page }) => {
+  test('the old Folders destination is gone; modal sections still open', async ({ page }) => {
     await page.goto('/')
-    for (const [view, label] of [['folders', 'Folders'], ['backup', 'Backup & restore'], ['settings', 'Settings'], ['about', 'About'], ['links', 'Links']]) {
+
+    // The standalone Folders page was removed. The folder surface is the tree,
+    // and nothing navigates away from the library to a "Folders" view.
+    await expect(page.locator('.page-title')).toHaveText('Links')
+    await openView(page, 'folders')
+    await expect(page.locator('.page-title')).toHaveText('Links')
+    await expect(page.locator('[data-testid="sidebar-folder-tree"]')).toBeAttached()
+    await expect(page.locator('[data-testid="sidebar-folder-new"]')).toBeVisible()
+
+    // The command palette no longer offers the old destination.
+    await page.keyboard.press('Control+k')
+    const paletteInput = page.locator('.command-palette input')
+    await expect(paletteInput).toBeVisible()
+    await paletteInput.fill('folders')
+    await expect(page.locator('.command-palette').getByText('Show folders')).toHaveCount(0)
+    await page.keyboard.press('Escape')
+    await expect(page.locator('.command-palette')).toHaveCount(0)
+
+    // P15.12: settings/about are modal sections (no page title / active nav row).
+    for (const [view, label] of [['settings', 'Settings'], ['about', 'About']]) {
       await openView(page, view)
-      await expect(page.locator('.page-title')).toHaveText(label)
-      await expect(page.locator('.sidebar-menu-link.active', { hasText: label })).toBeVisible()
+      await expect(page.getByRole('dialog').locator('.dialog-title')).toHaveText(label)
+      await expect(page.locator('.page-title')).toHaveText('Links') // the library stays underneath
+      await page.keyboard.press('Escape')
+      await expect(page.getByRole('dialog')).toHaveCount(0)
     }
+
+    // Backup & restore is the Settings modal's Data section now.
+    await openView(page, 'backup')
+    await expect(page.getByRole('dialog').locator('.dialog-title')).toHaveText('Settings')
+    await expect(page.getByRole('dialog').locator('.settings-nav-item.active')).toHaveText('Data')
+    await expect(page.locator('.page-title')).toHaveText('Links') // the library stays underneath
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('dialog')).toHaveCount(0)
   })
 
-  test('Assigning a folder from a row updates counts and persists', async ({ page }) => {
+  test('assigning a folder from a row updates tree counts and persists', async ({ page }) => {
     await openView(page, 'folders')
     await createFolder(page, 'Projects')
     await openView(page, 'links')
     await saveLink(page, { url: 'https://example.com/todo', title: 'TODO Link' })
-    await expect(page.locator('.sidebar-menu-link', { hasText: 'Folders' }).locator('.sidebar-menu-badge')).toContainText('1')
+    await expect(page.locator('.sidebar-folder-node', { hasText: 'Projects' })).toBeVisible()
 
     // Assign through the current More-actions menu
     await assignFolder(page, 'TODO Link', 'Projects')
-    await openView(page, 'folders')
-    await expect(page.locator('.folder-item', { hasText: 'Projects' }).locator('.folder-count')).toHaveText('1')
-    await expect(page.locator('.folder-item', { hasText: 'Unfiled' }).locator('.folder-count')).toHaveText('0')
+    await expect(page.locator('.sidebar-folder-node', { hasText: 'Projects' }).locator('.sidebar-folder-count')).toHaveText('1')
 
     // Move back to Unfiled
-    await openView(page, 'links')
     await assignFolder(page, 'TODO Link', 'Unfiled')
-    await openView(page, 'folders')
-    await expect(page.locator('.folder-item', { hasText: 'Unfiled' }).locator('.folder-count')).toHaveText('1')
+    await expect(page.locator('.sidebar-folder-node', { hasText: 'Projects' }).locator('.sidebar-folder-count')).toHaveText('0')
 
     // Persists after reload
-    await openView(page, 'links')
     await assignFolder(page, 'TODO Link', 'Projects')
     await page.reload()
-    await openView(page, 'folders')
-    await expect(page.locator('.folder-item', { hasText: 'Projects' }).locator('.folder-count')).toHaveText('1')
+    await expect(page.locator('.sidebar-folder-node', { hasText: 'Projects' }).locator('.sidebar-folder-count')).toHaveText('1')
   })
 
-  test('Mobile: folders view is reachable and folder selection filters links', async ({ page }) => {
+  test('Mobile: the drawer tree is reachable and folder selection filters links', async ({ page }) => {
     // Create folder & link at desktop width, then verify the mobile shell path
     await page.goto('/')
     await openView(page, 'folders')
@@ -89,16 +110,18 @@ test.describe('Folders view + sidebar navigation', () => {
     await page.setViewportSize({ width: 375, height: 667 })
     await page.reload()
 
-    // The Folders view is reachable through the current mobile navigation
+    // The tree lives in the More drawer below the desktop grid.
     await openView(page, 'folders')
-    await expect(page.locator('.page-title')).toHaveText('Folders')
-    await expect(page.locator('.folder-item', { hasText: 'Mobile' })).toBeVisible()
+    await expect(page.locator('[data-testid="sidebar-folder-tree"]')).toBeVisible()
+    const mobileRow = page.locator('[data-testid="sidebar-folder-row"]').filter({ hasText: 'Mobile' })
+    await expect(mobileRow).toBeVisible()
 
-    // Selecting the folder lands on Links filtered to it
-    await page.locator('.folder-item .folder-row', { hasText: 'Mobile' }).click()
+    // Selecting the folder lands on Links filtered to it and closes the drawer
+    await mobileRow.click()
     await expect(page.locator('.page-title')).toHaveText('Links')
     await expect(visibleLinkRows(page)).toHaveCount(1)
     await expect(visibleLinkRows(page).first()).toContainText('Mobile Link')
+    await expect(page.locator('.sidebar-wrapper')).not.toHaveClass(/\bshow\b/)
 
     // Back at desktop width the permanent sidebar is visible again
     await page.setViewportSize({ width: 1280, height: 800 })

@@ -16,21 +16,25 @@ const tokens = (page) =>
       probe.style.setProperty(prop, `var(${v})`)
       return getComputedStyle(probe).getPropertyValue(prop)
     }
-    const out = {
-      text: read('--text', 'color'),
-      muted: read('--muted', 'color'),
-      mutedBg: read('--muted-bg', 'background-color'),
-      card: read('--card', 'background-color'),
-      textH: read('--text-h', 'color'),
-      border: read('--border', 'border-top-color'),
-      accent: read('--accent', 'color'),
-      shadowSm: read('--shadow-sm', 'box-shadow'),
-      shadowMd: read('--shadow-md', 'box-shadow'),
-      accentBorder: read('--accent-border', 'border-top-color'),
-      sidebarActiveBg: read('--sidebar-active-bg', 'background-color'),
-      sm: read('--radius-sm', 'border-top-left-radius'),
-      radius: read('--radius', 'border-top-left-radius'),
-    }
+const out = {
+text: read('--text', 'color'),
+textSm: read('--text-sm', 'font-size'),
+bg: read('--bg', 'background-color'),
+muted: read('--muted', 'color'),
+mutedBg: read('--muted-bg', 'background-color'),
+card: read('--card', 'background-color'),
+textH: read('--text-h', 'color'),
+border: read('--border', 'border-top-color'),
+borderStrong: read('--border-strong', 'border-top-color'),
+accent: read('--accent', 'color'),
+shadowSm: read('--shadow-sm', 'box-shadow'),
+shadowMd: read('--shadow-md', 'box-shadow'),
+shadowLg: read('--shadow-lg', 'box-shadow'),
+accentBorder: read('--accent-border', 'border-top-color'),
+sidebarActiveBg: read('--sidebar-active-bg', 'background-color'),
+sm: read('--radius-sm', 'border-top-left-radius'),
+radius: read('--radius', 'border-top-left-radius'),
+}
     probe.remove()
     return out
   })
@@ -72,7 +76,7 @@ test.describe('Visual polish (Step 2C-6)', () => {
     await expect(active).toHaveCSS('color', t.accent)
     await expect(active).toHaveCSS('border-start-start-radius', t.sm)
     await expect(active).toHaveCSS('border-start-end-radius', t.sm)
-    await expect(active).toHaveCSS('min-height', '40px')
+    await expect(active).toHaveCSS('min-height', '44px') // P15.4: mockup nav item
     await expect(active).toHaveCSS('font-weight', '500')
     await expect(active).toHaveCSS('padding-left', '10px') // compact mockup row
 
@@ -80,7 +84,7 @@ test.describe('Visual polish (Step 2C-6)', () => {
     const inactive = page.locator('.sidebar-menu-link:not(.active)').first()
     await expect(inactive).toHaveCSS('border-inline-start-width', '0px')
     await expect(inactive).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
-    await expect(inactive).toHaveCSS('min-height', '40px')
+    await expect(inactive).toHaveCSS('min-height', '44px') // P15.4: mockup nav item
   })
 
   test('search keycap is a compact key and never affects search geometry', async ({ page }) => {
@@ -152,7 +156,7 @@ test.describe('Visual polish (Step 2C-6)', () => {
     await check(page.locator('.asel--header .asel-trigger').first(), 'sort/filter select')
 
     await ensureAddLinkOpen(page, { more: true })
-    for (const sel of ['#save-desc', '#save-title', '#save-url', '.add-popover .asel--field .asel-trigger']) {
+    for (const sel of ['#save-desc', '#save-title', '#save-url', '#add-form .asel--field .asel-trigger']) {
       await check(page.locator(sel).first(), sel)
     }
 
@@ -206,33 +210,38 @@ test.describe('Visual polish (Step 2C-6)', () => {
   })
 })
 
-test.describe('Toast polish (Step 2C-7)', () => {
+test.describe('Toast (P15.9 mockup pill)', () => {
   test.beforeEach(async ({ page }) => {
     await clearStorage(page)
   })
 
-  test('every toast uses one compact, quiet, non-pill recipe and keeps its behaviour', async ({ page }) => {
+  test('every toast uses the mockup pill recipe and keeps its behaviour', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.goto('/')
     const t = await tokens(page)
 
+    // P15.9 re-baseline: the mockup replaces the old "quiet accent edge" recipe
+    // with an inverted pill (--text on --bg, radius 24, --shadow-lg, no border).
     const recipe = async (toast, label) => {
       const box = await toast.boundingBox()
       expect(box.height, `${label} stays compact`).toBeLessThanOrEqual(44)
-      // not pill-like: moderate corner, well under half the height
       const radius = parseFloat(await toast.evaluate((el) => getComputedStyle(el).borderRadius))
-      expect(radius, `${label} radius`).toBeLessThanOrEqual(8)
-      expect(radius, `${label} radius vs height`).toBeLessThan(box.height / 2)
-      await expect(toast).toHaveCSS('box-shadow', t.shadowMd) // quiet elevation, not --shadow-lg
-      await expect(toast).toHaveCSS('border-top-width', '1px')
-      await expect(toast).toHaveCSS('border-top-color', t.border)
-      await expect(toast).toHaveCSS('border-left-width', '2px')
-      await expect(toast).toHaveCSS('border-left-color', t.accent) // existing accent edge, kept
-      await expect(toast).toHaveCSS('background-color', t.card)
-      await expect(toast).toHaveCSS('color', t.textH)
-      await expect(toast).toHaveCSS('position', 'fixed') // position/placement unchanged
+      expect(radius, `${label} mockup pill radius`).toBe(24)
+      await expect(toast).toHaveCSS('box-shadow', t.shadowLg) // mockup elevation
+      await expect(toast).toHaveCSS('border-top-width', '0px') // no border, no accent edge
+      await expect(toast).toHaveCSS('border-left-width', '0px')
+      await expect(toast).toHaveCSS('background-color', t.text) // inverted: --text on --bg
+      await expect(toast).toHaveCSS('color', t.bg)
+      await expect(toast).toHaveCSS('padding', '10px 20px')
+      await expect(toast).toHaveCSS('font-size', t.textSm) // --text-sm maps the mockup's 13px
+      await expect(toast).toHaveCSS('font-weight', '500')
+      await expect(toast).toHaveCSS('text-align', 'center')
+      await expect(toast).toHaveCSS('position', 'fixed') // still an overlay
       await expect(toast).toHaveAttribute('role', 'status')
       await expect(toast).toHaveAttribute('aria-live', 'polite')
+      // long real messages wrap instead of clipping: the pill is capped in viewport units
+      const cap = await toast.evaluate((el) => ({ max: parseFloat(getComputedStyle(el).maxWidth), vw: window.innerWidth }))
+      expect(cap.max).toBeLessThanOrEqual(cap.vw * 0.9 + 1)
       expect(box.x, `${label} inside viewport`).toBeGreaterThanOrEqual(0)
       return radius
     }
@@ -265,12 +274,11 @@ test.describe('Toast polish (Step 2C-7)', () => {
     await saveLink(page, { url: 'https://example.com/beta', title: 'Beta Link' })
     const toast = page.locator('.sl-toast')
     await expect(toast).toContainText('Link saved')
-    expect(parseFloat(await toast.evaluate((el) => getComputedStyle(el).borderRadius))).toBeLessThanOrEqual(8)
-    await expect(toast).toHaveCSS('box-shadow', t.shadowMd)
-    await expect(toast).toHaveCSS('background-color', t.card)
-    await expect(toast).toHaveCSS('color', t.textH)
-    await expect(toast).toHaveCSS('border-top-color', t.border)
-    await expect(toast).toHaveCSS('border-left-color', t.accent)
+    expect(parseFloat(await toast.evaluate((el) => getComputedStyle(el).borderRadius))).toBe(24)
+    await expect(toast).toHaveCSS('box-shadow', t.shadowLg)
+    await expect(toast).toHaveCSS('background-color', t.text) // still inverted in dark
+    await expect(toast).toHaveCSS('color', t.bg)
+    await expect(toast).toHaveCSS('border-top-width', '0px')
   })
 })
 
@@ -283,11 +291,12 @@ test.describe('Interaction states (Step 2C-8)', () => {
     await clearStorage(page)
   })
 
-  const ring = async (locator, label, offset = '2px') => {
+  const ring = async (locator, label, offset = '2px', boxShadow = 'none') => {
     await expect(locator, label).toHaveCSS('outline-style', 'solid')
     await expect(locator, label).toHaveCSS('outline-width', '2px')
     await expect(locator, label).toHaveCSS('outline-offset', offset)
-    await expect(locator, label).toHaveCSS('box-shadow', 'none') // never a halo
+    // never a focus halo — a raised control keeps only its resting elevation
+    await expect(locator, label).toHaveCSS('box-shadow', boxShadow)
   }
   const kfocus = async (page, locator) => {
     await page.keyboard.press('Tab')
@@ -303,19 +312,22 @@ test.describe('Interaction states (Step 2C-8)', () => {
     await page.waitForTimeout(2600)
 
     // card controls (do this before the Add popover opens — it would cover them)
-    const iconBtn = page.locator('.icon-btn').first()
-    await kfocus(page, iconBtn)
-    await ring(iconBtn, 'icon-btn', '1px')
-    const pill = page.locator('.pill').first()
-    await kfocus(page, pill)
-    await ring(pill, 'pill', '1px')
+    const bannerAction = page.locator('.banner-action').first()
+    await kfocus(page, bannerAction)
+    // the raised banner circle keeps its resting elevation, never a focus halo
+    await ring(bannerAction, 'banner-action', '1px', t.shadowSm)
+    // P15.11: the item status toggles are the mockup banner/row recipes, so
+    // they carry the same focus ring.
+    const star = page.getByRole('button', { name: 'Toggle Favorite' }).first()
+    await kfocus(page, star)
+    await ring(star, 'favorite-toggle', '1px', t.shadowSm)
 
-    // card hover = accent-border + the subtle shadow token, never a heavy shadow
+    // card hover = the mockup's stronger edge + one elevation step
     const card = page.locator('.card').first()
     await card.scrollIntoViewIfNeeded()
     await card.hover({ position: { x: 24, y: 24 } })
-    await expect(card).toHaveCSS('border-top-color', t.accentBorder)
-    await expect(card).toHaveCSS('box-shadow', t.shadowSm)
+    await expect(card).toHaveCSS('border-top-color', t.borderStrong)
+    await expect(card).toHaveCSS('box-shadow', t.shadowMd)
 
     // quick-action menu surface + icon family
     const trigger = page.getByRole('button', { name: 'More actions' }).first()
@@ -348,14 +360,14 @@ test.describe('Interaction states (Step 2C-8)', () => {
 
     // buttons: Bootstrap's outline:0 no longer suppresses the shared ring
     await ensureAddLinkOpen(page, { more: false })
-    const primary = page.locator('.add-popover .btn.primary').first()
+    const primary = page.locator('#add-form .btn.primary').first()
     await kfocus(page, primary)
     await ring(primary, 'btn.primary')
-    const ghost = page.locator('.add-popover .btn.ghost').first()
+    const ghost = page.locator('#add-form .btn.ghost').first()
     await kfocus(page, ghost)
     await ring(ghost, 'btn.ghost')
     await ghost.click() // Cancel closes the popover deterministically
-    await expect(page.locator('.add-popover .btn.primary')).toHaveCount(0)
+    await expect(page.locator('#add-form .btn.primary')).toHaveCount(0)
   })
 
   test('settings selection and focus stay distinguishable, and the ring holds (dark)', async ({ page }) => {
@@ -389,15 +401,15 @@ test.describe('Interaction states (Step 2C-8)', () => {
 
     // buttons, card surface and icon family in dark
     await ensureAddLinkOpen(page, { more: false })
-    const primary = page.locator('.add-popover .btn.primary').first()
+    const primary = page.locator('#add-form .btn.primary').first()
     await kfocus(page, primary)
     await ring(primary, 'dark btn.primary')
     await page.keyboard.press('Escape')
     await page.waitForTimeout(300)
     const card = page.locator('.card').first()
     await expect(card).toHaveCSS('background-color', t.card)
-    expect(await page.locator('.icon-btn svg').first().evaluate((el) => getComputedStyle(el).stroke)).not.toBe('rgb(0, 0, 0)')
-    await expect(page.locator('.icon-btn svg').first()).toHaveCSS('stroke-width', '1.8px')
+    expect(await page.locator('.banner-action svg').first().evaluate((el) => getComputedStyle(el).stroke)).not.toBe('rgb(0, 0, 0)')
+    await expect(page.locator('.banner-action svg').first()).toHaveCSS('stroke-width', '1.8px')
   })
 })
 
@@ -406,39 +418,6 @@ test.describe('Interaction states (Step 2C-8)', () => {
 test.describe('Secondary surfaces (Step 2D)', () => {
   test.beforeEach(async ({ page }) => {
     await clearStorage(page)
-  })
-
-  test('folder rows use the navigation state language and quiet labels', async ({ page }) => {
-    await page.setViewportSize({ width: 1280, height: 900 })
-    await page.goto('/')
-    const t = await tokens(page)
-    await openView(page, 'folders')
-
-    // shared empty-state recipe (icon + heading + supporting text)
-    const empty = page.locator('.folder-sidebar .empty-state')
-    await expect(empty).toBeVisible()
-    await expect(empty.locator('.empty-icon')).toBeVisible()
-    await expect(empty.locator('h3')).toHaveText('No folders yet')
-
-    // the group label is quiet supporting text, not an uppercase tracked heading
-    const groupLabel = page.locator('.folder-group-label')
-    await expect(groupLabel).toHaveCSS('text-transform', 'none')
-    // not tracked: computed "normal" (the base stack's default) counts as 0
-    const ls = await groupLabel.evaluate((el) => getComputedStyle(el).letterSpacing)
-    expect(Number.isNaN(parseFloat(ls)) ? 0 : parseFloat(ls)).toBeLessThanOrEqual(0)
-
-    // create + select a folder: the active row uses the reserved accent rail, no filled block
-    await page.getByLabel('New folder name').fill('Work')
-    await page.getByRole('button', { name: 'Create folder', exact: true }).click()
-    await expect(page.locator('.folder-sidebar .empty-state')).toHaveCount(0)
-    await page.getByRole('button', { name: 'Show folder Work' }).click()
-    await openView(page, 'folders')
-    const active = page.locator('.folder-item.active').first()
-    await expect(active).toHaveCSS('border-inline-start-width', '2px')
-    await expect(active).toHaveCSS('border-inline-start-color', t.accent)
-    await expect(active).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
-    await expect(active).toHaveCSS('border-start-start-radius', '0px')
-    await expect(active.locator('.folder-name')).toHaveCSS('color', t.accent)
   })
 
   test('account panel labels are quiet supporting text', async ({ page }) => {

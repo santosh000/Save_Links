@@ -181,6 +181,8 @@ async function handleSignOut() {
   inset: 0;
   z-index: var(--z-modal);
   background: var(--overlay);
+  backdrop-filter: blur(var(--overlay-blur));
+  -webkit-backdrop-filter: blur(var(--overlay-blur));
   display: grid;
   place-items: center;
   padding: 16px;

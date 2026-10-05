@@ -78,8 +78,10 @@
     --muted: #64748B;              /* secondary text */
     --text-subtle: #94A3B8;        /* tertiary text, placeholders, meta */
 
-    /* Borders — mockup border / border-strong family */
+    /* Borders — mockup border / border-strong family (--border-strong is the
+       mockup's stronger edge: item hover, chip outlines, selection boxes). */
     --border: #E2E8F0;
+    --border-strong: #CBD5E1;
     --border-subtle: rgba(15, 23, 42, 0.06);
 
     /* Accent — the scheme layer overrides --accent (and the derived trio);
@@ -95,6 +97,11 @@
     --error: #DC2626;
     --error-bg: rgba(220, 38, 38, 0.08);
     --on-error: #FFFFFF;
+    /* Favourite star (mockup --amber): a reserved highlight so a saved link's
+       star reads the same in every colour scheme. --favorite-bg is the quiet
+       tint behind the on-state; it follows --favorite per appearance. */
+    --favorite: #D97706;
+    --favorite-bg: color-mix(in srgb, var(--favorite) 14%, transparent);
 
     /* Sidebar — follows the global surface system */
     --sidebar-bg: #FFFFFF;
@@ -112,9 +119,10 @@
     --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.08);
     --shadow-lg: 0 12px 32px rgba(15, 23, 42, 0.12);
 
-    /* Radii — mockup: 8px controls, 12px surfaces */
+    /* Radii — mockup: 8px controls, 12px surfaces, 16px modal/sheet surfaces */
     --radius-sm: 8px;
     --radius: 12px;
+    --radius-lg: 16px;
     --radius-full: 999px;
 
     /* Spacing scale */
@@ -147,6 +155,9 @@
        toast. Modals must sit above the app chrome, otherwise the overlay
        cannot cover it. */
     --overlay: rgba(18, 18, 20, 0.45);
+    /* One backdrop treatment for every modal/overlay surface (AppDialog,
+       detail panel, account/profile panels, import preview, palette). */
+    --overlay-blur: 2px;
     --z-sticky: 1000;
     --z-overlay: 1025;
     --z-sidebar: 1030;
@@ -183,6 +194,9 @@
     --detail-width: 360px;
     /* P8: shell topbar height (mockup --topbar-h; 56px >=768 below) */
     --navbar-height: 52px;
+    /* Shared bottom-band height: the sidebar Settings footer and the Links
+       pagination footer are one 64px band at the bottom of their columns. */
+    --footer-height: 64px;
 }
 
 /* ---- Appearance: dark (mockup #0b0e14 family, scheme-independent) ---- */
@@ -200,6 +214,7 @@
     --text-subtle: #5B6478;
 
     --border: #232A38;
+    --border-strong: #2E3646;
     --border-subtle: rgba(255, 255, 255, 0.07);
 
     --on-accent: #FFFFFF;
@@ -229,6 +244,9 @@
     --accent-border: rgba(129, 140, 248, 0.28);
 
     --overlay: rgba(0, 0, 0, 0.6);
+
+    /* Favourite star: mockup --amber-400 on dark surfaces. */
+    --favorite: #FBBF24;
 }
 
 /* ---- Scheme accent: light (accent-only; the derived trio follows the hue) ---- */
@@ -424,7 +442,8 @@ h1, h2, h3, h4, h5, h6, .h1, .h2, .h3, .h4{
 a{
     color: var(--accent);
     text-decoration: none;
-    transition: all var(--transition-slow);
+    /* P15 (theme batch): targeted properties only - never `transition: all`. */
+    transition: color var(--transition-normal), background-color var(--transition-normal), border-color var(--transition-normal);
     touch-action: manipulation;
 }
 @media (hover: hover) and (pointer: fine){
@@ -479,11 +498,11 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
    density, accent-filled active row.
 --------------------------------------------------------------------- */
 .sidebar-wrapper{
-    /* P9 (G3): the mockup's off-canvas drawer is 280px / max 85vw at every
-       width below the desktop grid; >=1024 the shell grid column owns the
-       width (--sidebar-width 260/280). */
-    width: 280px;
-    max-width: 85vw;
+    /* P15.4: the mockup's off-canvas drawer is 300px / max 88vw at every width
+       below the desktop grid; >=1200 the shell grid column owns the width
+       (--sidebar-width 260/280). */
+    width: 300px;
+    max-width: 88vw;
     background-color: var(--sidebar-bg);
     height: 100vh;
     position: fixed;
@@ -498,15 +517,15 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
     transition: transform var(--transition-slow), background-color var(--transition-slow);
 }
 
-/* Drawer open (<1024) */
+/* Drawer open (<1200) */
 .sidebar-wrapper.show{
     transform: translateX(0);
     box-shadow: var(--shadow-lg);
 }
 
-/* P8: >=1024 the sidebar is the shell grid's static first column and the
+/* P8: >=1200 the sidebar is the shell grid's static first column and the
    mockup hides its head there (the topbar carries the brand). */
-@media (min-width: 1024px){
+@media (min-width: 1200px){
     .sidebar-wrapper{
         position: static;
         transform: none;
@@ -517,6 +536,9 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
         width: auto;
         max-width: none;
         box-shadow: none;
+        /* The Settings footer is the column's bottom band: no inset below it,
+           so its top border aligns with the pagination footer's border. */
+        padding-bottom: 0;
     }
     .sidebar-overlay{
         display: none;
@@ -530,6 +552,29 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
     overflow-y: auto;
 }
 
+/* Bottom-anchored application item: the scroller above takes the remaining
+   height, so the flex shell pins this footer to the sidebar's bottom edge in
+   every state (expanded, 80px rail, tablet/mobile drawer). The Settings row
+   reuses .sidebar-menu-link unchanged — same icon size, typography, hover,
+   horizontal padding and row height as the navigation items. */
+.sidebar-settings{
+    flex-shrink: 0;
+    align-self: stretch;
+    /* One shared bottom band: the footer owns the 64px (--footer-height) and
+       vertically centers the Settings row, exactly like the pagination footer. */
+    height: var(--footer-height);
+    display: flex;
+    align-items: center;
+    border-top: 1px solid var(--sidebar-border);
+    margin-top: 0;
+    padding-top: 0;
+}
+
+/* The row keeps the full-width hover/active surface inside the flex footer. */
+.sidebar-settings .sidebar-menu-link{
+    width: 100%;
+}
+
 .sidebar-brand{
     display: flex;
     align-items: center;
@@ -537,7 +582,6 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
     font-size: 16px;                     /* mockup brand: 15-16px bold */
     font-weight: var(--weight-bold);
     color: var(--sidebar-text-strong);
-    margin-bottom: var(--space-5);
     padding-inline-start: 10px;
     text-decoration: none;
 }
@@ -563,7 +607,8 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
     text-transform: uppercase;
     letter-spacing: .08em;
     color: var(--sidebar-title);
-    padding-inline-start: 10px;
+    /* P15 Group 1: the mockup insets section labels 8px inside the 12px section. */
+    padding-inline-start: 8px;
     margin-bottom: 6px;
 }
 
@@ -577,17 +622,18 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
     margin-bottom: 2px;
 }
 
-/* Nav row: the mockup's compact row — 40px tall, 8px radius, no rail. */
+/* Nav row: the mockup's compact row — 44px tall, 8px radius, no rail,
+   inactive weight 400 (the active row takes 500 below). */
 .sidebar-menu-link{
     display: flex;
     align-items: center;
     gap: 10px;
-    min-height: var(--control-height);
-    padding: 9px 10px;
+    min-height: 44px;
+    padding: 10px;
     color: var(--sidebar-text);
     border-radius: var(--radius-sm);
     font-size: 14px;
-    font-weight: var(--weight-medium);
+    font-weight: 400;
     transition: color var(--transition-normal), background-color var(--transition-normal);
 }
 
@@ -647,16 +693,17 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
 }
 
 /* ---------------------------------------------------------------------
-   P11: sidebar folder navigation (read-only tree)
-   Sidebar-specific classes only — FolderManager's .folder-* selectors are
-   never reused here, so existing tests cannot match two trees. The visual
-   language is the sidebar's own: 36px rows, hover surface, accent-soft
-   active block, shared focus ring, theme tokens.
+   P15.5: sidebar folder system (mockup rows + per-row ⋮ menu) — the folder
+   management surface. Mockup contract: 40px rows (46px <=1199), 8px + 14/depth
+   indent, chevron-right, folder / folder-open, real subtree count, accent-soft
+   active block, ⋮ hover/focus on desktop and always visible <=1199.
 --------------------------------------------------------------------- */
 .sidebar-folder-tree{
     list-style: none;
     padding: 0;
     margin: 0;
+    /* Tree connectors: one 1px gradient layer per ancestor level. */
+    --folder-guide: linear-gradient(var(--sidebar-border), var(--sidebar-border));
 }
 
 .sidebar-folder-node{
@@ -666,10 +713,10 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
 .sidebar-folder-line{
     display: flex;
     align-items: center;
-    gap: 4px;
-    min-height: 36px;
-    padding-inline-end: 8px;
-    border-radius: var(--radius-sm);
+    gap: 8px;
+    min-height: 40px;
+    padding-inline-end: 6px;
+    border-radius: 6px;
     color: var(--sidebar-text);
     transition: color var(--transition-normal), background-color var(--transition-normal);
 }
@@ -689,10 +736,63 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
     font-weight: var(--weight-medium);
 }
 
-/* Disclosure: a separate real button (aria-expanded lives here). */
+/* Tree connectors: every child row draws its own vertical connector at the
+   parent chevron centre plus a 4px horizontal arm at the row centre; the
+   vertical runs the full row height while the branch has following siblings
+   and stops at the centre (elbow) on the final child. Full-height ancestor
+   guides are background layers that continue only while that ancestor branch
+   still has a sibling below it. data-depth / data-guides / data-own are
+   presentation-only flags derived from the existing flattened rows — the
+   indentation itself stays on the inline paddingInlineStart the e2e suite
+   asserts. */
+.sidebar-folder-node[data-depth="2"] > .sidebar-folder-line { --own-x: 18px; }
+.sidebar-folder-node[data-depth="3"] > .sidebar-folder-line { --own-x: 32px; }
+.sidebar-folder-node[data-depth="4"] > .sidebar-folder-line { --own-x: 46px; }
+
+.sidebar-folder-line{
+    background-image: var(--anc18, none), var(--anc32, none);
+    background-size: 1px 100%;
+    background-position: 18px 0, 32px 0;
+    background-repeat: no-repeat;
+}
+.sidebar-folder-node[data-guides~="18"] > .sidebar-folder-line { --anc18: var(--folder-guide); }
+.sidebar-folder-node[data-guides~="32"] > .sidebar-folder-line { --anc32: var(--folder-guide); }
+
+.sidebar-folder-node:not([data-depth="1"]) > .sidebar-folder-line{
+    position: relative;
+}
+/* Own vertical connector (18 / 32 / 46 = the parent chevron centre). */
+.sidebar-folder-node:not([data-depth="1"]) > .sidebar-folder-line::before{
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: var(--own-x);
+    width: 1px;
+    background-color: var(--sidebar-border);
+}
+/* Final child: the guide stops at the row centre — the elbow corner. */
+.sidebar-folder-node[data-own="elbow"] > .sidebar-folder-line::before{
+    bottom: auto;
+    height: 50%;
+}
+/* Horizontal arm: meets the chevron/folder area exactly at the row centre. */
+.sidebar-folder-node:not([data-depth="1"]) > .sidebar-folder-line::after{
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: var(--own-x);
+    width: 4px;
+    height: 1px;
+    background-color: var(--sidebar-border);
+}
+
+/* Disclosure: a separate real button (aria-expanded lives here). The shared
+   Icon rotates when open. */
 .sidebar-folder-toggle{
-    width: 22px;
-    height: 22px;
+    position: relative;
+    width: 20px;
+    height: 20px;
     flex-shrink: 0;
     display: grid;
     place-items: center;
@@ -703,17 +803,17 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
     cursor: pointer;
     padding: 0;
 }
-.sidebar-folder-toggle svg{
-    width: 13px;
-    height: 13px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 2;
-    stroke-linecap: round;
-    stroke-linejoin: round;
+/* Comfortable click target without moving the 20px box: the invisible hit
+   area grows vertically inside the row (and 4px into the 8px row gap). */
+.sidebar-folder-toggle::after{
+    content: '';
+    position: absolute;
+    inset: -6px -4px;
+}
+.sidebar-folder-toggle .ic{
     transition: transform var(--transition-fast);
 }
-.sidebar-folder-toggle[aria-expanded="true"] svg{
+.sidebar-folder-toggle[aria-expanded="true"] .ic{
     transform: rotate(90deg);
 }
 @media (hover: hover) and (pointer: fine){
@@ -727,10 +827,10 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
     outline-offset: 1px;
 }
 
-/* Leaf alignment spacer (same box as the caret). */
+/* Leaf alignment spacer (same box as the chevron). */
 .sidebar-folder-spacer{
-    width: 22px;
-    height: 22px;
+    width: 20px;
+    height: 20px;
     flex-shrink: 0;
 }
 
@@ -742,13 +842,13 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
     display: flex;
     align-items: center;
     gap: 8px;
-    min-height: 36px;
+    min-height: 40px;
     padding: 0;
     border: none;
     background: transparent;
     color: inherit;
     font-family: inherit;
-    font-size: 14px;
+    font-size: 13.5px;
     text-align: left;
     cursor: pointer;
 }
@@ -764,7 +864,8 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
     outline-offset: 1px;
 }
 
-/* P12: folder section header action (the edit-mode gear). */
+/* P15.5: folder section header tools (mockup .folder-tools): toggle-all +
+   new folder, 28px targets like the mockup's section-label buttons. */
 .sidebar-section-head{
     display: flex;
     align-items: center;
@@ -773,9 +874,15 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
     padding-inline-end: 4px;
 }
 
+.sidebar-section-tools{
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
 .sidebar-section-action{
-    width: 24px;
-    height: 24px;
+    width: 28px;
+    height: 28px;
     flex-shrink: 0;
     display: grid;
     place-items: center;
@@ -785,10 +892,6 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
     color: var(--sidebar-title);
     cursor: pointer;
     padding: 0;
-}
-.sidebar-section-action[aria-pressed="true"]{
-    background-color: var(--sidebar-active-bg);
-    color: var(--accent);
 }
 @media (hover: hover) and (pointer: fine){
 .sidebar-section-action:hover{
@@ -809,105 +912,97 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
     color: var(--accent);
 }
 
-/* P12: per-row edit affordance + its inline action panel. */
-.sidebar-folder-edit{
-    width: 24px;
-    height: 24px;
+/* Real subtree count (P15.2 folderSubtreeCounts). Mockup: a plain faint number
+   on pointer surfaces that yields to the row actions on hover. */
+.sidebar-folder-count{
     flex-shrink: 0;
-    display: grid;
-    place-items: center;
-    border: none;
-    border-radius: var(--radius-sm);
-    background: transparent;
+    font-size: 11px;
+    font-weight: var(--weight-medium);
     color: var(--sidebar-title);
-    cursor: pointer;
-    padding: 0;
-}
-.sidebar-folder-edit svg{
-    width: 13px;
-    height: 13px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 2;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-}
-.sidebar-folder-edit[aria-expanded="true"]{
-    background-color: var(--sidebar-active-bg);
-    color: var(--accent);
+    transition: opacity var(--transition-fast);
 }
 @media (hover: hover) and (pointer: fine){
-.sidebar-folder-edit:hover{
-    background-color: var(--sidebar-hover-bg);
-    color: var(--text-h);
+.sidebar-folder-line:hover .sidebar-folder-count{
+    opacity: 0;
 }
-}
-.sidebar-folder-edit:focus-visible{
-    outline: var(--focus-ring-width) solid var(--focus-ring);
-    outline-offset: 1px;
 }
 
-.sidebar-folder-actions{
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 4px;
-    padding: 4px 8px 6px;
-}
-.sidebar-folder-action{
+/* Per-row ⋮ menu trigger: hover/focus revealed on pointer-fine surfaces,
+   always visible on touch widths. Opacity (not display) keeps it tabbable. */
+.sidebar-folder-more{
     width: 26px;
     height: 26px;
     flex-shrink: 0;
     display: grid;
     place-items: center;
     border: none;
-    border-radius: var(--radius-sm);
+    border-radius: 6px;
     background: transparent;
-    color: var(--sidebar-text);
+    color: var(--sidebar-title);
     cursor: pointer;
     padding: 0;
-}
-.sidebar-folder-action svg{
-    width: 14px;
-    height: 14px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 2;
-    stroke-linecap: round;
-    stroke-linejoin: round;
+    opacity: 0;
+    transition: opacity var(--transition-fast), background-color var(--transition-fast), color var(--transition-fast);
 }
 @media (hover: hover) and (pointer: fine){
-.sidebar-folder-action:hover{
+.sidebar-folder-line:hover .sidebar-folder-more{
+    opacity: 1;
+}
+.sidebar-folder-more:hover{
     background-color: var(--sidebar-hover-bg);
     color: var(--text-h);
 }
 }
-.sidebar-folder-action.delete:hover{
-    color: var(--error);
-}
-.sidebar-folder-action:focus-visible{
+.sidebar-folder-more:focus-visible{
+    opacity: 1;
     outline: var(--focus-ring-width) solid var(--focus-ring);
     outline-offset: 1px;
 }
-.sidebar-folder-subrow{
-    flex: 1 1 100%;
+.sidebar-folder-more[aria-expanded="true"]{
+    opacity: 1;
+    background-color: var(--sidebar-active-bg);
+    color: var(--accent);
+}
+
+/* Inline editors (rename / new subfolder / move / new root): the existing P12
+   flows, presented under the row they belong to. */
+.sidebar-folder-editor{
     display: flex;
     align-items: center;
     flex-wrap: wrap;
     gap: var(--space-2);
+    padding: 2px 8px 6px;
 }
-.sidebar-folder-subrow .input{
+.sidebar-folder-editor .input{
     flex: 1 1 120px;
     min-width: 0;
 }
-.sidebar-folder-subrow .btn{
+.sidebar-folder-editor .btn{
     flex: 0 0 auto;
     white-space: nowrap;
 }
-.sidebar-folder-subrow .asel{
+.sidebar-folder-editor .asel{
     flex: 1 1 130px;
     min-width: 0;
 }
+
+/* Inline rename input (mockup .rename-input): replaces the row label, with the
+   mockup's accent border + soft ring. */
+.sidebar-folder-rename{
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 26px;
+    background-color: var(--sidebar-bg);
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-family: inherit;
+    font-size: 13.5px;
+    color: var(--text-h);
+    outline: none;
+    box-shadow: 0 0 0 3px var(--accent-bg);
+}
+
 .sidebar-folder-error{
     flex: 1 1 100%;
     margin: 0;
@@ -915,13 +1010,193 @@ button:disabled, select:disabled, input:disabled, textarea:disabled{
     color: var(--error);
 }
 
-/* Minimized Sidebar Adjustments */
+/* Touch widths: the mockup's mobile folder rows — taller, larger text, the ⋮
+   always visible with a bigger target. */
+@media (max-width: 1199px){
+    .sidebar-folder-line{
+        min-height: 46px;
+    }
+    .sidebar-folder-row{
+        min-height: 46px;
+        font-size: 14px;
+    }
+    /* Mockup touch rows: the ⋮ is always visible at a larger target and the
+       count becomes a quiet pill that stays put. */
+    .sidebar-folder-more{
+        opacity: 1;
+        width: 32px;
+        height: 32px;
+    }
+    .sidebar-folder-count{
+        font-size: 10.5px;
+        color: var(--sidebar-badge-text);
+        background-color: var(--sidebar-badge-bg);
+        padding: 1px 6px;
+        border-radius: 8px;
+        margin-inline-end: 4px;
+    }
+    .sidebar-folder-line:hover .sidebar-folder-count{
+        opacity: 1;
+    }
+}
+
+/* Per-folder ⋮ menu: the app's teleported popover layer (useAnchoredPopover),
+   so it is never clipped by the sidebar. */
+.sidebar-folder-menu{
+    position: fixed;
+    min-width: 200px;
+    background-color: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: var(--shadow-lg);
+    padding: 5px;
+    z-index: var(--z-popover);
+    display: flex;
+    flex-direction: column;
+}
+.sidebar-folder-menu button{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 40px;
+    padding: 9px 10px;
+    border: none;
+    border-radius: 7px;
+    background: none;
+    color: var(--sidebar-text);
+    font-family: inherit;
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+}
+@media (hover: hover) and (pointer: fine){
+.sidebar-folder-menu button:hover{
+    background-color: var(--muted-bg);
+    color: var(--text-h);
+}
+}
+.sidebar-folder-menu button.danger{
+    color: var(--error);
+}.sidebar-folder-menu button:focus-visible{
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: 1px;
+}
+.sidebar-folder-menu-sep{
+    height: 1px;
+    background-color: var(--border);
+    margin: 4px 8px;
+}
+
+/* Mockup folder-menu delete step: the confirmation replaces the menu's items
+   in place (padding, type and compact actions per the mockup). */
+.sidebar-folder-confirm{
+    padding: 10px 12px;
+}
+.sidebar-folder-confirm-text{
+    margin: 0 0 10px;
+    font-size: 13px;
+    color: var(--text);
+}
+.sidebar-folder-confirm-actions{
+    display: flex;
+    gap: 8px;
+}
+.sidebar-folder-confirm-actions button{
+    flex: 1 1 0;
+    width: auto;
+    justify-content: center;
+    min-height: 0;
+    padding: 8px;
+    border-radius: 6px;
+    font-size: 12.5px;
+    background-color: var(--muted-bg);
+    border: 1px solid var(--border);
+    color: var(--text-h);
+}
+@media (hover: hover) and (pointer: fine){
+.sidebar-folder-confirm-actions button:hover{
+    background-color: var(--muted-bg);
+    color: var(--text-h);
+}
+}
+.sidebar-folder-confirm-actions button.danger{
+    background-color: var(--error);
+    border-color: var(--error);
+    color: var(--on-error);
+}
+@media (hover: hover) and (pointer: fine){
+.sidebar-folder-confirm-actions button.danger:hover{
+    background-color: var(--error);
+    color: var(--on-error);
+}
+}
+
+/* P15.6/P15.12: the tag cloud (mockup .tag-cloud / .tag-pill). The pills are
+   real buttons bound to the P15.2 filterTag state, not inert mockup spans, and
+   the recipe is shared by the sidebar and the Tags dialog. */
+.tag-cloud{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    padding: 0 4px;
+}
+
+.tag-pill{
+    display: inline-flex;
+    align-items: center;
+    min-height: 28px;
+    padding: 5px 10px;
+    border: 1px solid transparent;
+    border-radius: 14px;
+    background-color: var(--muted-bg);
+    color: var(--muted);
+    font-family: inherit;
+    font-size: 11.5px;
+    cursor: pointer;
+    transition: color var(--transition-fast), background-color var(--transition-fast), border-color var(--transition-fast);
+}
+
+@media (hover: hover) and (pointer: fine){
+.tag-pill:hover{
+    color: var(--text-h);
+    border-color: var(--border-strong);
+}
+}
+
+.tag-pill.active{
+    background-color: var(--accent-bg);
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.tag-pill:focus-visible{
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: 1px;
+}
+
+/* P15.6: sidebar storage meter — the REAL metadata size of the persisted
+   records, pinned at the bottom of the sidebar (mockup position). */
+.storage-meter{
+    flex-shrink: 0;
+    /* Bottom inset keeps the status line clear of the footer's top border. */
+    padding: 8px 12px;
+}
+.storage-text{
+    font-size: 11px;
+    color: var(--sidebar-title);
+}
+
+/* Minimized Sidebar Adjustments — desktop grid only (>=1200). Below it the
+   off-canvas drawer always shows the full navigation, so a minimized desktop
+   state can never leak into tablet/mobile as a competing layout. */
+@media (min-width: 1200px){
 body.sidebar-minimized{
     --sidebar-width: 80px;
 }
 
 body.sidebar-minimized .sidebar-wrapper{
-    padding: var(--space-6) var(--space-3);
+    padding: var(--space-6) var(--space-3) 0;
     align-items: center;
 }
 
@@ -932,6 +1207,13 @@ body.sidebar-minimized .sidebar-brand span, body.sidebar-minimized .sidebar-menu
 /* P11: the minimized sidebar is icon-only — the folder tree has no icon form,
    so it is hidden there (the Folders view keeps the full tree). */
 body.sidebar-minimized .sidebar-folder-tree{
+    display: none;
+}
+
+/* P15.6: same for the tag cloud and the storage text — neither has an
+   icon-only form in the 80px sidebar. */
+body.sidebar-minimized .tag-cloud,
+body.sidebar-minimized .storage-meter{
     display: none;
 }
 
@@ -949,6 +1231,7 @@ body.sidebar-minimized .sidebar-menu-link{
 body.sidebar-minimized .sidebar-menu-link .bi{
     font-size: var(--text-2xl);
 }
+}
 
 /* ---------------------------------------------------------------------
    5. Main Wrapper Layout (P8: the content column; its own scroll container)
@@ -956,15 +1239,16 @@ body.sidebar-minimized .sidebar-menu-link .bi{
 .main-wrapper{
     margin-left: 0;
     padding: 2rem 2.5rem;
-    transition: all var(--transition-slow);
+    /* P15 (theme batch): theme colors animate; layout does not. */
+    transition: margin var(--transition-slow), background-color var(--transition-normal), color var(--transition-normal), border-color var(--transition-normal);
     display: flex;
     flex-direction: column;
 }
 
 /* ---------------------------------------------------------------------
    6. Custom Header / Navbar Component (P8: one full-width topbar row)
-   Below 1024 it is a single sticky row inside the content scroller; at
-   >=1024 it is row 1 of the shell grid, spanning every column.
+   Below 1200 it is a single sticky row inside the content scroller; at
+   >=1200 it is row 1 of the shell grid, spanning every column.
 --------------------------------------------------------------------- */
 .navbar-custom{
     position: sticky;
@@ -986,26 +1270,43 @@ body.sidebar-minimized .sidebar-menu-link .bi{
         gap: var(--space-3);
     }
 }
-@media (min-width: 1024px){
+@media (min-width: 1200px){
     .navbar-custom{
         display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 480px) minmax(0, 1fr);
+        /* P15.3: the mockup topbar is one row - menu/brand · search · views ·
+           theme · actions. The search column absorbs the free space (its
+           wrapper keeps the mockup 480px cap); everything else is content-sized.
+           P15 Group 1: the 14px inline inset matches the mockup desktop
+           topbar (the search cap is set below). */
+        grid-template-columns: auto minmax(0, 1fr) auto auto auto;
         grid-column: 1 / -1;
         grid-row: 1;
-        padding: 8px 1.25rem;
-        gap: var(--space-4);
+        padding: 8px 14px;
+        gap: var(--space-3);
+    }
+
+    /* Search layout only: the middle grid track is the flexible centre zone
+       between the left zone and the right toolbar. The field is a controlled
+       width (560-640px, 600 target) centred inside that zone with auto inline
+       margins, so it never hugs the brand, never stretches the track, and the
+       whitespace stays balanced on both sides as the viewport grows. */
+    .navbar-search-wrapper{
+        max-width: 600px;
+        margin-inline: auto;
     }
 }
 
 .navbar-left{
     display: flex;
     align-items: center;
-    gap: var(--space-3);
+    /* Mockup topbar rhythm: 10px inset + 36px control + 8px gap puts the brand
+       on the same visual grid as the sidebar's 12px content inset. */
+    gap: var(--space-2);
     min-width: 0;
     flex-shrink: 0;
 }
 
-/* Brand in the topbar (mockup .brand): visible at every width. At >=1024 the
+/* Brand in the topbar (mockup .brand): visible at every width. At >=1200 the
    sidebar head is hidden, so this is the shell's identity. */
 .mobile-brand{
     display: inline-flex;
@@ -1013,11 +1314,13 @@ body.sidebar-minimized .sidebar-menu-link .bi{
     gap: var(--space-2);
     min-width: 0;
     color: var(--text-h);
-    font-size: var(--text-lg);
+    /* Mockup topbar brand: 15px/700 with a -0.3px track. */
+    font-size: 15px;
+    letter-spacing: -.3px;
     font-weight: var(--weight-bold);
     text-decoration: none;
     white-space: nowrap;
-}
+    }
 
 .mobile-brand img{
     display: block;
@@ -1025,11 +1328,12 @@ body.sidebar-minimized .sidebar-menu-link .bi{
 }
 
 .navbar-search-wrapper{
+    /* P15.12: the mockup's search fills its row space (no cap), so the topbar
+       grid gives the brand its natural width and the field absorbs the rest. */
     width: 100%;
-    max-width: 480px;
+    min-width: 0;
     position: relative;
-    margin: 0 auto;
-}
+    }
 
 .navbar-search-input{
     width: 100%;
@@ -1037,12 +1341,23 @@ body.sidebar-minimized .sidebar-menu-link .bi{
     background-color: var(--muted-bg);
     border: 1px solid var(--border);
     border-radius: 10px;
-    padding: 0 2.5rem 0 10px;
+    padding: 0 2.5rem 0 2.4rem;
     font-size: 14px;
     font-weight: 400;
     color: var(--text-h);
     outline: none;
     transition: border-color var(--transition-normal), background-color var(--transition-normal);
+}
+
+/* P15.3: the mockup search pill leads with a decorative magnifier; the input
+   keeps its own box/border/focus recipe (P7 contract). */
+.navbar-search-icon{
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-subtle);
+    pointer-events: none;
 }
 
 /* The app ships its own clear control (.navbar-search-btn with aria-label
@@ -1078,8 +1393,8 @@ body.sidebar-minimized .sidebar-menu-link .bi{
    button's existing trailing slot, so the field keeps its reserved
    padding-right and neither the input nor the app bar changes height. The
    keycap shows only while the field is empty and unfocused; the button
-   (magnifier / clear) owns the slot in every other state. Hidden on
-   touch-only pointers and below the mobile shell breakpoint, where search is
+   (magnifier / clear) owns the slot in every other state. Hidden
+   below the mobile-shell breakpoint, where search is
    a collapsed affordance. */
 .navbar-search-kbd{
     position: absolute;
@@ -1108,13 +1423,7 @@ body.sidebar-minimized .sidebar-menu-link .bi{
     visibility: hidden;
 }
 
-@media (max-width: 768px){
-    .navbar-search-kbd{
-        display: none;
-    }
-}
-
-@media (hover: none){
+@media (max-width: 767.98px){
     .navbar-search-kbd{
         display: none;
     }
@@ -1174,17 +1483,20 @@ body.sidebar-minimized .sidebar-menu-link .bi{
 }
 
 /* Mobile Sidebar Toggle Button (shown below the desktop breakpoint).
-   Size/visuals come from the shared top-bar icon-button rule above. */
+   Size/visuals come from the shared top-bar icon-button rule above. The
+   .navbar-left gap owns the spacing after it, exactly like the desktop
+   collapse control — no extra per-control margin that would shift the brand
+   and the search between the tablet and desktop shells. */
 .sidebar-toggle-btn{
     display: none;
-    margin-right: var(--space-2);
 }
 
-/* Desktop sidebar minimize toggle: hidden while the drawer is off-canvas
-   (< 1200px), shown beside the brand once the sidebar is part of the layout. */
+/* Desktop sidebar minimize toggle: it exists wherever the persistent grid
+   sidebar exists (>=1200), so collapse/expand is always reversible inside the
+   desktop band and the button keeps the same header slot. Below 1200 the
+   drawer owns navigation (its own close control), so this toggle is hidden. */
 .btn-desktop-toggle{
     display: none;
-    margin-right: var(--space-4);
 }
 @media (min-width: 1200px){
     .btn-desktop-toggle{
@@ -1213,28 +1525,6 @@ body.sidebar-minimized .sidebar-menu-link .bi{
     font-size: var(--text-md);
     color: var(--muted);
     margin-bottom: 0;
-}
-
-.btn-date-picker{
-    background-color: transparent;
-    border: 1px solid transparent;
-    border-radius: var(--radius-sm);
-    padding: 0.5rem 0.85rem;
-    font-size: var(--text-sm);
-    font-weight: var(--weight-medium);
-    color: var(--muted);
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    cursor: pointer;
-    transition: background-color var(--transition-fast), color var(--transition-fast);
-}
-
-@media (hover: hover) and (pointer: fine){
-.btn-date-picker:hover{
-    background-color: var(--muted-bg);
-    color: var(--text-h);
-}
 }
 
 /* ---------------------------------------------------------------------
@@ -1275,17 +1565,17 @@ body.sidebar-minimized .sidebar-menu-link .bi{
 }
 
 /* Mobile bottom navigation (All · Favorites · Folders · More): the mockup's
-   primary destinations, shown for the whole <1024 drawer/mobile band. */
+   primary destinations, shown for the whole <1200 drawer/tablet/mobile band. */
 .bottom-nav{
     display: none;
 }
 
 /* ---------------------------------------------------------------------
    P8 responsive shell:
-   · <1024  : drawer sidebar + sticky single-row topbar + bottom bar + FAB
-   · >=1024 : static three-column grid (sidebar · content · detail), topbar row
+   · <1200  : drawer sidebar + sticky single-row topbar + bottom bar + FAB
+   · >=1200 : static three-column grid (sidebar · content · detail), topbar row
 --------------------------------------------------------------------- */
-@media (max-width: 1023px) {
+@media (max-width: 1199px) {
     .main-wrapper{
         padding: 1.5rem 1.5rem;
         /* The fixed bottom bar + FAB own the bottom edge of the screen. */
@@ -1300,11 +1590,6 @@ body.sidebar-minimized .sidebar-menu-link .bi{
         flex: 1 1 auto;
         width: auto;
         min-width: 0;
-    }
-
-    /* One Add entry point in this band: the floating action. */
-    .btn-date-picker{
-        display: none;
     }
 
     /* The topbar stays brand · search · profile (no fullscreen utility). */
@@ -1331,13 +1616,13 @@ body.sidebar-minimized .sidebar-menu-link .bi{
 
 /* The drawer toggle exists in the tablet band only; the mobile shell opens the
    same drawer from its More item so the topbar stays brand · search · profile. */
-@media (min-width: 768px) and (max-width: 1023px) {
+@media (min-width: 768px) and (max-width: 1199px) {
     .sidebar-toggle-btn{
         display: flex;
     }
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767.98px) {
     .page-header{
         flex-direction: column;
         align-items: flex-start;
@@ -1352,7 +1637,8 @@ body.sidebar-minimized .sidebar-menu-link .bi{
 .bottom-nav-item{
     flex: 1 1 0;
     min-width: 0;
-    min-height: var(--control-height);
+    /* P15 Group 1 (mockup .bn-item): 44px touch target, 10.5px labels. */
+    min-height: 44px;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -1360,35 +1646,34 @@ body.sidebar-minimized .sidebar-menu-link .bi{
     gap: 3px;
     padding: 0 var(--space-1);
     border: none;
-    border-radius: var(--radius-sm);
     background-color: transparent;
     color: var(--muted);
     font-family: inherit;
-    font-size: var(--text-xs);
-    font-weight: var(--weight-semibold);
+    font-size: 10.5px;
+    font-weight: var(--weight-medium);
     line-height: 1;
     cursor: pointer;
-    transition: background-color var(--transition-fast), color var(--transition-fast);
+    transition: color var(--transition-fast);
 }
 
 .bottom-nav-item .bi,
-.bottom-nav-item .ui-icon{
+.bottom-nav-item .ui-icon,
+.bottom-nav-item .ic{
     width: 18px;
     height: 18px;
     font-size: 1.15rem;
     line-height: 1;
 }
 
-/* Press feedback on the bar itself: immediate on finger-down, on the same
-   quiet inset surface the hover state uses (no scale on a full-width item). */
+/* P15.13 (mockup .bn-item): the bar gives colour-only feedback — pressing or
+   hovering firms the label colour and never paints a rounded block behind the
+   icon. */
 .bottom-nav-item:active{
-    background-color: var(--muted-bg);
     color: var(--text-h);
 }
 
 @media (hover: hover) and (pointer: fine){
 .bottom-nav-item:hover{
-    background-color: var(--muted-bg);
     color: var(--text-h);
 }
 }
@@ -1545,29 +1830,29 @@ textarea.input{ resize: vertical; }
 --------------------------------------------------------------------- */
 
 /* ---- Toast ---- */
-/* Neutral feedback surface with an accent edge: the accent marks the state,
-   it never becomes a filled notification pill. It still floats (overlay).
-   One shared recipe for every toast message — nothing is styled per message. */
+/* P15.9 — the mockup's single toast: an inverted, centred pill that floats
+   above every other layer (--z-toast). One shared recipe for every real
+   message: the app has no severity variants, so nothing is styled per message
+   and there is no icon or close control to render. */
 .sl-toast{
   position: fixed;
-  bottom: 20px;
+  bottom: 24px;                     /* mockup bottom: 24px */
   left: 50%;
   transform: translateX(-50%);
-  background-color: var(--card);
-  color: var(--text-h);
-  border: 1px solid var(--border);
-  border-left: 2px solid var(--accent);
-  padding: var(--space-2) var(--space-4);
-  /* Moderate corner: at 10px (--radius-sm) the short ends of a ~38px-tall
-     toast curved into a pill. The scale has no radius below --radius-sm, so
-     this is a documented literal (same approach as the search keycap). */
-  border-radius: 8px;
-  font-size: var(--text-sm);
-  font-weight: var(--weight-semibold);
-  /* Quieter than --shadow-lg: still floats clear of the page, no heavy glow. */
-  box-shadow: var(--shadow-md);
+  max-width: 90vw;                  /* long real messages wrap, never clip */
+  background-color: var(--text);    /* mockup: inverted surface (--text on --bg) */
+  color: var(--bg);
+  padding: 10px 20px;               /* mockup literals: the scale has no 10/20px step */
+  border-radius: 24px;              /* mockup pill radius */
+  font-size: var(--text-sm);        /* 13px */
+  font-weight: var(--weight-medium);
+  text-align: center;
+  box-shadow: var(--shadow-lg);
+  /* The toast is a status message with nothing to click, so it never
+     intercepts pointer input (the mockup's .show sets pointer-events:auto,
+     but its toast is just as non-interactive). */
+  pointer-events: none;
   z-index: var(--z-toast);
-  white-space: nowrap;
 }
 /* The mobile shell owns the bottom of the screen: the toast clears the bottom
    bar instead of covering the navigation. */
@@ -1575,6 +1860,15 @@ textarea.input{ resize: vertical; }
   .sl-toast{
     bottom: calc(var(--bottom-nav-height) + var(--safe-area-bottom) + var(--space-3));
   }
+}
+/* While an overlay (dialog, account/profile panel, import preview, mobile
+   detail sheet) is open, the toast moves to the top edge: it stays above the
+   overlay in --z-toast and never hides behind the backdrop, but it can no
+   longer sit on a bottom sheet's actionable footer. Same overlay set the
+   scroll lock above already tracks. */
+body:has(.dialog-backdrop, .account-backdrop, .import-preview-backdrop, .lp-backdrop, .detail-backdrop) .sl-toast{
+  top: calc(var(--safe-area-top) + var(--space-4));
+  bottom: auto;
 }
 .toast-enter-active, .toast-leave-active{
   transition: opacity var(--transition-fast), transform var(--transition-fast);
@@ -1621,7 +1915,7 @@ textarea.input{ resize: vertical; }
 }
 
 /* A button's fill is its own edge, so it keeps the shared outline (as do
-   .icon-btn, .row-toggle and the chrome buttons). */
+   .icon-btn, .item-action and the chrome buttons). */
 .btn:focus-visible{
   outline: var(--focus-ring-width) solid var(--focus-ring);
   outline-offset: var(--focus-ring-offset);
@@ -1630,6 +1924,12 @@ textarea.input{ resize: vertical; }
 /* ---------------------------------------------------------------------
    14. Motion & Accessibility
 --------------------------------------------------------------------- */
+/* P15 (theme batch): targeted theme transitions for the token-driven surfaces.
+   Colors and shadow only - never layout, opacity or transform. :where() keeps
+   zero specificity, so a component's own hover/press transition still wins. */
+:where(body, .app, .main-wrapper, .navbar-custom, .sidebar-wrapper, .bottom-nav, .fab, .detail, .dialog, .content-head, .filterbar, .library-results, .links-panel, .links-content, .grid, .row-list, .group-h, .link-row, .link-card, .table-footer-control, .empty-state) {
+  transition: background-color var(--transition-normal), color var(--transition-normal), border-color var(--transition-normal), box-shadow var(--transition-normal);
+}
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after{
     animation-duration: 0.01ms !important;
@@ -1739,7 +2039,7 @@ textarea.input{ resize: vertical; }
    Transparent at rest so item actions stay quiet next to the content, and the
    same box everywhere so Card and List never drift apart. The destructive
    state appears only on hover. */
-.icon-btn, .row-toggle{
+.icon-btn{
   width: var(--control-height-sm);
   height: var(--control-height-sm);
   flex-shrink: 0;
@@ -1753,17 +2053,132 @@ textarea.input{ resize: vertical; }
   cursor: pointer;
   transition: color var(--transition-fast), background-color var(--transition-fast), border-color var(--transition-fast), transform .1s ease;
 }
-.icon-btn:active, .row-toggle:active{ transform: scale(0.92); }
-.icon-btn:focus-visible, .row-toggle:focus-visible{ outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 1px; }
-.icon-btn svg, .row-toggle svg{ width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-/* Status toggle: the accent marks the active state on the icon only. */
-.row-toggle.active{ color: var(--accent); }
+.icon-btn:active{ transform: scale(0.92); }
+.icon-btn:focus-visible{ outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 1px; }
+.icon-btn svg{ fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 @media (hover: hover) and (pointer: fine){
-.icon-btn:hover, .row-toggle:hover{ background-color: var(--muted-bg); color: var(--text-h); }
+.icon-btn:hover{ background-color: var(--muted-bg); color: var(--text-h); }
 .icon-btn.delete:hover{ background-color: var(--error-bg); color: var(--error); }
-.row-toggle.active:hover{ background-color: var(--accent-bg); }
 }
-.row-toggle.active svg{ fill: currentColor; stroke: currentColor; }
+
+/* ---- Item actions (P15.11): the mockup's quiet control for link items -------
+   One recipe for Card/List/Compact. The visible control is the mockup's
+   ~25px (5px padding around a 15px glyph, radius 5) while the button keeps a
+   comfortable hit area via an ::after zone on touch (never by growing the
+   painted control). */
+.item-action{
+  position: relative;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  background-color: transparent;
+  border: none;
+  border-radius: 5px;
+  color: var(--text-subtle);   /* mockup --text-faint at rest */
+  cursor: pointer;
+  transition: color var(--transition-fast), background-color var(--transition-fast);
+}
+.item-action svg{ fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.item-action:focus-visible{ outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 1px; }
+@media (hover: hover) and (pointer: fine){
+.item-action:hover{ color: var(--text-h); background-color: var(--muted-bg); }
+}
+@media (pointer: coarse){
+  /* Larger touch target without a larger painted control. */
+  .item-action::after{ content: ''; position: absolute; inset: -6px; }
+}
+/* One obviously-on state per toggle: a favourite star (mockup --amber, filled)
+   and a pinned pin (accent, filled) — colour + fill only, never a filled pill
+   behind the glyph (the mockup's .row-star.on is colour-only). */
+.item-action.favorite-toggle.on{ color: var(--favorite); }
+.item-action.pin-toggle.on{ color: var(--accent); }
+.item-action.favorite-toggle.on svg,
+.item-action.pin-toggle.on svg{ fill: currentColor; }
+
+/* ---- Banner actions (P15.11): the mockup's floating circle on a media
+   banner (30px, surface, border, shadow-sm, hover scale) — the same recipe the
+   card's favourite/pin/menu controls share. */
+.banner-action{
+  position: relative;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  background-color: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  box-shadow: var(--shadow-sm);
+  color: var(--muted);         /* mockup --text-dim at rest */
+  cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast), background-color var(--transition-fast), transform .12s ease;
+}
+.banner-action svg{ fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.banner-action:focus-visible{ outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 1px; }
+@media (hover: hover) and (pointer: fine){
+.banner-action:hover{ transform: scale(1.08); }
+}
+@media (pointer: coarse){
+  .banner-action::after{ content: ''; position: absolute; inset: -6px; border-radius: 50%; }
+}
+.banner-action.favorite-toggle.on{ color: var(--favorite); border-color: var(--accent-border); }
+.banner-action.pin-toggle.on{ color: var(--accent); border-color: var(--accent-border); }
+.banner-action.favorite-toggle.on svg,
+.banner-action.pin-toggle.on svg{ fill: currentColor; }
+
+/* ---- Item selection box (P15.11): the mockup's check recipe. The native
+   input stays the real control (checkbox semantics + keyboard) and is stretched
+   invisibly over the box, so the painted control matches the mockup. */
+.item-check{
+  position: relative;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  display: block;
+  cursor: pointer;
+}
+.item-check input{
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.item-check-box{
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 5px;
+  background-color: var(--card);
+  color: transparent;
+  transition: background-color var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+.item-check input:checked + .item-check-box{
+  background-color: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+.item-check input:focus-visible + .item-check-box{
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: 2px;
+}
+@media (pointer: coarse){
+  .item-check::after{ content: ''; position: absolute; inset: -8px; }
+}
+/* The card banner variant: 22px, radius 6, 2px border (mockup .card-check). */
+.item-check--lg{ width: 22px; height: 22px; }
+.item-check--lg .item-check-box{ border-width: 2px; border-radius: 6px; }
+
+/* Shared visually-hidden utility (one definition for every surface). */
+.sr-only{ position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 
 /* ---------------------------------------------------------------------
    15. Select / dropdown (AppSelect.vue)
@@ -2127,4 +2542,144 @@ select,
 .input{
     font-size: 16px;
 }
+}
+
+/* ---------------------------------------------------------------------
+   Add/Edit form controls (mockup .type-pills / .toggle-row .switch /
+   .fetch-btn): shared by AddLink and EditLinkForm. Values and state stay in
+   the components; this is presentation only.
+--------------------------------------------------------------------- */
+.type-pills{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.type-pill{
+    padding: 7px 13px;
+    border-radius: 16px;
+    background-color: var(--muted-bg);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-family: inherit;
+    font-size: 12.5px;
+    line-height: 1.2;
+    cursor: pointer;
+    transition: background-color var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+.type-pill.active{
+    background-color: var(--accent-bg);
+    border-color: var(--accent);
+    color: var(--accent);
+    font-weight: var(--weight-medium);
+}
+.type-pill:focus-visible{
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: 2px;
+}
+@media (hover: hover) and (pointer: fine){
+    .type-pill:not(.active):hover{
+        border-color: var(--border-strong);
+        color: var(--text-h);
+    }
+}
+.switch{
+    /* Containing block for the visually hidden input below: without it the
+       absolute 1x1 input lands at the document origin and focusing it on click
+       scrolls the page (the edit panel "shift"). */
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: var(--text-sm);
+    color: var(--text-h);
+    cursor: pointer;
+}
+.switch input{
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: 0;
+    opacity: 0;
+}
+.switch-track{
+    position: relative;
+    width: 36px;
+    height: 20px;
+    flex-shrink: 0;
+    border-radius: 999px;
+    background-color: var(--muted-bg);
+    border: 1px solid var(--border);
+    transition: background-color .15s ease, border-color .15s ease;
+}
+.switch-thumb{
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background-color: var(--card);
+    box-shadow: var(--shadow-sm);
+    transition: transform .15s ease;
+}
+.switch input:checked + .switch-track{
+    background-color: var(--accent);
+    border-color: var(--accent);
+}
+.switch input:checked + .switch-track .switch-thumb{
+    transform: translateX(16px);
+    background-color: #fff;
+}
+.switch input:focus-visible + .switch-track{
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: 2px;
+}
+.fetch-btn{
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 14px;
+    min-height: var(--control-height);
+    background-color: var(--accent-bg);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-sm);
+    color: var(--accent);
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: var(--weight-medium);
+    cursor: pointer;
+    transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+@media (hover: hover) and (pointer: fine){
+    .fetch-btn:hover:not(:disabled){
+        background-color: var(--accent);
+        color: var(--on-accent);
+    }
+}
+.fetch-btn:disabled{
+    opacity: .6;
+    cursor: default;
+}
+.fetch-btn:focus-visible{
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: 2px;
+}
+.fetch-spinner{
+    width: 12px;
+    height: 12px;
+    border: 2px solid currentColor;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: fetch-spin .7s linear infinite;
+}
+@keyframes fetch-spin{
+    to { transform: rotate(360deg); }
+}
+@media (max-width: 768px){
+    .type-pill,
+    .fetch-btn{
+        min-height: calc(var(--control-height) + var(--space-1));
+        font-size: var(--text-lg);
+    }
 }

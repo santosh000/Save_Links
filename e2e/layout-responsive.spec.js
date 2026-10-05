@@ -52,7 +52,8 @@ async function cardControlsInsideCard(page) {
   const cards = await page.locator('.grid > .card').all()
   for (const card of cards.slice(0, 3)) {
     const cardBox = await card.boundingBox()
-    const actions = await card.locator('.actions').all()
+    // P15.11: the card's controls are the banner box + the banner action cluster.
+    const actions = await card.locator('.card-check, .banner-actions button').all()
     for (const action of actions) {
       const box = await action.boundingBox()
       if (!box || !cardBox) return false
@@ -127,14 +128,17 @@ test.describe('Link view responsive layout', () => {
     }
   })
 
-  test('Toolbar wraps without viewport overflow at mobile widths', async ({ page }) => {
+  test('Links toolbar is desktop-only and mobile widths never overflow', async ({ page }) => {
     await setupLinks(page)
     for (const width of [390, 375, 320]) {
       await page.setViewportSize({ width, height: 900 })
       await page.waitForTimeout(150)
       expect(await hasHorizontalOverflow(page), `toolbar overflow at ${width}px`).toBe(false)
-      const toolbar = page.locator('.content-head')
-      await expect(toolbar).toBeVisible()
+      // The empty Links toolbar band is removed below 1024; the filter bar tops
+      // the workspace and the FAB is the Add entry point.
+      await expect(page.locator('.content-head')).toBeHidden()
+      await expect(page.locator('.filterbar')).toBeVisible()
+      await expect(page.locator('.fab')).toBeVisible()
     }
   })
 })

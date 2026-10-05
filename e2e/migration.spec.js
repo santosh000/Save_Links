@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { linkRowByTitle, openEditFormFor, openView, visibleLinkRows } from './helpers.js'
+import { linkRowByTitle, openEditFormFor, openView, visibleLinkRows, readStoredLinks } from './helpers.js'
 
 async function clearStorage(page) {
   await page.goto('/')
@@ -56,28 +56,24 @@ test.describe('localStorage -> IndexedDB migration', () => {
     await expect(linkRowByTitle(page, 'Legacy Link')).toBeVisible()
     await expect(linkRowByTitle(page, 'Canonical Link')).toBeVisible()
     await openView(page, 'folders')
-    await expect(page.locator('.folder-item', { hasText: 'Work' })).toBeVisible()
+    await expect(page.locator('[data-testid="sidebar-folder-row"]', { hasText: 'Work' })).toBeVisible()
     await expect(page.locator('.identity-name')).toContainText('Migrated User')
     await expect(page.locator('html')).toHaveAttribute('data-appearance', 'dark')
     await expect(page.locator('html')).toHaveAttribute('data-color-scheme', 'lavender')
 
     // legacy status 'important' -> important flag; explicit booleans preserved.
-    // Flags are permanent row/card controls now (Important/Favorite direct, Must
-    // Have in the More-actions menu), so their state is asserted there.
+    // P15.10+: the flags have no UI surface anymore; assert the migrated rows
+    // directly (the data must survive the migration).
     await openView(page, 'links')
     const legacy = linkRowByTitle(page, 'Legacy Link')
-    await expect(legacy.getByRole('button', { name: 'Toggle Important' })).toHaveAttribute('aria-pressed', 'true')
     await expect(legacy.getByRole('button', { name: 'Toggle Favorite' })).toHaveAttribute('aria-pressed', 'false')
-    await legacy.getByRole('button', { name: 'More actions' }).click()
-    await expect(page.locator('.more-menu').getByRole('button', { name: 'Toggle Must Have' })).toHaveAttribute('aria-pressed', 'false')
-    await page.keyboard.press('Escape')
 
     const canonical = linkRowByTitle(page, 'Canonical Link')
     await expect(canonical.getByRole('button', { name: 'Toggle Favorite' })).toHaveAttribute('aria-pressed', 'true')
-    await expect(canonical.getByRole('button', { name: 'Toggle Important' })).toHaveAttribute('aria-pressed', 'false')
-    await canonical.getByRole('button', { name: 'More actions' }).click()
-    await expect(page.locator('.more-menu').getByRole('button', { name: 'Toggle Must Have' })).toHaveAttribute('aria-pressed', 'true')
-    await page.keyboard.press('Escape')
+
+    const stored = await readStoredLinks(page)
+    expect(stored.find((l) => l.title === 'Legacy Link')?.important).toBe(true)
+    expect(stored.find((l) => l.title === 'Canonical Link')?.mustHave).toBe(true)
 
     // marker state + original localStorage source retained as recovery source
     expect(await page.evaluate(() => localStorage.getItem('save_link:test:migration'))).toBe('complete')
@@ -89,7 +85,7 @@ test.describe('localStorage -> IndexedDB migration', () => {
     await expect(linkRowByTitle(page, 'Legacy Link')).toBeVisible()
     await expect(linkRowByTitle(page, 'Canonical Link')).toBeVisible()
     await openView(page, 'folders')
-    await expect(page.locator('.folder-item', { hasText: 'Work' })).toBeVisible()
+    await expect(page.locator('[data-testid="sidebar-folder-row"]', { hasText: 'Work' })).toBeVisible()
     await expect(page.locator('html')).toHaveAttribute('data-appearance', 'dark')
     expect(await page.evaluate(() => localStorage.getItem('save_link:test:migration'))).toBe('complete')
   })

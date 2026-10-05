@@ -1,4 +1,6 @@
 <script setup>
+import Icon from './Icon.vue'
+
 // Public repository URL: taken from the project's own configuration
 // (README / CONTRIBUTING / MAINTAINERS / git remote).
 const GITHUB_URL = 'https://github.com/santosh000/Save_Links'
@@ -24,14 +26,17 @@ defineProps({
 
     <div class="about-principles">
       <section class="about-principle">
+        <span class="about-principle-icon" aria-hidden="true"><Icon name="database" size="sm" /></span>
         <h5>Local-first</h5>
         <p>Your links stay on your device first. Use Save Links without an account.</p>
       </section>
       <section class="about-principle">
+        <span class="about-principle-icon" aria-hidden="true"><Icon name="refresh-cw" size="sm" /></span>
         <h5>Optional sync</h5>
         <p>Sign in with Google or GitHub when you want your links across devices.</p>
       </section>
       <section class="about-principle">
+        <span class="about-principle-icon" aria-hidden="true"><Icon name="download" size="sm" /></span>
         <h5>Your data, your choice</h5>
         <p>Cloud sync is optional. Export your data when you want a backup.</p>
       </section>
@@ -65,7 +70,7 @@ defineProps({
 .about-card {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-6);
 }
 
 .about-header {
@@ -85,7 +90,9 @@ defineProps({
 .about-logo img { display: block; }
 .about-heading h4 {
   margin: 0 0 2px;
-  font-size: var(--text-lg);
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-semibold);
+  line-height: 1.2;
   color: var(--text-h);
 }
 .about-lead {
@@ -105,17 +112,39 @@ defineProps({
 
 .about-principles {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: var(--space-4);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
 }
 .about-principle {
-  border-top: 1px solid var(--border-subtle);
-  padding-top: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+  padding: var(--space-5);
+  /* Reference card motion: a 500ms colour transition only (no lift). */
+  transition: border-color 0.5s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+@media (hover: hover) and (pointer: fine) {
+  .about-principle:hover { border-color: var(--border-strong); background: var(--muted-bg); }
+}
+/* The third principle spans the row, like the reference's full-width card. */
+.about-principle:last-child { grid-column: 1 / -1; }
+.about-principle-icon {
+  width: var(--control-height);
+  height: var(--control-height);
+  display: grid;
+  place-items: center;
+  margin-bottom: var(--space-4);
+  border-radius: var(--radius);
+  background: var(--accent-bg);
+  color: var(--accent);
+  flex-shrink: 0;
 }
 .about-principle h5,
 .about-open h5 {
-  margin: 0 0 4px;
-  font-size: var(--text-md);
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-lg);
   color: var(--text-h);
 }
 .about-principle p,
@@ -132,28 +161,32 @@ defineProps({
   justify-content: space-between;
   gap: var(--space-4);
   border-top: 1px solid var(--border-subtle);
-  padding-top: var(--space-4);
+  padding-top: var(--space-6);
 }
 .about-open-text { min-width: 0; }
 .about-open p { max-width: 60ch; }
 .about-github {
-  width: var(--control-height);
+  width: auto;
+  min-width: var(--control-height);
   height: var(--control-height);
   flex-shrink: 0;
-  display: grid;
-  place-items: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 20px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-full);
   background: var(--card);
   color: var(--text-h);
   text-decoration: none;
-  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+  transition: background-color 0.3s cubic-bezier(0.4, 0, 0.2, 1), color 0.3s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1), transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 @media (hover: hover) and (pointer: fine) {
   .about-github:hover {
     background: var(--muted-bg);
     color: var(--accent);
     border-color: var(--accent-border);
+    transform: scale(1.05);
   }
 }
 .about-github:focus-visible {
@@ -169,7 +202,7 @@ defineProps({
   justify-content: space-between;
   gap: var(--space-2);
   border-top: 1px solid var(--border-subtle);
-  padding-top: var(--space-4);
+  padding-top: var(--space-6);
 }
 .about-made {
   margin: 0;
@@ -181,5 +214,14 @@ defineProps({
   margin: 0;
   font-size: var(--text-xs);
   color: var(--muted);
+}
+/* Narrow modal panes: one principle card per row. */
+@media (max-width: 575px) {
+  .about-principles { grid-template-columns: 1fr; }
+  .about-principle:last-child { grid-column: auto; }
+}
+/* Reduced motion: no GitHub hover movement. */
+@media (prefers-reduced-motion: reduce) {
+  .about-github:hover { transform: none; }
 }
 </style>

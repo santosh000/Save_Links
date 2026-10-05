@@ -118,7 +118,9 @@ function activeId() {
   position: fixed;
   inset: 0;
   z-index: var(--z-modal, 1050);
-  background: var(--overlay, rgba(15, 23, 42, .45));
+  background: var(--overlay);
+  backdrop-filter: blur(var(--overlay-blur));
+  -webkit-backdrop-filter: blur(var(--overlay-blur));
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -132,7 +134,7 @@ function activeId() {
   flex-direction: column;
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 14px;              /* mockup palette radius */
+  border-radius: var(--radius-lg);    /* shared modal-surface radius */
   box-shadow: var(--shadow-lg);     /* mockup: floating palette uses lg */
   overflow: hidden;
 }

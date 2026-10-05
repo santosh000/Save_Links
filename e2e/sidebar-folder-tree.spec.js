@@ -5,7 +5,7 @@
 // active state, CRUD sync, the drawer close, depth 4, keyboard, aria-expanded
 // and light/dark.
 import { test, expect } from '@playwright/test'
-import { clearStorage, openView, ensureAddLinkOpen, saveLink, linkRowByTitle, visibleLinkRows, expectNoHorizontalScroll } from './helpers.js'
+import { clearStorage, openView, createFolder, createSubfolder, ensureAddLinkOpen, saveLink, linkRowByTitle, visibleLinkRows, expectNoHorizontalScroll } from './helpers.js'
 
 const tree = (page) => page.locator('[data-testid="sidebar-folder-tree"]')
 const row = (page, name) => page.locator('[data-testid="sidebar-folder-row"]').filter({ hasText: name })
@@ -15,16 +15,16 @@ const toggle = (page, name) => page.locator(
 const indentOf = (page, name) => row(page, name).evaluate((el) => el.closest('.sidebar-folder-line').style.paddingInlineStart)
 const activeRowNames = (page) => page.locator('[data-testid="sidebar-folder-row"][aria-current="true"]').allTextContents()
 
+// Creation auto-expands the parent branch (the new row must be visible for the
+// inline rename). Tests that need the collapsed state collapse explicitly.
 async function createRoot(page, name) {
-  await page.getByLabel('New folder name').fill(name)
-  await page.getByRole('button', { name: 'Create folder', exact: true }).click()
-  await expect(page.locator('.folder-item', { hasText: name })).toBeVisible()
+  await createFolder(page, name)
 }
 async function createChild(page, parent, name) {
-  await page.getByRole('button', { name: `Add subfolder to ${parent}` }).click()
-  await page.getByLabel(`New subfolder name in ${parent}`).fill(name)
-  await page.getByRole('button', { name: `Create subfolder in ${parent}` }).click()
-  await expect(page.locator('.folder-item', { hasText: name })).toBeVisible()
+  await createSubfolder(page, parent, name)
+}
+async function ensureExpanded(page, name) {
+  if ((await toggle(page, name).getAttribute('aria-expanded')) !== 'true') await toggle(page, name).click()
 }
 async function saveLinkInFolder(page, { url, title, folderName }) {
   await ensureAddLinkOpen(page)
@@ -56,23 +56,25 @@ test.describe('P11 — sidebar folder tree', () => {
     await createChild(page, 'Work', 'Engineering')
     await createChild(page, 'Engineering', 'Frontend')
 
-    // Roots are visible; the nested child is hidden while its parent is collapsed.
+    // Roots are visible; creation expanded the branch, so collapse it first to
+    // assert the collapsed default state.
     await expect(tree(page)).toBeVisible()
     await expect(row(page, 'Work')).toBeVisible()
     await expect(row(page, 'Personal')).toBeVisible()
+    await toggle(page, 'Work').click()
     await expect(row(page, 'Engineering')).toHaveCount(0)
     await expect(row(page, 'Frontend')).toHaveCount(0)
 
-    // Expand Work -> Engineering appears at depth 2 (10 + 14 = 24px).
+    // Expand Work -> Engineering appears at depth 2 (P15.5 mockup: 8 + 14 = 22px).
     await toggle(page, 'Work').click()
     await expect(row(page, 'Engineering')).toBeVisible()
-    expect(await indentOf(page, 'Work')).toBe('10px')
-    expect(await indentOf(page, 'Engineering')).toBe('24px')
+    expect(await indentOf(page, 'Work')).toBe('8px')
+    expect(await indentOf(page, 'Engineering')).toBe('22px')
 
-    // Expand Engineering -> Frontend appears at depth 3 (38px).
-    await toggle(page, 'Engineering').click()
+    // Expand Engineering -> Frontend appears at depth 3 (36px).
+    await ensureExpanded(page, 'Engineering')
     await expect(row(page, 'Frontend')).toBeVisible()
-    expect(await indentOf(page, 'Frontend')).toBe('38px')
+    expect(await indentOf(page, 'Frontend')).toBe('36px')
 
     // Collapse Work -> the whole subtree hides again.
     await toggle(page, 'Work').click()
@@ -85,6 +87,8 @@ test.describe('P11 — sidebar folder tree', () => {
     await createRoot(page, 'Work')
     await createChild(page, 'Work', 'Engineering')
 
+    // Creation expanded Work; collapse so the state machine is observed from false.
+    await toggle(page, 'Work').click()
     await expect(toggle(page, 'Work')).toHaveAttribute('aria-expanded', 'false')
     await toggle(page, 'Work').click()
     await expect(toggle(page, 'Work')).toHaveAttribute('aria-expanded', 'true')
@@ -105,7 +109,7 @@ test.describe('P11 — sidebar folder tree', () => {
     await saveLink(page, { url: 'https://example.com/unfiled', title: 'Unfiled Link' })
 
     // Select the child: only its own link.
-    await toggle(page, 'Work').click()
+    await ensureExpanded(page, 'Work')
     await row(page, 'Engineering').click()
     await expect(page.locator('.page-title')).toHaveText('Links')
     await expect(visibleLinkRows(page)).toHaveCount(1)
@@ -116,58 +120,50 @@ test.describe('P11 — sidebar folder tree', () => {
     await row(page, 'Work').click()
     await expect(visibleLinkRows(page)).toHaveCount(2)
     await expect(page.locator('.filter-chip', { hasText: 'Folder: Work' })).toBeVisible()
-
-    // Status filtering is cleared by the same selection path (no favorites here).
-    await expect(page.locator('#filter-status')).toHaveValue('')
   })
 
-  test('active sidebar row follows the current selection from both surfaces', async ({ page }) => {
+  test('active sidebar row follows the current selection', async ({ page }) => {
     await openView(page, 'folders')
     await createRoot(page, 'Work')
     await createRoot(page, 'Personal')
     await createChild(page, 'Work', 'Engineering')
 
-    await toggle(page, 'Work').click()
+    await ensureExpanded(page, 'Work')
     await row(page, 'Engineering').click()
     await expect(page.locator('[data-testid="sidebar-folder-row"][aria-current="true"]')).toHaveText('Engineering')
     expect(await activeRowNames(page)).toEqual(['Engineering'])
 
-    // Selecting from the Folders view updates the sidebar (and reveals a nested
-    // active folder even when its parent was collapsed).
-    await openView(page, 'folders')
-    await page.getByRole('button', { name: 'Show folder Personal' }).click()
+    // Selecting another row takes over the single active state.
+    await row(page, 'Personal').click()
     await expect(page.locator('[data-testid="sidebar-folder-row"][aria-current="true"]')).toHaveText('Personal')
-
-    await openView(page, 'folders')
-    await page.getByRole('button', { name: 'Show folder Engineering' }).click()
-    await expect(page.locator('[data-testid="sidebar-folder-row"][aria-current="true"]')).toHaveText('Engineering')
-    await expect(row(page, 'Engineering')).toBeVisible() // auto-revealed
+    expect(await activeRowNames(page)).toEqual(['Personal'])
   })
 
-  test('Folders view CRUD updates the sidebar tree', async ({ page }) => {
+  test('sidebar tree CRUD updates the tree (rename, create child, delete)', async ({ page }) => {
     await openView(page, 'folders')
     await createRoot(page, 'Work')
     await createChild(page, 'Work', 'Engineering')
     await expect(row(page, 'Work')).toBeVisible()
 
-    // rename
-    await page.getByRole('button', { name: 'Rename folder Work' }).click()
-    await page.getByLabel('Rename folder Work').fill('Office')
-    await page.getByRole('button', { name: 'Save folder name' }).click()
+    // rename through the ⋮ menu
+    await page.getByRole('button', { name: 'Folder options for Work' }).click()
+    await page.getByRole('menuitem', { name: 'Rename sidebar folder Work' }).click()
+    await page.getByLabel('Rename sidebar folder Work').fill('Office')
+    await page.keyboard.press('Enter')
     await expect(row(page, 'Office')).toBeVisible()
     await expect(row(page, 'Work')).toHaveCount(0)
 
     // create another child -> appears after expanding
-    await toggle(page, 'Office').click()
+    await ensureExpanded(page, 'Office')
     await expect(row(page, 'Engineering')).toBeVisible()
     await createChild(page, 'Office', 'Design')
     await expect(row(page, 'Design')).toBeVisible()
-    expect(await indentOf(page, 'Design')).toBe('24px')
+    expect(await indentOf(page, 'Design')).toBe('22px')
 
-    // delete a subtree -> its rows disappear
-    await page.getByRole('button', { name: 'Delete folder Engineering' }).click()
-    const dialog = page.getByRole('dialog')
-    await dialog.getByRole('button', { name: 'Delete', exact: true }).click()
+    // delete a subtree -> its rows disappear (confirmation lives in the menu)
+    await page.getByRole('button', { name: 'Folder options for Engineering' }).click()
+    await page.getByRole('menuitem', { name: 'Delete sidebar folder Engineering' }).click()
+    await page.getByRole('button', { name: 'Confirm delete sidebar folder Engineering' }).click()
     await expect(row(page, 'Engineering')).toHaveCount(0)
     await expect(row(page, 'Design')).toHaveCount(1)
   })
@@ -179,14 +175,12 @@ test.describe('P11 — sidebar folder tree', () => {
     await createChild(page, 'L2', 'L3')
     await createChild(page, 'L3', 'L4')
 
-    await toggle(page, 'L1').click()
-    await toggle(page, 'L2').click()
-    await toggle(page, 'L3').click()
+    for (const name of ['L1', 'L2', 'L3']) await ensureExpanded(page, name)
     await expect(row(page, 'L4')).toBeVisible()
-    expect(await indentOf(page, 'L1')).toBe('10px')
-    expect(await indentOf(page, 'L2')).toBe('24px')
-    expect(await indentOf(page, 'L3')).toBe('38px')
-    expect(await indentOf(page, 'L4')).toBe('52px')
+    expect(await indentOf(page, 'L1')).toBe('8px')
+    expect(await indentOf(page, 'L2')).toBe('22px')
+    expect(await indentOf(page, 'L3')).toBe('36px')
+    expect(await indentOf(page, 'L4')).toBe('50px')
     await expect(toggle(page, 'L4')).toHaveCount(0)
   })
 
@@ -201,7 +195,7 @@ test.describe('P11 — sidebar folder tree', () => {
       await page.reload()
       await openDrawer(page)
       await expect(tree(page)).toBeVisible()
-      await toggle(page, 'Work').click()
+      await ensureExpanded(page, 'Work')
       await row(page, 'Engineering').click()
       await expect(page.locator('.sidebar-wrapper')).not.toHaveClass(/\bshow\b/)
       await expect(page.locator('.page-title')).toHaveText('Links')
@@ -216,7 +210,7 @@ test.describe('P11 — sidebar folder tree', () => {
     await createRoot(page, 'Personal')
     await createChild(page, 'Work', 'Engineering')
 
-    await toggle(page, 'Work').click()
+    await ensureExpanded(page, 'Work')
     await row(page, 'Engineering').focus()
     await page.keyboard.press('Enter')
     await expect(page.locator('.page-title')).toHaveText('Links')
@@ -243,9 +237,9 @@ test.describe('P11 — sidebar folder tree', () => {
     await createRoot(page, 'Work')
     await createChild(page, 'Work', longName)
 
-    for (const width of [375, 390, 480, 640, 768, 820, 900, 1023, 1024, 1100, 1200, 1280, 1440]) {
+    for (const width of [375, 390, 480, 640, 768, 820, 900, 1023, 1024, 1100, 1199, 1200, 1280, 1440]) {
       await page.setViewportSize({ width, height: 900 })
-      if (width < 1024) await openDrawer(page)
+      if (width < 1200) await openDrawer(page)
       await expect(tree(page)).toBeVisible()
       // expansion state persists across width changes — only toggle when needed
       if ((await toggle(page, 'Work').getAttribute('aria-expanded')) !== 'true') await toggle(page, 'Work').click()
@@ -263,7 +257,7 @@ test.describe('P11 — sidebar folder tree', () => {
       })
       expect(fits, `tree fits @${width}`).toBe(true)
       await expectNoHorizontalScroll(page)
-      if (width < 1024) await page.locator('.sidebar-close').click()
+      if (width < 1200) await page.locator('.sidebar-close').click()
     }
 
     // dark mode keeps the tree usable
@@ -271,23 +265,24 @@ test.describe('P11 — sidebar folder tree', () => {
     await page.evaluate(() => document.documentElement.setAttribute('data-appearance', 'dark'))
     await openView(page, 'folders')
     await expect(row(page, 'Work')).toBeVisible()
-    expect(await indentOf(page, 'Work')).toBe('10px')
+    expect(await indentOf(page, 'Work')).toBe('8px')
     await row(page, 'Work').click()
     await expect(page.locator('.page-title')).toHaveText('Links')
     await expectNoHorizontalScroll(page)
   })
 })
 
-// P12 — navigation state coherence + the sidebar's compact folder edit mode.
-// The edit mode reuses the same App.vue handlers/validation as the Folders
-// view, so these tests assert the shared rules through the sidebar surface.
-test.describe('P12 — sidebar navigation state + folder edit mode', () => {
+// P15.5 — sidebar folder rows + per-row ⋮ menu. Every action reuses the same
+// App.vue handlers/validation as the Folders view, so these tests assert the
+// shared rules through the rebuilt sidebar surface.
+test.describe('P15.5 — sidebar folder rows + ⋮ menu', () => {
   test.beforeEach(async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await clearStorage(page)
   })
 
-  const gear = (page) => page.locator('[data-testid="sidebar-folder-edit-toggle"]')
+  const more = (page, name) => page.getByRole('button', { name: `Folder options for ${name}` })
+  const menu = (page) => page.getByRole('menu', { name: 'Folder options' })
   const linksItem = (page) => page.locator('.sidebar-menu-link', { hasText: 'Links' })
 
   test('A/B: folder selection owns the active state; Links returns to the complete collection', async ({ page }) => {
@@ -301,7 +296,7 @@ test.describe('P12 — sidebar navigation state + folder edit mode', () => {
     await expect(linksItem(page)).toHaveClass(/active/)
 
     // Folder selected: the folder row is active, Links is not.
-    await toggle(page, 'Work').click()
+    await ensureExpanded(page, 'Work')
     await row(page, 'Engineering').click()
     await expect(row(page, 'Engineering')).toHaveAttribute('aria-current', 'true')
     await expect(linksItem(page)).not.toHaveClass(/active/)
@@ -329,7 +324,7 @@ test.describe('P12 — sidebar navigation state + folder edit mode', () => {
     await page.setViewportSize({ width: 390, height: 900 })
     await page.reload()
     await openDrawer(page)
-    await toggle(page, 'Work').click()
+    await ensureExpanded(page, 'Work')
     await row(page, 'Engineering').click()
     await expect(page.locator('.sidebar-wrapper')).not.toHaveClass(/\bshow\b/)
     await expect(visibleLinkRows(page)).toHaveCount(1)
@@ -345,51 +340,71 @@ test.describe('P12 — sidebar navigation state + folder edit mode', () => {
     await expect(row(page, 'Engineering')).not.toHaveAttribute('aria-current', 'true')
   })
 
-  test('D: the gear toggles a compact edit mode with the real actions', async ({ page }) => {
+  test('D: the ⋮ menu opens, exposes the real actions and closes like a popover', async ({ page }) => {
     await openView(page, 'folders')
     await createRoot(page, 'Work')
     await createChild(page, 'Work', 'Engineering')
+    await openView(page, 'links')
 
-    await expect(gear(page)).toBeVisible()
-    await expect(gear(page)).toHaveAttribute('aria-label', 'Edit folders')
-    await expect(gear(page)).toHaveAttribute('aria-pressed', 'false')
-    await expect(page.locator('[data-testid="sidebar-folder-edit-row"]')).toHaveCount(0)
+    await expect(more(page, 'Work')).toHaveAttribute('aria-expanded', 'false')
+    await more(page, 'Work').click()
+    await expect(menu(page)).toBeVisible()
+    await expect(more(page, 'Work')).toHaveAttribute('aria-expanded', 'true')
+    for (const label of ['New subfolder in Work', 'Rename sidebar folder Work', 'Move sidebar folder Work', 'Delete sidebar folder Work']) {
+      await expect(menu(page).getByRole('menuitem', { name: label })).toBeVisible()
+    }
 
-    await gear(page).click()
-    await expect(gear(page)).toHaveAttribute('aria-label', 'Exit folder editing')
-    await expect(gear(page)).toHaveAttribute('aria-pressed', 'true')
-    // Only the visible rows expose their edit affordance (Engineering is collapsed).
-    await expect(page.locator('[data-testid="sidebar-folder-edit-row"]')).toHaveCount(1)
-    await expect(page.getByRole('button', { name: 'Edit sidebar folder Work' })).toBeVisible()
+    // Outside click closes the menu.
+    await page.locator('.navbar-custom').click({ position: { x: 4, y: 4 } })
+    await expect(menu(page)).toHaveCount(0)
+    await expect(more(page, 'Work')).toHaveAttribute('aria-expanded', 'false')
 
-    await gear(page).click()
-    await expect(gear(page)).toHaveAttribute('aria-pressed', 'false')
-    await expect(page.locator('[data-testid="sidebar-folder-edit-row"]')).toHaveCount(0)
+    // Escape closes the menu.
+    await more(page, 'Work').click()
+    await expect(menu(page)).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(menu(page)).toHaveCount(0)
+
+    // Open menu never causes horizontal overflow.
+    await more(page, 'Work').click()
+    await expect(menu(page)).toBeVisible()
+    await expectNoHorizontalScroll(page)
+    await page.keyboard.press('Escape')
   })
 
-  test('D: rename works and keeps the existing validation', async ({ page }) => {
+  test('D: rename is inline — Enter commits, Escape cancels, duplicates auto-suffix', async ({ page }) => {
     await openView(page, 'folders')
     await createRoot(page, 'Work')
     await createRoot(page, 'Personal')
+    await openView(page, 'links')
 
-    await gear(page).click()
-    await page.getByRole('button', { name: 'Edit sidebar folder Work' }).click()
-    await expect(page.locator('[data-testid="sidebar-folder-actions"]')).toBeVisible()
-    await page.getByRole('button', { name: 'Rename sidebar folder Work' }).click()
-
+    // menu -> Rename: one input in the row, focused for keyboard users
+    await more(page, 'Work').click()
+    await menu(page).getByRole('menuitem', { name: 'Rename sidebar folder Work' }).click()
     const input = page.getByLabel('Rename sidebar folder Work')
-    await expect(input).toBeFocused() // the field owns focus for keyboard users
-    await input.fill('Personal')
-    await page.getByRole('button', { name: 'Save sidebar folder name' }).click()
-    // existing duplicate-name rule, surfaced inline (same result callback path)
-    await expect(page.locator('.sidebar-folder-error')).toHaveText('Folder already exists')
-    await expect(row(page, 'Work')).toBeVisible()
+    await expect(input).toBeFocused()
 
-    await input.fill('Office')
-    await page.getByRole('button', { name: 'Save sidebar folder name' }).click()
-    await expect(row(page, 'Office')).toBeVisible()
-    await expect(row(page, 'Work')).toHaveCount(0)
+    // Escape cancels and keeps the old name
+    await input.fill('Discarded')
+    await page.keyboard.press('Escape')
+    await expect(row(page, 'Work')).toBeVisible()
+    await expect(row(page, 'Discarded')).toHaveCount(0)
+
+    // duplicate names auto-suffix like the mockup (no blocking error)
+    await more(page, 'Work').click()
+    await menu(page).getByRole('menuitem', { name: 'Rename sidebar folder Work' }).click()
+    await page.getByLabel('Rename sidebar folder Work').fill('Personal')
+    await page.keyboard.press('Enter')
+    await expect(row(page, 'Personal')).toHaveCount(2)
     await expect(page.getByText('Folder renamed')).toBeVisible()
+    await expect(page.locator('.sidebar-folder-error')).toHaveCount(0)
+
+    // double-click also starts a rename; Enter commits a unique name
+    await row(page, 'Personal 2').dblclick()
+    await page.getByLabel('Rename sidebar folder Personal 2').fill('Office')
+    await page.keyboard.press('Enter')
+    await expect(row(page, 'Office')).toBeVisible()
+    await expect(row(page, 'Personal 2')).toHaveCount(0)
   })
 
   test('D/E: add subfolder respects depth 4 and keeps indentation/expansion', async ({ page }) => {
@@ -398,33 +413,36 @@ test.describe('P12 — sidebar navigation state + folder edit mode', () => {
     await createChild(page, 'L1', 'L2')
     await createChild(page, 'L2', 'L3')
     await createChild(page, 'L3', 'L4')
+    await openView(page, 'links')
 
-    await gear(page).click()
-    await page.getByRole('button', { name: 'Edit sidebar folder L1' }).click()
-    await page.getByRole('button', { name: 'Add subfolder in sidebar L1' }).click()
-    const input = page.getByLabel('New sidebar subfolder name in L1')
+    await more(page, 'L1').click()
+    await menu(page).getByRole('menuitem', { name: 'New subfolder in L1' }).click()
+    // Mockup: the subfolder is created immediately with a generated name, then
+    // that row goes into inline rename (no separate create form).
+    const input = page.getByLabel('Rename sidebar folder New Folder')
     await expect(input).toBeFocused()
     await input.fill('Sub')
-    await page.getByRole('button', { name: 'Create sidebar subfolder' }).click()
+    await page.keyboard.press('Enter')
     await expect(row(page, 'Sub')).toBeVisible() // parent auto-expanded
-    expect(await indentOf(page, 'Sub')).toBe('24px')
+    expect(await indentOf(page, 'Sub')).toBe('22px')
 
-    // Depth cap: L4 (depth 4) has no add-subfolder control, the others remain.
+    // Depth cap: L4 (depth 4) never offers New subfolder; the others remain.
     for (const name of ['L1', 'L2', 'L3']) {
       if ((await toggle(page, name).getAttribute('aria-expanded')) !== 'true') await toggle(page, name).click()
     }
-    await page.getByRole('button', { name: 'Edit sidebar folder L4' }).click()
-    await expect(page.locator('[data-testid="sidebar-folder-actions"]')).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Add subfolder in sidebar L4' })).toHaveCount(0)
-    await expect(page.getByRole('button', { name: 'Rename sidebar folder L4' })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Move sidebar folder L4' })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Delete sidebar folder L4' })).toBeVisible()
+    await more(page, 'L4').click()
+    await expect(menu(page)).toBeVisible()
+    await expect(menu(page).getByRole('menuitem', { name: 'New subfolder in L4' })).toHaveCount(0)
+    await expect(menu(page).getByRole('menuitem', { name: 'Rename sidebar folder L4' })).toBeVisible()
+    await expect(menu(page).getByRole('menuitem', { name: 'Move sidebar folder L4' })).toBeVisible()
+    await expect(menu(page).getByRole('menuitem', { name: 'Delete sidebar folder L4' })).toBeVisible()
+    await page.keyboard.press('Escape')
 
-    // Edit mode does not change the tree's indentation or expansion behaviour.
-    expect(await indentOf(page, 'L1')).toBe('10px')
-    expect(await indentOf(page, 'L2')).toBe('24px')
-    expect(await indentOf(page, 'L3')).toBe('38px')
-    expect(await indentOf(page, 'L4')).toBe('52px')
+    // The rebuilt rows keep the mockup indentation and expansion behaviour.
+    expect(await indentOf(page, 'L1')).toBe('8px')
+    expect(await indentOf(page, 'L2')).toBe('22px')
+    expect(await indentOf(page, 'L3')).toBe('36px')
+    expect(await indentOf(page, 'L4')).toBe('50px')
     await toggle(page, 'L1').click()
     await expect(row(page, 'L2')).toHaveCount(0)
     await toggle(page, 'L1').click()
@@ -436,71 +454,88 @@ test.describe('P12 — sidebar navigation state + folder edit mode', () => {
     await createRoot(page, 'Work')
     await createChild(page, 'Work', 'Engineering')
     await createRoot(page, 'Personal')
+    await openView(page, 'links')
 
-    await gear(page).click()
-    await page.getByRole('button', { name: 'Edit sidebar folder Work' }).click()
-    await page.getByRole('button', { name: 'Move sidebar folder Work' }).click()
+    await more(page, 'Work').click()
+    await menu(page).getByRole('menuitem', { name: 'Move sidebar folder Work' }).click()
     const combo = page.getByRole('combobox', { name: 'Move sidebar folder Work to' })
     await expect(combo).toBeVisible()
     await combo.click()
-    const menu = page.locator('.asel-menu')
+    const selectMenu = page.locator('.asel-menu')
     // self and own descendants are never offered (canonical folderTree validation)
-    await expect(menu.getByRole('option', { name: /Work/ })).toHaveCount(0)
-    await expect(menu.getByRole('option', { name: /Engineering/ })).toHaveCount(0)
-    await menu.getByRole('option', { name: /Personal/ }).click()
+    await expect(selectMenu.getByRole('option', { name: /Work/ })).toHaveCount(0)
+    await expect(selectMenu.getByRole('option', { name: /Engineering/ })).toHaveCount(0)
+    await selectMenu.getByRole('option', { name: /Personal/ }).click()
     await expect(page.getByText('Folder moved')).toBeVisible()
 
     // Personal was expanded by the move; Work nests under it at depth 2.
     await expect(row(page, 'Work')).toBeVisible()
-    expect(await indentOf(page, 'Work')).toBe('24px')
-    await toggle(page, 'Work').click()
+    expect(await indentOf(page, 'Work')).toBe('22px')
+    await ensureExpanded(page, 'Work')
     await expect(row(page, 'Engineering')).toBeVisible()
-    expect(await indentOf(page, 'Engineering')).toBe('38px')
+    expect(await indentOf(page, 'Engineering')).toBe('36px')
   })
 
-  test('D: delete keeps the subtree confirmation and semantics', async ({ page }) => {
+  test('D: delete confirms inside the ⋮ menu and keeps the subtree semantics', async ({ page }) => {
     await openView(page, 'folders')
     await createRoot(page, 'Work')
     await createChild(page, 'Work', 'Engineering')
+    await openView(page, 'links')
 
-    await gear(page).click()
-    await page.getByRole('button', { name: 'Edit sidebar folder Work' }).click()
-    await page.getByRole('button', { name: 'Delete sidebar folder Work' }).click()
-    const dialog = page.getByRole('dialog')
-    await expect(dialog).toContainText('Delete "Work" and its 1 subfolder?')
-    await dialog.getByRole('button', { name: 'Delete', exact: true }).click()
+    await more(page, 'Work').click()
+    await menu(page).getByRole('menuitem', { name: 'Delete sidebar folder Work' }).click()
+    // Mockup: the confirmation replaces the menu items in place (no dialog).
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+    const confirm = menu(page)
+    await expect(confirm).toContainText('Delete this folder and its subfolders?')
+    await expect(confirm.getByRole('button', { name: 'Confirm delete sidebar folder Work' })).toBeVisible()
+    // Cancel returns to the menu items, nothing is deleted.
+    await confirm.getByRole('button', { name: 'Cancel delete sidebar folder Work' }).click()
+    await expect(confirm.getByRole('menuitem', { name: 'Rename sidebar folder Work' })).toBeVisible()
+    await expect(row(page, 'Work')).toBeVisible()
+    await page.keyboard.press('Escape')
+
+    await more(page, 'Work').click()
+    await menu(page).getByRole('menuitem', { name: 'Delete sidebar folder Work' }).click()
+    await menu(page).getByRole('button', { name: 'Confirm delete sidebar folder Work' }).click()
     await expect(row(page, 'Work')).toHaveCount(0)
     await expect(row(page, 'Engineering')).toHaveCount(0)
     await expect(page.getByText('2 folders deleted')).toBeVisible()
   })
 
-  test('F: edit mode works at desktop, the 1024 boundary and in the drawer', async ({ page }) => {
+  test('F: the ⋮ menu works at desktop, the 1024 boundary and in the drawer', async ({ page }) => {
     await openView(page, 'folders')
     await createRoot(page, 'Work')
     await createChild(page, 'Work', 'Engineering')
 
-    for (const width of [375, 768, 820, 1024, 1280, 1440]) {
+    for (const width of [375, 768, 820, 1024, 1100, 1199, 1280, 1440]) {
       await page.setViewportSize({ width, height: 900 })
       await page.reload()
-      if (width < 1024) await openDrawer(page)
+      if (width < 1200) await openDrawer(page)
 
-      await expect(gear(page), `gear @${width}`).toBeVisible()
-      await gear(page).click()
-      await expect(gear(page)).toHaveAttribute('aria-pressed', 'true')
-      await expect(page.getByRole('button', { name: 'Edit sidebar folder Work' })).toBeVisible()
+      await expect(more(page, 'Work'), `⋮ @${width}`).toBeVisible()
+      await more(page, 'Work').click()
+      await expect(menu(page), `menu @${width}`).toBeVisible()
+      await expect(more(page, 'Work')).toHaveAttribute('aria-expanded', 'true')
 
-      // The edit controls never overflow the sidebar or the document.
+      // The menu and the tree never overflow the sidebar or the document.
       const fits = await page.evaluate(() => {
         const w = document.querySelector('.sidebar-wrapper')
         const t = document.querySelector('[data-testid="sidebar-folder-tree"]')
-        return t.getBoundingClientRect().right <= w.getBoundingClientRect().right + 1
+        const m = document.querySelector('.sidebar-folder-menu')
+        const mr = m.getBoundingClientRect()
+        return {
+          tree: t.getBoundingClientRect().right <= w.getBoundingClientRect().right + 1,
+          menu: mr.left >= -1 && mr.right <= window.innerWidth + 1,
+        }
       })
-      expect(fits, `tree fits @${width}`).toBe(true)
+      expect(fits.tree, `tree fits @${width}`).toBe(true)
+      expect(fits.menu, `menu fits @${width}`).toBe(true)
       await expectNoHorizontalScroll(page)
 
-      await gear(page).click()
-      await expect(gear(page)).toHaveAttribute('aria-pressed', 'false')
-      if (width < 1024) await page.locator('.sidebar-close').click()
+      await page.keyboard.press('Escape')
+      await expect(menu(page)).toHaveCount(0)
+      if (width < 1200) await page.locator('.sidebar-close').click()
     }
   })
 
@@ -510,29 +545,26 @@ test.describe('P12 — sidebar navigation state + folder edit mode', () => {
     await createChild(page, 'Work', 'Engineering')
     await openView(page, 'links')
 
-    // caret state stays correct
-    await expect(toggle(page, 'Work')).toHaveAttribute('aria-expanded', 'false')
-    await toggle(page, 'Work').click()
+    // caret state stays correct (creation auto-expanded Work)
+    await ensureExpanded(page, 'Work')
     await expect(toggle(page, 'Work')).toHaveAttribute('aria-expanded', 'true')
 
     // folder active state is exposed as aria-current
     await row(page, 'Engineering').click()
     await expect(row(page, 'Engineering')).toHaveAttribute('aria-current', 'true')
 
-    // gear: accessible name + mode state, operable from the keyboard
-    await expect(gear(page)).toHaveAttribute('aria-label', 'Edit folders')
-    await gear(page).focus()
+    // ⋮ menu: accessible name + expanded state, operable from the keyboard
+    await expect(more(page, 'Work')).toHaveAttribute('aria-label', 'Folder options for Work')
+    await more(page, 'Work').focus()
     await page.keyboard.press('Enter')
-    await expect(gear(page)).toHaveAttribute('aria-pressed', 'true')
-    await expect(gear(page)).toHaveAttribute('aria-label', 'Exit folder editing')
+    await expect(menu(page)).toBeVisible()
+    await expect(more(page, 'Work')).toHaveAttribute('aria-expanded', 'true')
+    await page.keyboard.press('Escape')
+    await expect(menu(page)).toHaveCount(0)
 
-    // row editor opens from the keyboard; the field takes focus; Escape cancels
-    const editRow = page.getByRole('button', { name: 'Edit sidebar folder Work' })
-    await editRow.focus()
-    await page.keyboard.press('Enter')
-    await expect(editRow).toHaveAttribute('aria-expanded', 'true')
-    await page.getByRole('button', { name: 'Rename sidebar folder Work' }).focus()
-    await page.keyboard.press('Enter')
+    // rename through the menu: the field takes focus; Escape cancels
+    await more(page, 'Work').click()
+    await menu(page).getByRole('menuitem', { name: 'Rename sidebar folder Work' }).click()
     await expect(page.getByLabel('Rename sidebar folder Work')).toBeFocused()
     await page.keyboard.press('Escape')
     await expect(row(page, 'Work')).toBeVisible()
@@ -540,11 +572,8 @@ test.describe('P12 — sidebar navigation state + folder edit mode', () => {
     // no interactive element nested inside another one in the sidebar
     const nested = await page.evaluate(() => {
       const root = document.querySelector('.sidebar-wrapper')
-      return root.querySelectorAll('button button, a button, button a, a a').length
+      return root.querySelectorAll('button button, a button, button a, a a, button input, a input').length
     })
     expect(nested).toBe(0)
-
-    await gear(page).click()
-    await expect(gear(page)).toHaveAttribute('aria-pressed', 'false')
   })
 })

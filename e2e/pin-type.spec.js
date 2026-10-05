@@ -106,7 +106,7 @@ test.describe('Pin and link types', () => {
     await ensureAddLinkOpen(page, { more: true })
     await page.locator('#save-url').fill('https://example.com/docs/page')
     await page.locator('#save-title').fill('Explicit Docs')
-    await page.locator('#save-type').selectOption('docs')
+    await page.locator('#add-form .type-pill', { hasText: 'Docs' }).click()
     await page.getByRole('button', { name: 'Save link', exact: true }).click()
     await expect(page.locator('#add-form')).toHaveCount(0)
     await expect(page.getByText('Link saved')).toBeVisible()
@@ -122,30 +122,29 @@ test.describe('Pin and link types', () => {
     await ensureCardView(page) // P8: the library boots in Compact
 
     const explicit = await openEditFormFor(page, 'Explicit Docs')
-    await expect(explicit.form.getByRole('combobox', { name: 'Edit type' })).toContainText('Docs')
+    await expect(explicit.form.locator('.type-pill[aria-checked="true"]')).toHaveText('Docs')
     await explicit.form.getByRole('button', { name: 'Cancel' }).click()
     await expect(page.locator('.edit-form')).toHaveCount(0)
 
     const detected = await openEditFormFor(page, 'Detected Video')
-    await expect(detected.form.getByRole('combobox', { name: 'Edit type' })).toContainText('Video')
+    await expect(detected.form.locator('.type-pill[aria-checked="true"]')).toHaveText('Video')
     await detected.form.getByRole('button', { name: 'Cancel' }).click()
     await expect(page.locator('.edit-form')).toHaveCount(0)
 
     // Edit type + pin through the existing edit form
     const edit = await openEditFormFor(page, 'Explicit Docs')
-    await edit.form.getByRole('combobox', { name: 'Edit type' }).click()
-    await page.getByRole('option', { name: 'Repo', exact: true }).click()
+    await edit.form.locator('.type-pill', { hasText: 'Repo' }).click()
     // The anchored popover repositions while it settles; toggle via keyboard so
     // the assertion does not depend on animation stability.
-    await edit.form.getByRole('checkbox').focus()
+    await edit.form.getByLabel('Pinned').focus()
     await page.keyboard.press('Space')
-    await expect(edit.form.getByRole('checkbox')).toBeChecked()
+    await expect(edit.form.getByLabel('Pinned')).toBeChecked()
     await edit.form.getByRole('button', { name: 'Save' }).click()
     await expect(page.locator('.edit-form')).toHaveCount(0)
 
     const again = await openEditFormFor(page, 'Explicit Docs')
-    await expect(again.form.getByRole('combobox', { name: 'Edit type' })).toContainText('Repo')
-    await expect(again.form.getByRole('checkbox')).toBeChecked()
+    await expect(again.form.locator('.type-pill[aria-checked="true"]')).toHaveText('Repo')
+    await expect(again.form.getByLabel('Pinned')).toBeChecked()
     await again.form.getByRole('button', { name: 'Cancel' }).click()
     await expect(pinIn(page, card(page, 'Explicit Docs'))).toHaveAttribute('aria-pressed', 'true')
   })
@@ -156,41 +155,41 @@ test.describe('Pin and link types', () => {
 
     // Type filter: video links are every 4th (indices 1,5,9) -> 3 of 12
     await page.locator('#filter-type').selectOption('video')
-    await expect(page.locator('.library-results-count')).toHaveText(/^Showing 1–3 of 3 links$/)
+    await expect(page.locator('.library-results-count')).toHaveText(/^3 of 12 links$/)
     await expect(visibleLinkRows(page)).toHaveCount(3)
-    await expect(page.locator('.filter-chip', { hasText: 'Type: Video' })).toBeVisible()
+    await expect(page.locator('#filter-type')).toHaveValue('video') // the type chip carries the value
 
     // Compose with search
     await page.getByLabel('Search links').fill('Type Link 0005')
-    await expect(page.locator('.library-results-count')).toHaveText(/^Showing 1 of 1 links$/)
+    await expect(page.locator('.library-results-count')).toHaveText(/^1 of 12 links$/)
 
     // Clear search, add pinned filter (pinned = every 5th: 0,5,10)
     await page.getByLabel('Search links').fill('')
-    await page.locator('.pinned-toggle').click()
-    await expect(page.locator('.pinned-toggle')).toHaveAttribute('aria-pressed', 'true')
-    await expect(page.locator('.filter-chip', { hasText: 'Pinned' })).toBeVisible()
-    await expect(page.locator('.library-results-count')).toHaveText(/^Showing 1 of 1 links$/) // video ∩ pinned = index 5 only
+    const pinnedFilter = page.getByRole('button', { name: 'Show pinned links only' })
+    await pinnedFilter.click()
+    await expect(pinnedFilter).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.locator('.library-results-count')).toHaveText(/^1 of 12 links$/) // video ∩ pinned = index 5 only
 
-    // Remove the pinned chip; the type filter remains
-    await page.locator('.filter-chip', { hasText: 'Pinned' }).getByRole('button', { name: 'Clear pinned filter' }).click()
-    await expect(page.locator('.library-results-count')).toHaveText(/^Showing 1–3 of 3 links$/)
+    // Turn the pinned filter off; the type filter remains
+    await pinnedFilter.click()
+    await expect(page.locator('.library-results-count')).toHaveText(/^3 of 12 links$/)
 
     // Type filter alone on page one keeps the DOM bounded
     await expect(visibleLinkRows(page)).toHaveCount(3)
-    await page.locator('.filter-chip', { hasText: 'Type: Video' }).getByRole('button', { name: 'Clear type filter' }).click()
-    await expect(page.locator('.library-results-count')).toHaveText(/^Showing 1–10 of 12 links$/)
+    await page.locator('#filter-type').selectOption('') // clear via the chip's own menu value
+    await expect(page.locator('.library-results-count')).toHaveText(/^Showing 1\u201310 of 12 links$/)
   })
 
   test('Pinned filter shows only pinned links; type filter stays usable', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await seedTyped(page, 10)
 
-    await page.locator('.pinned-toggle').click()
+    await page.getByRole('button', { name: 'Show pinned links only' }).click()
     await expect(visibleLinkRows(page)).toHaveCount(2) // indices 0 and 5
     for (const title of ['Type Link 0000', 'Type Link 0005']) {
       await expect(card(page, title)).toHaveCount(1)
     }
-    await expect(page.locator('.library-results-count')).toHaveText(/^Showing 1–2 of 2 links$/)
+    await expect(page.locator('.library-results-count')).toHaveText(/^2 of 10 links$/)
   })
 
   test('bulk pin/unpin applies to the selection and persists', async ({ page }) => {
@@ -256,10 +255,11 @@ test.describe('Pin and link types', () => {
     await pin.click()
     await expect(pin).toHaveAttribute('aria-pressed', 'true')
 
-    // Filters live in the mobile disclosure; pinned filter works there too.
-    await page.locator('.sort-filter-toggle').click()
-    await expect(page.locator('.pinned-toggle')).toBeVisible()
-    await page.locator('.pinned-toggle').click()
+    // P15.10: the filter bar is always present — pinned filtering works on
+    // mobile without any disclosure step.
+    const pinnedFilter = page.getByRole('button', { name: 'Show pinned links only' })
+    await expect(pinnedFilter).toBeVisible()
+    await pinnedFilter.click()
     await expect(visibleLinkRows(page)).toHaveCount(1)
 
     const overflow = await page.evaluate(() =>
