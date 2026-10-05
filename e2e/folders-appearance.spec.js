@@ -1,11 +1,12 @@
 import { test, expect } from '@playwright/test'
-import { clearStorage, openView, ensureAddLinkOpen, saveLink, visibleLinkRows, linkRowByTitle, installBackupCapture, clickExportAndCaptureBackup } from './helpers.js'
+import { clearStorage, openView, createFolder, selectColorScheme, saveLink, visibleLinkRows, linkRowByTitle, installBackupCapture, clickExportAndCaptureBackup } from './helpers.js'
 
-async function createFolder(page, name) {
-  await page.getByLabel('New folder name').fill(name)
-  await page.getByRole('button', { name: 'Create folder', exact: true }).click()
-  await expect(page.locator('.folder-item', { hasText: name })).toBeVisible()
-}
+const folderRow = (page, name) => page.locator('[data-testid="sidebar-folder-row"]').filter({ hasText: name })
+const more = (page, name) => page.getByRole('button', { name: `Folder options for ${name}` })
+const menu = (page) => page.getByRole('menu', { name: 'Folder options' })
+const count = (page, name) => page.locator('.sidebar-folder-line')
+  .filter({ has: page.locator('[data-testid="sidebar-folder-row"]', { hasText: name }) })
+  .locator('.sidebar-folder-count')
 
 test.describe('Folders, Appearance, Color Schemes, Backup v2', () => {
   test.beforeEach(async ({ page }) => {
@@ -20,35 +21,30 @@ test.describe('Folders, Appearance, Color Schemes, Backup v2', () => {
       if (msg.type() === 'warning' && msg.text().includes('Unhandled error')) unhandledWarnings.push(msg.text())
     })
 
-    await openView(page, 'folders')
-    // create folder
+    // create folders through the sidebar tree (the only folder surface)
     await createFolder(page, 'Work')
-    // create second
     await createFolder(page, 'Personal')
-    // duplicate should show toast + inline error, and preserve the typed name
-    await page.getByLabel('New folder name').fill('work')
-    await page.getByRole('button', { name: 'Create folder', exact: true }).click()
-    await expect(page.locator('.sl-toast')).toContainText('Folder already exists')
-    await expect(page.locator('.folder-sidebar .error')).toHaveText('Folder already exists')
-    await expect(page.getByLabel('New folder name')).toHaveValue('work')
-    // rename
-    await page.getByRole('button', { name: 'Rename folder Work' }).click()
-    await page.getByLabel('Rename folder Work').fill('Office')
-    await page.getByRole('button', { name: 'Save folder name' }).click()
-    await expect(page.locator('.folder-item', { hasText: 'Office' })).toBeVisible()
-    await expect(page.getByText('Work')).toHaveCount(0)
-    // duplicate rename shows toast + inline error, stays in edit mode, preserves name
-    await page.getByRole('button', { name: 'Rename folder Office' }).click()
-    await page.getByLabel('Rename folder Office').fill('personal')
-    await page.getByRole('button', { name: 'Save folder name' }).click()
-    await expect(page.locator('.sl-toast')).toContainText('Folder already exists')
-    await expect(page.locator('.folder-sidebar .error')).toHaveText('Folder already exists')
-    await expect(page.getByLabel('Rename folder Office')).toBeVisible()
-    await expect(page.getByLabel('Rename folder Office')).toHaveValue('personal')
+    // rename through the per-row ⋮ menu
+    await more(page, 'Work').click()
+    await menu(page).getByRole('menuitem', { name: 'Rename sidebar folder Work' }).click()
+    await page.locator('.sidebar-folder-rename').fill('Office')
+    await page.keyboard.press('Enter')
+    await expect(folderRow(page, 'Office')).toBeVisible()
+    await expect(folderRow(page, 'Work')).toHaveCount(0)
+    // duplicate rename auto-suffixes (sibling-scoped rule): no error, no data loss
+    await more(page, 'Office').click()
+    await menu(page).getByRole('menuitem', { name: 'Rename sidebar folder Office' }).click()
+    await page.locator('.sidebar-folder-rename').fill('Personal')
+    await page.keyboard.press('Enter')
+    await expect(page.locator('.sl-toast')).toContainText('Folder renamed')
+    await expect(page.locator('.sidebar-folder-error')).toHaveCount(0)
+    await expect(folderRow(page, 'Personal 2')).toBeVisible()
     // a subsequent valid rename (back to Office) still works
-    await page.getByLabel('Rename folder Office').fill('Office')
-    await page.getByRole('button', { name: 'Save folder name' }).click()
-    await expect(page.locator('.folder-item', { hasText: 'Office' })).toBeVisible()
+    await more(page, 'Personal 2').click()
+    await menu(page).getByRole('menuitem', { name: 'Rename sidebar folder Personal 2' }).click()
+    await page.locator('.sidebar-folder-rename').fill('Office')
+    await page.keyboard.press('Enter')
+    await expect(folderRow(page, 'Office')).toBeVisible()
     // save link in folder
     await openView(page, 'links')
     await saveLink(page, { url: 'https://example.com/work1', title: 'Work link' })
@@ -62,38 +58,31 @@ test.describe('Folders, Appearance, Color Schemes, Backup v2', () => {
     await page.keyboard.press('Escape')
     await expect(workMenu).toBeHidden()
     // folder count should be 1 for Office
-    await openView(page, 'folders')
-    await expect(page.locator('.folder-item', { hasText: 'Office' })).toContainText('1')
-    // delete folder moves to Unfiled (in-app dialog; cancel returns focus to the trigger)
-    await page.getByRole('button', { name: 'Delete folder Office' }).click()
-    const folderDialog = page.getByRole('dialog')
-    await expect(folderDialog).toBeVisible()
-    await folderDialog.getByRole('button', { name: 'Cancel' }).click()
-    await expect(page.locator('.folder-item', { hasText: 'Office' })).toBeVisible()
-    // Note: focus-return-after-cancel behavior preserved (delete button still present)
-    await page.getByRole('button', { name: 'Delete folder Office' }).click()
-    await expect(folderDialog).toBeVisible()
-    await folderDialog.getByRole('button', { name: 'Delete', exact: true }).click()
-    await expect(page.getByText('Office')).toHaveCount(0)
-    await openView(page, 'folders')
-    await expect(page.locator('.folder-item', { hasText: 'Unfiled' })).toContainText('1')
-    // the link itself still exists in Saved links
+    await expect(count(page, 'Office')).toHaveText('1')
+    // delete folder through the ⋮ menu (P15 folder pass: the mockup keeps the
+    // links inside a deleted folder and re-assigns them to Unfiled)
+    await more(page, 'Office').click()
+    await menu(page).getByRole('menuitem', { name: 'Delete sidebar folder Office' }).click()
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+    await expect(menu(page)).toContainText('Delete this folder and its subfolders?')
+    await menu(page).getByRole('button', { name: 'Cancel delete sidebar folder Office' }).click()
+    await expect(folderRow(page, 'Office')).toBeVisible()
+    await page.keyboard.press('Escape')
+    await more(page, 'Office').click()
+    await menu(page).getByRole('menuitem', { name: 'Delete sidebar folder Office' }).click()
+    await menu(page).getByRole('button', { name: 'Confirm delete sidebar folder Office' }).click()
+    await expect(folderRow(page, 'Office')).toHaveCount(0)
+    // the deleted root folder's link survives in Unfiled
     await openView(page, 'links')
+    await expect(visibleLinkRows(page)).toHaveCount(1)
     await expect(visibleLinkRows(page).first()).toContainText('Work link')
-    await openView(page, 'folders')
-    await expect(page.locator('.folder-item', { hasText: 'Unfiled' }).locator('.folder-count')).toHaveText('1') // folder state lives in the Folders view, not in card text
-    // after CONFIRM deletion the trigger button is gone, focus falls to body (no fallback)
-    // Note: focus-return-after-confirm is a known gap in the new shell
     // a subsequent valid create still works
-    await page.getByLabel('New folder name').fill('AfterDuplicate')
-    await page.getByRole('button', { name: 'Create folder', exact: true }).click()
-    await expect(page.locator('.folder-item', { hasText: 'AfterDuplicate' })).toBeVisible()
+    await createFolder(page, 'AfterDuplicate')
     // duplicate create/rename must never trigger Vue's unhandled-event warning
     expect(unhandledWarnings).toEqual([])
   })
 
   test('Assign folder via edit and filtering + search', async ({ page }) => {
-    await openView(page, 'folders')
     await createFolder(page, 'Alpha')
     await openView(page, 'links')
     await saveLink(page, { url: 'https://example.com/a', title: 'Alpha Link' })
@@ -108,11 +97,9 @@ test.describe('Folders, Appearance, Color Schemes, Backup v2', () => {
     await expect(page.getByText('Folder updated')).toBeVisible()
     await page.keyboard.press('Escape')
     await expect(moreMenu).toBeHidden()
-    await openView(page, 'folders')
-    await expect(page.locator('.folder-item', { hasText: 'Alpha' }).locator('.folder-count')).toHaveText('1')
+    await expect(count(page, 'Alpha')).toHaveText('1')
     // filter by folder Alpha should show 1
-    await openView(page, 'folders')
-    await page.getByRole('button', { name: 'Show folder Alpha' }).click()
+    await folderRow(page, 'Alpha').click()
     await page.getByLabel('Search links').fill('Beta')
     await expect(visibleLinkRows(page)).toHaveCount(0)
     await page.getByLabel('Search links').fill('Alpha')
@@ -131,7 +118,6 @@ test.describe('Folders, Appearance, Color Schemes, Backup v2', () => {
   })
 
   test('Folder independent of important/favorite and persistence after reload', async ({ page }) => {
-    await openView(page, 'folders')
     await createFolder(page, 'PersistFolder')
     await openView(page, 'links')
     await saveLink(page, { url: 'https://example.com/persistFolder', title: 'Persist Folder Link' })
@@ -143,21 +129,19 @@ test.describe('Folders, Appearance, Color Schemes, Backup v2', () => {
     await expect(page.getByText('Folder updated')).toBeVisible()
     await page.keyboard.press('Escape')
     await expect(moreMenu).toBeHidden()
-    // current permanent controls
+    // P15.10: Favorite + Pin are the item states (Important left the surfaces)
     await row.getByRole('button', { name: 'Toggle Favorite' }).click()
-    await row.getByRole('button', { name: 'Toggle Important' }).click()
+    await row.getByRole('button', { name: 'Toggle Pin' }).click()
     await expect(row.getByRole('button', { name: 'Toggle Favorite' })).toHaveAttribute('aria-pressed', 'true')
-    await expect(row.getByRole('button', { name: 'Toggle Important' })).toHaveAttribute('aria-pressed', 'true')
+    await expect(row.getByRole('button', { name: 'Toggle Pin' })).toHaveAttribute('aria-pressed', 'true')
     await page.reload()
-    await openView(page, 'folders')
-    await expect(page.locator('.folder-item', { hasText: 'PersistFolder' })).toBeVisible()
+    await expect(folderRow(page, 'PersistFolder')).toBeVisible()
     await openView(page, 'links')
     const persisted = linkRowByTitle(page, 'Persist Folder Link')
     await expect(persisted).toBeVisible()
     await expect(persisted.getByRole('button', { name: 'Toggle Favorite' })).toHaveAttribute('aria-pressed', 'true')
-    await expect(persisted.getByRole('button', { name: 'Toggle Important' })).toHaveAttribute('aria-pressed', 'true')
-    await openView(page, 'folders')
-    await expect(page.locator('.folder-item', { hasText: 'PersistFolder' }).locator('.folder-count')).toHaveText('1')
+    await expect(persisted.getByRole('button', { name: 'Toggle Pin' })).toHaveAttribute('aria-pressed', 'true')
+    await expect(count(page, 'PersistFolder')).toHaveText('1')
   })
 
   test('Migrate existing links without folder to Unfiled', async ({ page }) => {
@@ -171,8 +155,12 @@ test.describe('Folders, Appearance, Color Schemes, Backup v2', () => {
     })
     await page.reload()
     await expect(visibleLinkRows(page).first()).toContainText('Old Link')
-    await openView(page, 'folders')
-    await expect(page.locator('.folder-item', { hasText: 'Unfiled' })).toContainText('1')
+    // the migrated link belongs to no folder → its item folder select is Unfiled
+    await linkRowByTitle(page, 'Old Link').getByRole('button', { name: 'More actions' }).click()
+    const oldMenu = page.locator('.more-menu')
+    await expect(oldMenu).toBeVisible()
+    await expect(oldMenu.locator('.more-field', { hasText: 'Folder' }).locator('select')).toHaveValue('')
+    await page.keyboard.press('Escape')
   })
 
   test('Appearance Light/Dark/System persistence and system follows', async ({ page }) => {
@@ -203,19 +191,21 @@ test.describe('Folders, Appearance, Color Schemes, Backup v2', () => {
     await openView(page, 'settings')
     await page.getByLabel('Dark theme').click()
     await openView(page, 'links')
-    await expect(page.getByRole('link', { name: 'Theme Persist', exact: true })).toBeVisible()
+    // P8: the default presentation is Compact, so the item is asserted through
+    // the view-agnostic row helper (same data, same filter pipeline).
+    await expect(visibleLinkRows(page).first()).toContainText('Theme Persist')
   })
 
   test('Color schemes all 4 and independence', async ({ page }) => {
     await openView(page, 'settings')
     // default is no named color scheme
     await expect(page.getByLabel('None color scheme')).toBeChecked()
-    for (const scheme of ['Forest color scheme', 'Lavender color scheme', 'Amber color scheme', 'Ocean color scheme']) {
-      await page.getByLabel(scheme).click()
-      await expect(page.getByLabel(scheme)).toBeChecked()
+    // The swatch radios are covered by their visible dot: click the label.
+    for (const [scheme, value] of [['Forest', 'forest'], ['Lavender', 'lavender'], ['Warm Amber', 'amber'], ['Ocean', 'ocean']]) {
+      await selectColorScheme(page, scheme)
+      await expect(page.getByLabel(`${scheme} color scheme`)).toBeChecked()
       const cs = await page.getAttribute('html', 'data-color-scheme')
-      const map = { 'Ocean color scheme': 'ocean', 'Forest color scheme': 'forest', 'Lavender color scheme': 'lavender', 'Amber color scheme': 'amber' }
-      expect(cs).toBe(map[scheme])
+      expect(cs).toBe(value)
       // each works with light/dark
       await page.getByLabel('Light theme').click()
       await expect(page.locator('html')).toHaveAttribute('data-appearance', 'light')
@@ -226,13 +216,13 @@ test.describe('Folders, Appearance, Color Schemes, Backup v2', () => {
       await expect(page.getByText('Appearance')).toBeVisible()
     }
     // persistence after reload for forest
-    await page.getByLabel('Forest color scheme').click()
+    await selectColorScheme(page, 'Forest')
     await page.reload()
     await openView(page, 'settings')
     await expect(page.getByLabel('Forest color scheme')).toBeChecked()
     // independence from appearance
     await page.getByLabel('Light theme').click()
-    await page.getByLabel('Lavender color scheme').click()
+    await selectColorScheme(page, 'Lavender')
     await expect(page.getByLabel('Light theme')).toBeChecked()
     await expect(page.getByLabel('Lavender color scheme')).toBeChecked()
   })
@@ -243,74 +233,59 @@ test.describe('Folders, Appearance, Color Schemes, Backup v2', () => {
     await page.getByLabel('Dark theme').click()
     await expect(page.locator('html')).toHaveAttribute('data-appearance', 'dark')
 
-    // --- Ocean dark: neutral surfaces + indigo accent ---
-    await page.getByLabel('Ocean color scheme').click()
+    // --- Ocean dark: the mockup's slate surfaces + scheme accent ---
+    await selectColorScheme(page, 'Ocean')
     await expect(page.locator('html')).toHaveAttribute('data-color-scheme', 'ocean')
-    // toRgb handles both "#rrggbb" tokens and resolved "rgb(r, g, b)"
-    const toRgb = (v) => {
-      const hex = v.trim().match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i)
-      if (hex) return hex.slice(1).map((h) => parseInt(h, 16))
-      const parts = v.match(/\d+(?:\.\d+)?/g)
-      if (!parts || parts.length < 3) throw new Error(`unparseable color: ${v}`)
-      return parts.slice(0, 3).map(Number)
-    }
-    const assertNeutral = (v, label) => {
-      const [r, g, b] = toRgb(v)
-      expect({ label, v, r, g, b, d1: Math.abs(g - r), d2: Math.abs(g - b) }).toBeDefined()
-      expect(Math.abs(g - r), `${label}=${v}`).toBeLessThanOrEqual(7)
-      expect(Math.abs(g - b), `${label}=${v}`).toBeLessThanOrEqual(7)
-    }
     const readVar = (name) =>
       page.evaluate((n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim(), name)
 
-    for (const v of ['--bg', '--card', '--muted-bg', '--border']) {
-      assertNeutral(await readVar(v), v)
-    }
+    // P7 re-baseline: the supplied mockup is the authoritative dark palette
+    // (exact token values — supersedes the earlier neutral-black heuristic).
+    expect(await readVar('--bg')).toBe('#0B0E14')
+    expect(await readVar('--card')).toBe('#12161F')
+    expect(await readVar('--muted-bg')).toBe('#1A1F2B')
+    expect(await readVar('--border')).toBe('#232A38')
 
-    // Accent is still the scheme colour — not neutral
+    // Accent is still the scheme colour — not a surface tint
     const oceanAccent = await readVar('--accent')
     expect(oceanAccent).toBe('#7C8CF2')
 
-    // Sidebar background is neutral (scheme no longer tints it).
+    // Sidebar background is the mockup's raised dark surface, untinted by the scheme.
     // .sidebar-wrapper has `transition: all 0.3s`, so poll until it settles.
     await expect
       .poll(() =>
         page.evaluate(() => getComputedStyle(document.querySelector('.sidebar-wrapper')).backgroundColor)
       )
-      .toBe('rgb(0, 0, 0)')
+      .toBe('rgb(18, 22, 31)')
     const sidebarBg = await page.evaluate(() =>
       getComputedStyle(document.querySelector('.sidebar-wrapper')).backgroundColor
     )
-    assertNeutral(sidebarBg, 'sidebar (ocean)')
+    expect(sidebarBg).toBe('rgb(18, 22, 31)')
 
-    // --- Forest dark: surfaces still neutral, accent is forest green ---
-    await page.getByLabel('Forest color scheme').click()
-    for (const v of ['--bg', '--card', '--muted-bg', '--border']) {
-      assertNeutral(await readVar(v))
-    }
+    // --- Forest dark: same surfaces, accent is forest green ---
+    await selectColorScheme(page, 'Forest')
+    expect(await readVar('--bg')).toBe('#0B0E14')
+    expect(await readVar('--card')).toBe('#12161F')
+    expect(await readVar('--muted-bg')).toBe('#1A1F2B')
+    expect(await readVar('--border')).toBe('#232A38')
     const forestAccent = await readVar('--accent')
     expect(forestAccent).toBe('#62A982')
     await expect
       .poll(() =>
         page.evaluate(() => getComputedStyle(document.querySelector('.sidebar-wrapper')).backgroundColor)
       )
-      .toBe('rgb(0, 0, 0)')
-    const forestSidebarBg = await page.evaluate(() =>
-      getComputedStyle(document.querySelector('.sidebar-wrapper')).backgroundColor
-    )
-    assertNeutral(forestSidebarBg, 'sidebar (forest)')
+      .toBe('rgb(18, 22, 31)')
 
-    // --- Light mode unchanged: soft near-white canvas, white card ---
+    // --- Light mode: the mockup's soft slate canvas, white card ---
     await page.getByLabel('Light theme').click()
     expect(await readVar('--card')).toBe('#FFFFFF')
-    expect(await readVar('--bg')).toBe('#F6F6F7') // not dark's black
+    expect(await readVar('--bg')).toBe('#F8FAFC')
   })
 
   test('Backup v2 export/import and v1 migrate, invalid rejected', async ({ page }) => {
-    await openView(page, 'folders')
     await createFolder(page, 'BackupFolder')
     await openView(page, 'settings')
-    await page.getByLabel('Forest color scheme').click()
+    await selectColorScheme(page, 'Forest')
     await page.getByLabel('Dark theme').click()
     await openView(page, 'links')
     await saveLink(page, { url: 'https://example.com/backupF', title: 'Backup Folder Link' })
@@ -339,8 +314,7 @@ test.describe('Folders, Appearance, Color Schemes, Backup v2', () => {
     await expect(page.getByText(/Import complete/)).toBeVisible()
     await openView(page, 'links')
     await expect(visibleLinkRows(page).first()).toContainText('Backup Folder Link')
-    await openView(page, 'folders')
-    await expect(page.locator('.folder-item', { hasText: 'BackupFolder' })).toBeVisible()
+    await expect(folderRow(page, 'BackupFolder')).toBeVisible()
     // local-first invariant: imported appearance/color-scheme are NOT applied
     await openView(page, 'settings')
     await expect(page.getByLabel('System theme')).toBeChecked()
@@ -351,12 +325,16 @@ test.describe('Folders, Appearance, Color Schemes, Backup v2', () => {
     await page.locator('.backup-card input[type="file"]').setInputFiles({ name: 'v1.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(v1)) })
     await expect(page.getByText(/Import complete/)).toBeVisible()
     await openView(page, 'links')
-    await expect(linkRowByTitle(page, 'V1 Link')).toBeVisible()
+    const v1Row = linkRowByTitle(page, 'V1 Link')
+    await expect(v1Row).toBeVisible()
+    // v1 has no folders → the imported link stays Unfiled
+    await v1Row.getByRole('button', { name: 'More actions' }).click()
+    const v1Menu = page.locator('.more-menu')
+    await expect(v1Menu.locator('.more-field', { hasText: 'Folder' }).locator('select')).toHaveValue('')
+    await page.keyboard.press('Escape')
     await openView(page, 'settings')
     await expect(page.getByLabel('System theme')).toBeChecked()
     await expect(page.getByLabel('None color scheme')).toBeChecked()
-    await openView(page, 'folders')
-    await expect(page.locator('.folder-item', { hasText: 'Unfiled' })).toBeVisible()
     // invalid backup rejected
     await openView(page, 'links')
     await saveLink(page, { url: 'https://example.com/keepInvalid', title: 'KeepInvalid' })

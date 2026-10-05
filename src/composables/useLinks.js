@@ -3,7 +3,7 @@ import { repository } from '../storage/repository.js'
 import { bootState } from '../storage/migration.js'
 import { onDataChanged } from '../storage/dataChanges.js'
 import { categorizeUrl, getDomain, normalizeUrl } from '../utils/categorize.js'
-import { normalizeLink, generateId } from '../domain/link.js'
+import { normalizeLink, generateId, LINK_TYPES, detectLinkType } from '../domain/link.js'
 import { fetchMetadata, guessTitleSync } from '../utils/metadata.js'
 import { detectPlatform } from '../utils/device.js'
 import { session } from '../auth/session.js'
@@ -58,6 +58,9 @@ function buildLinkSpec(payload, normalized) {
   const important = !!payload.important || payload.status === 'important'
   const mustHave = !!payload.mustHave || payload.status === 'must-have'
   const favorite = !!payload.favorite
+  const pinned = !!payload.pinned
+  // Explicit type always wins; otherwise conservative detection; else 'other'.
+  const type = LINK_TYPES.includes(payload.type) ? payload.type : detectLinkType(normalized)
   const folderId = typeof payload.folderId === 'string' && payload.folderId.trim() ? payload.folderId.trim() : null
 
   return {
@@ -73,6 +76,8 @@ function buildLinkSpec(payload, normalized) {
     important,
     mustHave,
     favorite,
+    pinned,
+    type,
     folderId,
     status: important && mustHave ? 'both' : important ? 'important' : mustHave ? 'must-have' : null,
     // v2 sync field — new objects start at revision 0 (server-authoritative
@@ -331,6 +336,12 @@ export function useLinks() {
     if ('favorite' in patch) {
       merged.favorite = !!patch.favorite
     }
+    if ('pinned' in patch) {
+      merged.pinned = !!patch.pinned
+    }
+    if ('type' in patch) {
+      merged.type = LINK_TYPES.includes(patch.type) ? patch.type : merged.type
+    }
     if ('folderId' in patch) {
       const fid = patch.folderId
       merged.folderId = typeof fid === 'string' && fid.trim() ? fid.trim() : null
@@ -402,6 +413,13 @@ export function useLinks() {
     const l = links.value.find(x => x.id === id)
     if (!l) return
     updateLink(id, { favorite: !l.favorite })
+  }
+
+  // P3: pin is its own persistent flag, independent of favorite.
+  function togglePin(id) {
+    const l = links.value.find(x => x.id === id)
+    if (!l) return
+    updateLink(id, { pinned: !l.pinned })
   }
 
   // legacy single-status toggle kept for compat but now delegates to independent flags
@@ -478,6 +496,8 @@ export function useLinks() {
               important: existingLink.important,
               mustHave: existingLink.mustHave,
               favorite: existingLink.favorite,
+              pinned: existingLink.pinned,
+              type: existingLink.type,
               revision: existingLink.revision,
               account_id: existingLink.account_id,
             }
@@ -541,6 +561,7 @@ export function useLinks() {
     toggleImportant,
     toggleMustHave,
     toggleFavorite,
+    togglePin,
     removeLink,
     setLinks,
     mergeLinks,

@@ -1,4 +1,5 @@
-import { normalizeLink as normalizeCanonicalLink } from '../domain/link.js'
+import { normalizeLink as normalizeCanonicalLink, LINK_TYPES } from '../domain/link.js'
+import { repairFolderTree } from './folderTree.js'
 import { getStorageKey } from './environment.js'
 import { DEFAULT_APPEARANCE, DEFAULT_COLOR_SCHEME, sanitizeAppearance, sanitizeColorScheme } from './storage.js'
 
@@ -12,7 +13,9 @@ function sanitizeFolder(raw) {
   const name = typeof raw.name === 'string' ? raw.name.trim().slice(0, 50) : ''
   if (!id || !name) return null
   const createdAt = typeof raw.createdAt === 'string' ? raw.createdAt : new Date().toISOString()
-  return { id, name, createdAt }
+  // P4: nested folders — missing parentId becomes null (old backups import flat).
+  const parentId = typeof raw.parentId === 'string' && raw.parentId.trim() ? raw.parentId.trim() : null
+  return { id, name, createdAt, parentId }
 }
 
 function sanitizeFolders(arr) {
@@ -46,6 +49,10 @@ export function createBackupPayload({ links, profile, folders, appearance, color
         important: !!l.important,
         mustHave: !!l.mustHave,
         favorite: !!l.favorite,
+        // P3 fields — exported explicitly so a round-trip preserves them.
+        // Old backups without them still import via normalizeLink defaults.
+        pinned: !!l.pinned,
+        type: LINK_TYPES.includes(l.type) ? l.type : 'other',
         folderId: typeof l.folderId === 'string' && l.folderId ? l.folderId : null,
         domain: l.domain,
         createdAt: l.createdAt,
@@ -119,7 +126,9 @@ export function normalizeBackupData(data) {
   // Assumes data already validated (app/version/links array)
   const profile = data.profile && typeof data.profile === 'object' && !Array.isArray(data.profile) ? { ...data.profile } : {}
   // folders: v1 has none -> default [], sanitize
-  const folders = sanitizeFolders(data.folders || [])
+  // P4: repair the whole set so imported nested relationships can never create
+  // a corrupt tree (dangling parents/cycles/too-deep -> root).
+  const folders = repairFolderTree(sanitizeFolders(data.folders || []))
   const validFolderIds = new Set(folders.map(f => f.id))
   // settings: v1 defaults to system/none, v2 uses data.settings
   let appearance = DEFAULT_APPEARANCE
@@ -292,4 +301,40 @@ export function mergeImportData(existingLinks, existingFolders, importedLinks, i
       folders: mergedFolders,
     },
   }
+}
+
+// P15.3: shared import preparation — raw file text -> validated, normalized
+// data plus the duplicate preview. The Backup view and the topbar both call
+// this, so the import pipeline exists exactly once.
+export function prepareImport(text, { links, folders } = {}) {
+  const { data, error } = parseBackupText(text)
+  if (error) return { error }
+  const validation = validateBackupPayload(data)
+  if (!validation.valid) return { error: validation.error }
+  let normalized
+  try {
+    normalized = normalizeBackupData(data)
+  } catch {
+    return { error: 'Invalid backup: malformed records' }
+  }
+  const preview = mergeImportData(links || [], folders || [], normalized.links, normalized.folders)
+  return { data: normalized, preview }
+}
+
+// P15.3: shared export — one payload builder + file download used by the
+// Backup view and the topbar. Returns the payload that was written.
+export function downloadBackupFile({ links, profile, folders, appearance, colorScheme }) {
+  const payload = createBackupPayload({ links, profile, folders, appearance, colorScheme })
+  const json = JSON.stringify(payload, null, 2)
+  const blob = new Blob([json], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `save-links-backup-${new Date().toISOString().slice(0, 10)}.json`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+  setLastBackupAt(new Date().toISOString())
+  return payload
 }

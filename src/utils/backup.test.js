@@ -75,6 +75,33 @@ describe('backup utils', () => {
       expect(payload.version).toBe(2)
     })
 
+    it('exports P3 pinned/type and sanitizes an unknown type', () => {
+      const payload = createBackupPayload({
+        links: [
+          { id: '1', normalizedUrl: 'https://example.com/a', url: 'https://example.com/a', title: 'A', pinned: true, type: 'video' },
+          { id: '2', normalizedUrl: 'https://example.com/b', url: 'https://example.com/b', title: 'B', type: 'podcast' },
+        ],
+        profile: {},
+      })
+      expect(payload.links[0].pinned).toBe(true)
+      expect(payload.links[0].type).toBe('video')
+      expect(payload.links[1].pinned).toBe(false)
+      expect(payload.links[1].type).toBe('other')
+    })
+
+    it('exports nested folder parentIds (P4)', () => {
+      const payload = createBackupPayload({
+        links: [],
+        folders: [
+          { id: 'f1', name: 'Work', parentId: null },
+          { id: 'f2', name: 'Engineering', parentId: 'f1' },
+        ],
+        profile: {},
+      })
+      expect(payload.folders[0].parentId).toBe(null)
+      expect(payload.folders[1].parentId).toBe('f1')
+    })
+
     it('exports from in-memory state (not raw localStorage)', () => {
       // put different data in localStorage (using environment-specific key)
       const ls2 = (typeof window !== 'undefined' && window.localStorage) ? window.localStorage : globalThis.localStorage
@@ -352,6 +379,62 @@ describe('backup utils', () => {
       const { links } = normalizeBackupData(data)
       expect(links[0].title.length).toBe(200)
       expect(links[0].description.length).toBe(400)
+    })
+
+    it('imports P3-less backups with pinned false / type other (old backup compatibility)', () => {
+      const data = {
+        app: 'Save_Link',
+        version: 2,
+        exportedAt: new Date().toISOString(),
+        profile: {},
+        links: [{ id: '1', url: 'https://example.com/a', title: 'A' }],
+      }
+      const { links } = normalizeBackupData(data)
+      expect(links[0].pinned).toBe(false)
+      expect(links[0].type).toBe('other')
+    })
+
+    it('round-trips pinned and type through export → import', () => {
+      const payload = createBackupPayload({
+        links: [{ id: '1', normalizedUrl: 'https://example.com/a', url: 'https://example.com/a', title: 'A', pinned: true, type: 'tutorial' }],
+        profile: {},
+      })
+      const { links } = normalizeBackupData(payload)
+      expect(links[0].pinned).toBe(true)
+      expect(links[0].type).toBe('tutorial')
+    })
+
+    it('imports old flat folder backups with parentId null (P4)', () => {
+      const data = {
+        app: 'Save_Link',
+        version: 2,
+        exportedAt: new Date().toISOString(),
+        profile: {},
+        folders: [{ id: 'f1', name: 'Work' }],
+        links: [],
+      }
+      const { folders } = normalizeBackupData(data)
+      expect(folders[0].parentId).toBe(null)
+    })
+
+    it('round-trips nested folders and repairs invalid relationships (P4)', () => {
+      const payload = createBackupPayload({
+        links: [],
+        folders: [
+          { id: 'f1', name: 'Work', parentId: null },
+          { id: 'f2', name: 'Engineering', parentId: 'f1' },
+          { id: 'f3', name: 'Ghost', parentId: 'missing' },
+          { id: 'f4', name: 'CycleA', parentId: 'f5' },
+          { id: 'f5', name: 'CycleB', parentId: 'f4' },
+        ],
+        profile: {},
+      })
+      const { folders } = normalizeBackupData(payload)
+      const byId = new Map(folders.map((f) => [f.id, f]))
+      expect(byId.get('f1').parentId).toBe(null)
+      expect(byId.get('f2').parentId).toBe('f1')
+      expect(byId.get('f3').parentId).toBe(null) // dangling -> root
+      expect([byId.get('f4').parentId, byId.get('f5').parentId].includes(null)).toBe(true) // cycle broken
     })
   })
 })

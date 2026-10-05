@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { normalizeLink, generateId } from './link.js'
+import { normalizeLink, generateId, detectLinkType } from './link.js'
 
 describe('normalizeLink', () => {
   it('returns null for non-object input', () => {
@@ -25,6 +25,9 @@ describe('normalizeLink', () => {
       important: true,
       mustHave: false,
       favorite: true,
+      // P3 fields
+      pinned: true,
+      type: 'docs',
       folderId: 'f1',
       status: 'important',
       createdAt: '2024-01-01T00:00:00.000Z',
@@ -176,5 +179,38 @@ describe('generateId', () => {
     expect(typeof generateId()).toBe('string')
     expect(generateId().length).toBeGreaterThan(4)
     expect(new Set([generateId(), generateId(), generateId()]).size).toBe(3)
+  })
+})
+
+describe('P3 pin + type normalization', () => {
+  it('defaults missing pinned to false and missing type to other', () => {
+    const l = normalizeLink({ id: '1', url: 'https://example.com/a' })
+    expect(l.pinned).toBe(false)
+    expect(l.type).toBe('other')
+  })
+
+  it('preserves valid pinned and type', () => {
+    const l = normalizeLink({ id: '1', url: 'https://example.com/a', pinned: true, type: 'video' })
+    expect(l.pinned).toBe(true)
+    expect(l.type).toBe('video')
+  })
+
+  it('coerces a non-boolean pinned and an unknown type safely', () => {
+    const l = normalizeLink({ id: '1', url: 'https://example.com/a', pinned: 'yes', type: 'podcast' })
+    expect(l.pinned).toBe(false)
+    expect(l.type).toBe('other')
+  })
+})
+
+describe('detectLinkType', () => {
+  it('detects only the conservative hosts/paths and falls back to other', () => {
+    expect(detectLinkType('https://www.youtube.com/watch?v=1')).toBe('video')
+    expect(detectLinkType('https://youtu.be/abc')).toBe('video')
+    expect(detectLinkType('https://github.com/a/b')).toBe('repo')
+    expect(detectLinkType('https://docs.example.com/x')).toBe('docs')
+    expect(detectLinkType('https://example.com/docs/page')).toBe('docs')
+    expect(detectLinkType('https://example.com/article')).toBe('other')
+    expect(detectLinkType('not a url')).toBe('other')
+    expect(detectLinkType('')).toBe('other')
   })
 })

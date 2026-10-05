@@ -1,9 +1,18 @@
 <script setup>
 import { ref, watch } from 'vue'
 import { CATEGORIES, categorizeUrl, normalizeUrl, getDomain } from '../utils/categorize.js'
+import { LINK_TYPES, LINK_TYPE_LABELS } from '../domain/link.js'
 import { fetchMetadata } from '../utils/metadata.js'
-import { useAnchoredPopover } from '../utils/anchoredPopover.js'
 import AppSelect from './AppSelect.vue'
+import AppDialog from './AppDialog.vue'
+
+// '' = Auto (detect): the submitted payload omits `type`, so buildLinkSpec
+// applies the conservative creation-time heuristic (or 'other'). Choosing an
+// explicit type always wins. The pills keep every LINK_TYPES value + Auto.
+const TYPE_OPTIONS = [
+  { value: '', label: 'Auto' },
+  ...LINK_TYPES.map((t) => ({ value: t, label: LINK_TYPE_LABELS[t] })),
+]
 
 const props = defineProps({
   folders: { type: Array, default: () => [] }
@@ -18,38 +27,18 @@ const description = ref('')
 const image = ref('')
 const category = ref('Other')
 const tagsInput = ref('')
-const important = ref(false)
-const mustHave = ref(false)
+const pinned = ref(false)
+const favorite = ref(false)
+const type = ref('')
 const folderId = ref('')
 const loadingMeta = ref(false)
 const error = ref('')
 
-// Anchored, content-sized popover (no page expansion). The form is teleported
-// to <body>; this helper flips it above/below the trigger based on viewport
-// space and closes it on an outside click.
-const toolbarTriggerEl = ref(null)
-const anchorEl = ref(null)
-const popoverEl = ref(null)
-useAnchoredPopover({
-  trigger: anchorEl,
-  popover: popoverEl,
-  isOpen: open,
-  onOutside: () => { open.value = false },
-  // Mobile presentation: viewport-centred below the shell breakpoint so the
-  // form keeps equal margins instead of hanging off the bottom bar.
-  mode: 'auto'
-})
-
-// Opens/toggles the popover anchored to the trigger that was used. Both the
-// toolbar "Add link" toggle and the header "+ Add link" button call this,
-// so there is one form/state and only the anchor element differs.
-function toggleFrom(el) {
-  const anchor = el || anchorEl.value || toolbarTriggerEl.value
-  if (open.value && anchorEl.value === anchor) {
-    open.value = false
-    return false
-  }
-  anchorEl.value = anchor
+// Mockup modal model (P15 Group 3): the same AppDialog shell used across the
+// app renders the form as a bottom sheet <768 and a centred panel >=768. The
+// dialog owns Escape/backdrop/focus; this component owns only the draft fields.
+function toggleFrom() {
+  if (open.value) { open.value = false; return false }
   open.value = true
   return true
 }
@@ -85,6 +74,7 @@ async function autoFill(raw) {
     if (signal.aborted || myId !== currentRequestId) return
     lastMeta = meta
     lastMetaUrl = normalized
+    // Never clobber text the user already typed: metadata only fills blanks.
     if (!title.value.trim() && meta.title) title.value = meta.title
     if (!description.value.trim() && meta.description) description.value = meta.description
     if (!image.value.trim() && meta.image) image.value = meta.image
@@ -93,6 +83,15 @@ async function autoFill(raw) {
   } finally {
     if (myId === currentRequestId) loadingMeta.value = false
   }
+}
+
+// Explicit Fetch control (mockup .fetch-btn): the same metadata path as the
+// automatic paste/blur fill. The pending debounce is cancelled so one user
+// gesture never starts two requests; autoFill itself aborts any in-flight one.
+function fetchNow() {
+  clearTimeout(debounceTimer)
+  if (!url.value.trim()) return
+  autoFill(url.value)
 }
 
 function onSubmit() {
@@ -113,14 +112,15 @@ function onSubmit() {
     image: image.value.trim(),
     category: category.value,
     tags,
-    important: important.value,
-    mustHave: mustHave.value,
+    pinned: pinned.value,
+    favorite: favorite.value,
+    type: type.value || undefined,
     folderId: folderId.value || null,
     _prefetchedMeta: usePrefetched ? lastMeta : null,
     _prefetchedUrl: usePrefetched ? lastMetaUrl : null
   })
   resetForm()
-  // compact form: collapse after a successful save so cards stay dominant
+  // The dialog closes after a successful save so the library stays dominant.
   open.value = false
 }
 
@@ -130,8 +130,9 @@ function resetForm() {
   description.value = ''
   image.value = ''
   tagsInput.value = ''
-  important.value = false
-  mustHave.value = false
+  pinned.value = false
+  favorite.value = false
+  type.value = ''
   category.value = 'Other'
   folderId.value = ''
   lastMeta = null
@@ -145,9 +146,6 @@ function cancelForm() {
   open.value = false
 }
 
-function handlePaste(e) {
-  // let v-model handle, autoFill will trigger
-}
 // Expose open/toggle so both triggers (toolbar toggle and header "+ Add link")
 // reveal this one form without duplicating any state or logic.
 defineExpose({ open, toggleFrom, close })
@@ -155,7 +153,7 @@ defineExpose({ open, toggleFrom, close })
 
 <template>
   <section class="add-card">
-    <button ref="toolbarTriggerEl" type="button" class="add-toggle" :aria-expanded="open" aria-controls="add-form" @click="toggleFrom($event.currentTarget)">
+    <button type="button" class="add-toggle" :aria-expanded="open" aria-controls="add-form" @click="toggleFrom">
       <span class="add-toggle-icon" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
       </span>
@@ -166,77 +164,101 @@ defineExpose({ open, toggleFrom, close })
       </span>
     </button>
 
-    <Teleport to="body">
-      <Transition name="fade-down">
-        <div v-if="open" id="add-form" ref="popoverEl" class="add-popover anchored-popover">
-          <form novalidate @submit.prevent="onSubmit">
-            <div class="row row-3">
-              <label class="field grow" for="save-url">
-                <span>URL *</span>
-                <input id="save-url" v-model="url" @paste="handlePaste" type="url" inputmode="url" autocapitalize="none" autocorrect="off" enterkeyhint="done" placeholder="https://example.com/article" class="input" />
-                <span v-if="loadingMeta" class="meta-hint">Detecting metadata…</span>
-                <span v-else-if="url && getDomain(normalizeUrl(url))" class="meta-hint">{{ getDomain(normalizeUrl(url)) }} → {{ category }}</span>
-              </label>
-              <label class="field" for="save-title">
-                <span>Title</span>
-                <input id="save-title" v-model="title" placeholder="Auto or custom" class="input" />
-              </label>
-              <label class="field" for="save-category">
-                <span>Category</span>
-                <AppSelect id="save-category" v-model="category" variant="field" :options="CATEGORIES" aria-label="Category" />
-              </label>
-            </div>
-
-            <button type="button" class="more-toggle" :aria-expanded="moreOpen" @click="moreOpen = !moreOpen">
-              <span>More options</span>
-              <span class="caret" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" :class="{ flipped: moreOpen }"><path d="m6 9 6 6 6-6"/></svg>
-              </span>
+    <AppDialog :open="open" title="Save new link" :buttons="[]" initial-focus="#save-url" @close="close">
+      <form id="add-form" novalidate @submit.prevent="onSubmit">
+        <div class="field">
+          <label for="save-url">URL *</label>
+          <div class="url-row">
+            <input id="save-url" v-model="url" type="url" inputmode="url" autocapitalize="none" autocorrect="off" enterkeyhint="done" placeholder="https://example.com/article" class="input" />
+            <button type="button" class="fetch-btn" :disabled="loadingMeta || !url.trim()" @click="fetchNow">
+              <span v-if="loadingMeta" class="fetch-spinner" aria-hidden="true"></span>
+              <span>{{ loadingMeta ? 'Fetching…' : 'Fetch' }}</span>
             </button>
-
-            <Transition name="fade-down">
-              <div v-if="moreOpen" class="more-body">
-                <div class="row row-2">
-                  <label class="field" for="save-desc">
-                    <span>Description (preview)</span>
-                    <textarea id="save-desc" v-model="description" rows="2" placeholder="Auto when available" class="input"></textarea>
-                  </label>
-                  <label class="field" for="save-image">
-                    <span>Preview image URL (optional)</span>
-                    <input id="save-image" v-model="image" type="url" inputmode="url" autocapitalize="none" autocorrect="off" placeholder="https://..." class="input" />
-                  </label>
-                </div>
-                <div class="row row-2">
-                  <label class="field" for="save-tags">
-                    <span>Tags (comma separated)</span>
-                    <input id="save-tags" v-model="tagsInput" autocapitalize="none" autocorrect="off" placeholder="reading, inspiration" class="input" />
-                  </label>
-                  <div class="field">
-                    <span>Status</span>
-                    <div class="checks">
-                      <label class="check"><input type="checkbox" v-model="important" /> Important</label>
-                      <label class="check"><input type="checkbox" v-model="mustHave" /> Must Have</label>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </Transition>
-
-            <label class="field" for="save-folder">
-              <span>Folder</span>
-              <AppSelect id="save-folder" v-model="folderId" variant="field" :options="[{ value: '', label: 'Unfiled' }, ...folders]" aria-label="Select folder" />
-            </label>
-
-            <p v-if="error" class="error">{{ error }}</p>
-
-            <div class="form-actions">
-              <button type="button" class="btn ghost" @click="cancelForm">Cancel</button>
-              <button type="submit" class="btn primary">Save link</button>
-            </div>
-          </form>
+          </div>
+          <span v-if="loadingMeta" class="meta-hint">Detecting metadata…</span>
+          <span v-else-if="url && getDomain(normalizeUrl(url))" class="meta-hint">{{ getDomain(normalizeUrl(url)) }} → {{ category }}</span>
         </div>
-      </Transition>
-    </Teleport>
+
+        <label class="field" for="save-title">
+          <span>Title</span>
+          <input id="save-title" v-model="title" placeholder="Auto or custom" class="input" />
+        </label>
+
+        <label class="field" for="save-desc">
+          <span>Description</span>
+          <textarea id="save-desc" v-model="description" rows="2" placeholder="Auto when available" class="input"></textarea>
+        </label>
+
+        <div class="field">
+          <span>Type</span>
+          <div class="type-pills" role="radiogroup" aria-label="Type">
+            <button
+              v-for="o in TYPE_OPTIONS"
+              :key="o.value"
+              type="button"
+              class="type-pill"
+              :class="{ active: type === o.value }"
+              role="radio"
+              :aria-checked="String(type === o.value)"
+              @click="type = o.value"
+            >{{ o.label }}</button>
+          </div>
+        </div>
+
+        <label class="field" for="save-folder">
+          <span>Folder</span>
+          <AppSelect id="save-folder" v-model="folderId" variant="field" :options="[{ value: '', label: 'Unfiled' }, ...folders]" aria-label="Select folder" />
+        </label>
+
+        <label class="field" for="save-tags">
+          <span>Tags (comma separated)</span>
+          <input id="save-tags" v-model="tagsInput" autocapitalize="none" autocorrect="off" placeholder="reading, inspiration" class="input" />
+        </label>
+
+        <!-- Compact action row: the two state toggles plus the subordinate
+             More options disclosure, all on one deliberate line. -->
+        <div class="quick-row">
+          <label class="switch">
+            <input type="checkbox" v-model="favorite" />
+            <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+            <span class="switch-label">Favorite</span>
+          </label>
+
+          <label class="switch">
+            <input type="checkbox" v-model="pinned" />
+            <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+            <span class="switch-label">Pinned</span>
+          </label>
+
+          <button type="button" class="more-toggle" :aria-expanded="moreOpen" aria-controls="add-more" @click="moreOpen = !moreOpen">
+            <span>More options</span>
+            <span class="caret" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" :class="{ flipped: moreOpen }"><path d="m6 9 6 6 6-6"/></svg>
+            </span>
+          </button>
+        </div>
+
+        <Transition name="fade-down">
+          <div v-if="moreOpen" id="add-more" class="more-body">
+            <label class="field" for="save-category">
+              <span>Category</span>
+              <AppSelect id="save-category" v-model="category" variant="field" :options="CATEGORIES" aria-label="Category" />
+            </label>
+            <label class="field" for="save-image">
+              <span>Image URL (optional)</span>
+              <input id="save-image" v-model="image" type="url" inputmode="url" autocapitalize="none" autocorrect="off" placeholder="https://..." class="input" />
+            </label>
+          </div>
+        </Transition>
+
+        <p v-if="error" class="error">{{ error }}</p>
+
+        <div class="form-actions">
+          <button type="button" class="btn ghost" @click="cancelForm">Cancel</button>
+          <button type="submit" class="btn primary">Save link</button>
+        </div>
+      </form>
+    </AppDialog>
   </section>
 </template>
 
@@ -247,21 +269,21 @@ defineExpose({ open, toggleFrom, close })
   border-radius: var(--radius);
   padding: 10px 14px;
 }
-/* Toolbar "Add link": the panel's primary action (solid primary button,
-   same token as .btn.primary so it stays consistent in both themes). */
+/* Toolbar "Add link": the panel's primary action, sized to the toolbar's
+   control family (solid accent stays the primary affordance). */
 .add-toggle {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-1);
   width: auto;
-  min-height: var(--control-height);
-  background: var(--accent);
-  color: var(--on-accent);
+  min-height: var(--control-height-sm);
+  background: var(--accent-strong);
+  color: var(--accent-text-on-strong);
   border: none;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  padding: 0 var(--space-3);
-  font-size: var(--text-md);
+  padding: 0 var(--space-2);
+  font-size: var(--text-sm);
   text-align: left;
   transition: background-color var(--transition-fast), transform .1s ease;
 }
@@ -271,32 +293,47 @@ defineExpose({ open, toggleFrom, close })
 .add-toggle:active { transform: scale(0.98); }
 .add-toggle:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 2px; }
 .add-toggle-icon {
-  width: 22px;
-  height: 22px;
+  width: 18px;
+  height: 18px;
   border-radius: var(--radius-full);
-  background: color-mix(in srgb, var(--on-accent) 18%, transparent);
+  background: color-mix(in srgb, var(--accent-text-on-strong) 18%, transparent);
   border: none;
-  color: var(--on-accent);
+  color: var(--accent-text-on-strong);
   display: grid;
   place-items: center;
   flex-shrink: 0;
   transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), transform .1s ease;
 }
-.add-toggle-icon svg { width: 12px; height: 12px; }
+.add-toggle-icon svg { width: 10px; height: 10px; }
 @media (hover: hover) and (pointer: fine){
-.add-toggle:hover .add-toggle-icon { background: color-mix(in srgb, var(--on-accent) 28%, transparent); color: var(--on-accent); }
+.add-toggle:hover .add-toggle-icon { background: color-mix(in srgb, var(--accent-text-on-strong) 28%, transparent); color: var(--accent-text-on-strong); }
 }
-.add-toggle-label { font-weight: var(--weight-semibold); font-size: var(--text-md); }
+.add-toggle-label { font-weight: var(--weight-semibold); font-size: var(--text-sm); }
 .add-toggle-hint { font-size: 12.5px; color: var(--muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .add-toggle-caret { color: currentColor; opacity: .8; display: inline-flex; }
-.add-toggle-caret svg { width: 14px; height: 14px; transition: transform var(--transition-fast); }
+.add-toggle-caret svg { width: 12px; height: 12px; transition: transform var(--transition-fast); }
 .add-toggle-caret svg.flipped, .caret svg.flipped { transform: rotate(180deg); }
-.row { display: grid; gap: 10px; margin-bottom: 10px; }
-.row-3 { grid-template-columns: 2fr 1.2fr 1fr; }
-.row-2 { grid-template-columns: 1fr 1fr; }
-.grow { min-width: 0; }
-.field { display: flex; flex-direction: column; gap: 5px; }
-.field span:first-child { font-size: var(--text-xs); font-weight: var(--weight-semibold); color: var(--text-h); }
+
+/* Mockup field stack: one label above one control, even vertical rhythm. */
+.field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
+.field > span:first-child,
+.field > label:first-child { font-size: var(--text-xs); font-weight: var(--weight-semibold); color: var(--text-h); }
+/* URL row (mockup .field-url-wrap): the field takes the free space, the
+   Fetch control keeps its own width. */
+.url-row { display: flex; gap: 8px; align-items: flex-start; }
+.url-row .input { flex: 1 1 auto; min-width: 0; }
+/* Compact action row: Favorite + Pinned toggles and the subordinate More
+   options disclosure. The row gap is the only spacing (no negative margins),
+   and the row wraps deliberately on very narrow widths. */
+.quick-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  row-gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.quick-row .switch { flex-shrink: 0; }
 /* Field visuals come from the shared .input base (src/app-overrides.css §11);
    the mobile tap-size override below still applies. */
 .more-toggle {
@@ -307,8 +344,8 @@ defineExpose({ open, toggleFrom, close })
   background: transparent;
   border: none;
   border-radius: var(--radius-sm);
-  padding: 6px 8px;
-  margin: 0 0 10px -8px;
+  padding: 6px 0;
+  margin: 0;
   font-size: 12.5px;
   font-weight: var(--weight-semibold);
   color: var(--text-h);
@@ -318,28 +355,35 @@ defineExpose({ open, toggleFrom, close })
 @media (hover: hover) and (pointer: fine){
 .more-toggle:hover { background: var(--muted-bg); }
 }
+.more-toggle:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 2px; }
 .more-toggle .caret { color: var(--muted); display: inline-flex; }
 .more-toggle .caret svg { width: 13px; height: 13px; transition: transform var(--transition-fast); }
 .more-toggle[aria-expanded="true"] { color: var(--accent); }
 .more-toggle[aria-expanded="true"] .caret { color: var(--accent); }
-.more-body { background: var(--muted-bg); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 10px; }
+/* Optional fields stay part of the same form: no card wrapper — the shared
+   .field rhythm carries the layout, labels and control alignment. */
+.more-body { margin: 0 0 10px; }
 .meta-hint { font-size: var(--text-xs); color: var(--muted); }
 .error { color: var(--error); font-size: var(--text-sm); margin: 0 0 10px; }
-.btn.block { width: 100%; margin-top: 2px; }
-.form-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 14px; }
-.checks { display: flex; gap: 14px; align-items: center; padding-top: 9px; flex-wrap: wrap; }
-.check { font-size: var(--text-sm); color: var(--text-h); display: flex; gap: 6px; align-items: center; cursor: pointer; }
-.check input { accent-color: var(--accent); }
-@media (max-width: 640px) {
-  .row-3 { grid-template-columns: 1fr; }
-  .row-2 { grid-template-columns: 1fr; }
+/* Actions stay reachable while a tall form scrolls internally: the row sticks
+   to the bottom of the dialog body's scroll area. */
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 14px;
+  position: sticky;
+  bottom: 0;
+  background: var(--card);
+  padding-top: 10px;
+  padding-bottom: 2px;
 }
 
 /* Mobile form presentation: comfortable tap targets — 44px, expressed with the
    existing control-height token plus the smallest space step — and 16px control
    text, which also stops iOS zooming the page when a field is focused. Desktop
    and tablet keep the compact sizing. The select fields are styled globally
-   (.asel--field) alongside the popover itself. */
+   (.asel--field); the pills, switch and Fetch control in app-overrides. */
 @media (max-width: 768px) {
   .input,
   .form-actions .btn {

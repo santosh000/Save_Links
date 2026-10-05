@@ -116,6 +116,8 @@ vi.mock('./composables/useSettings.js', () => ({
   useSettings: () => ({
     appearance: 'system',
     colorScheme: 'system',
+    // The topbar theme switch reads the resolved appearance (ref-like value).
+    resolvedAppearance: { value: 'light' },
     setAppearance: vi.fn(),
     setColorScheme: vi.fn(),
   }),
@@ -141,6 +143,13 @@ function resetAnonData() {
 function mountApp() {
   return mount(App, { attachTo: document.body })
 }
+
+/**
+ * AddLink nests its own modal AppDialog (title "Save new link"); the app-level
+ * dialog used by the sync flow is the other AppDialog instance.
+ */
+const appDialog = (wrapper) =>
+  wrapper.findAllComponents({ name: 'AppDialog' }).find((d) => d.props('title') !== 'Save new link')
 
 async function flush() {
   await flushPromises()
@@ -198,7 +207,7 @@ describe('App — anonymous → authenticated sync flow', () => {
       const wrapper = await mountAndLogin()
       // Initial sync should have run
       await flush()
-      expect(wrapper.findComponent({ name: 'AppDialog' }).props('open')).toBe(false)
+      expect(appDialog(wrapper).props('open')).toBe(false)
       wrapper.unmount()
     })
 
@@ -215,7 +224,7 @@ describe('App — anonymous → authenticated sync flow', () => {
       const wrapper = await mountAndLogin([{ id: 'link-1', account_id: null, normalizedUrl: 'https://example.com' }])
       await flush()
 
-      const dialog = wrapper.findComponent({ name: 'AppDialog' })
+      const dialog = appDialog(wrapper)
       expect(dialog.props('open')).toBe(true)
       expect(dialog.props('title')).toBe('Sync your local data?')
       expect(dialog.props('message')).toContain('1 link')
@@ -227,7 +236,7 @@ describe('App — anonymous → authenticated sync flow', () => {
       const wrapper = await mountAndLogin([], [{ id: 'folder-1', account_id: null, name: 'Test Folder' }])
       await flush()
 
-      const dialog = wrapper.findComponent({ name: 'AppDialog' })
+      const dialog = appDialog(wrapper)
       expect(dialog.props('open')).toBe(true)
       expect(dialog.props('message')).toContain('1 folder')
       wrapper.unmount()
@@ -240,7 +249,7 @@ describe('App — anonymous → authenticated sync flow', () => {
       )
       await flush()
 
-      const dialog = wrapper.findComponent({ name: 'AppDialog' })
+      const dialog = appDialog(wrapper)
       expect(dialog.props('open')).toBe(true)
       expect(dialog.props('message')).toContain('2 links')
       expect(dialog.props('message')).toContain('1 folder')
@@ -251,7 +260,7 @@ describe('App — anonymous → authenticated sync flow', () => {
       const wrapper = await mountAndLogin([{ id: 'link-1', account_id: null }])
       await flush()
 
-      const dialog = wrapper.findComponent({ name: 'AppDialog' })
+      const dialog = appDialog(wrapper)
       const buttons = dialog.props('buttons')
       expect(buttons).toHaveLength(2)
       expect(buttons[0].label).toBe('Sync & Merge')
@@ -269,7 +278,7 @@ describe('App — anonymous → authenticated sync flow', () => {
       const wrapper = await mountAndLogin([{ id: 'link-1', account_id: null }])
       await flush()
 
-      await wrapper.findComponent({ name: 'AppDialog' }).vm.$emit('choose', 'keep-local')
+      await appDialog(wrapper).vm.$emit('choose', 'keep-local')
       await flush()
 
       // Keep Local now marks items as kept_local via update mutations
@@ -288,7 +297,7 @@ describe('App — anonymous → authenticated sync flow', () => {
       const wrapper = await mountAndLogin([{ id: 'link-1', account_id: null }])
       await flush()
 
-      await wrapper.findComponent({ name: 'AppDialog' }).vm.$emit('choose', 'keep-local')
+      await appDialog(wrapper).vm.$emit('choose', 'keep-local')
       await flush()
 
       // The toast might be rendered in a teleport, check the wrapper text
@@ -302,7 +311,7 @@ describe('App — anonymous → authenticated sync flow', () => {
       const wrapper = await mountAndLogin([{ id: 'link-1', account_id: null, title: 'Test Link', normalizedUrl: 'https://example.com' }])
       await flush()
 
-      await wrapper.findComponent({ name: 'AppDialog' }).vm.$emit('choose', 'merge')
+      await appDialog(wrapper).vm.$emit('choose', 'merge')
       await flush()
 
       expect(h.addPendingMutationMock).toHaveBeenCalled()
@@ -321,7 +330,7 @@ describe('App — anonymous → authenticated sync flow', () => {
       const wrapper = await mountAndLogin([], [{ id: 'folder-1', account_id: null, name: 'Test Folder' }])
       await flush()
 
-      await wrapper.findComponent({ name: 'AppDialog' }).vm.$emit('choose', 'merge')
+      await appDialog(wrapper).vm.$emit('choose', 'merge')
       await flush()
 
       const calls = h.addPendingMutationMock.mock.calls
@@ -340,7 +349,7 @@ describe('App — anonymous → authenticated sync flow', () => {
 
       h.syncNowMock.mockClear()
 
-      await wrapper.findComponent({ name: 'AppDialog' }).vm.$emit('choose', 'merge')
+      await appDialog(wrapper).vm.$emit('choose', 'merge')
       await flush()
 
       expect(h.syncNowMock).toHaveBeenCalledTimes(1)
@@ -351,7 +360,7 @@ describe('App — anonymous → authenticated sync flow', () => {
       const wrapper = await mountAndLogin([{ id: 'link-1', account_id: null }])
       await flush()
 
-      await wrapper.findComponent({ name: 'AppDialog' }).vm.$emit('choose', 'merge')
+      await appDialog(wrapper).vm.$emit('choose', 'merge')
       await flush()
 
       expect(wrapper.text()).toContain('Local data synced to your account')
@@ -414,7 +423,7 @@ describe('App — anonymous → authenticated sync flow', () => {
       const wrapper = mountApp()
       await flush()
 
-      const dialog = wrapper.findComponent({ name: 'AppDialog' })
+      const dialog = appDialog(wrapper)
       expect(dialog.props('open')).toBe(true)
       expect(dialog.props('title')).toBe('Sync your local data?')
       expect(dialog.props('message')).toContain('1 link')
@@ -460,8 +469,8 @@ describe('App — anonymous → authenticated sync flow', () => {
       const wrapper = await mountAndLogin([{ id: 'link-1', account_id: null }])
       await flush()
 
-      expect(wrapper.findComponent({ name: 'AppDialog' }).props('open')).toBe(true)
-      await wrapper.findComponent({ name: 'AppDialog' }).vm.$emit('choose', 'keep-local')
+      expect(appDialog(wrapper).props('open')).toBe(true)
+      await appDialog(wrapper).vm.$emit('choose', 'keep-local')
       await flush()
 
       // Logout
@@ -476,7 +485,7 @@ describe('App — anonymous → authenticated sync flow', () => {
       }
       await flush()
 
-      expect(wrapper.findComponent({ name: 'AppDialog' }).props('open')).toBe(true)
+      expect(appDialog(wrapper).props('open')).toBe(true)
       wrapper.unmount()
     })
   })

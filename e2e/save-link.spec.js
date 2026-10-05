@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test'
-import { clearStorage, ensureAddLinkOpen, saveLink, visibleLinkRows, linkRowByTitle, openView, openEditFormFor, setNavbarSearch } from './helpers.js'
+import { clearStorage, ensureAddLinkOpen, saveLink, seedLinks, linkRecord, visibleLinkRows, linkRowByTitle, openView, openEditFormFor, setNavbarSearch, ensureCardView, readStoredLinks } from './helpers.js'
+
+const sidebarItem = (page, text) => page.locator('.sidebar-menu-link', { hasText: text })
 
 test.describe('Save Links E2E', () => {
   test.beforeEach(async ({ page }) => {
@@ -14,10 +16,9 @@ test.describe('Save Links E2E', () => {
   await page.locator('.content-head .add-toggle').click()
   await expect(page.locator('#add-form')).toBeVisible()
   await expect(page.getByPlaceholder('https://example.com/article')).toBeVisible()
-    // Folders view reachable (the Statistics view was removed)
+    // Folder surface is the sidebar tree (the standalone page was removed)
     await openView(page, 'folders')
-    await expect(page.locator('.page-title')).toHaveText('Folders')
-    await expect(page.locator('.folder-sidebar')).toBeVisible()
+    await expect(page.locator('[data-testid="sidebar-folder-new"]')).toBeVisible()
     // Back to links
     await openView(page, 'links')
     // Current identity surface (the old navbar popover was removed)
@@ -44,69 +45,52 @@ test.describe('Save Links E2E', () => {
 
     // initial favorite count 0, not active
     await expect(favButton).toHaveAttribute('aria-pressed', 'false')
-    // The current status filter shows no favorites yet
-    await page.locator('#filter-status').selectOption('favorite')
+    // The Favorites destination shows no favorites yet
+    await sidebarItem(page, 'Favorites').click()
     await expect(visibleLinkRows(page)).toHaveCount(0)
-    await page.locator('#filter-status').selectOption('')
+    await sidebarItem(page, 'All Links').click()
 
     // mark favorite
     await favButton.click()
     await expect(row.getByRole('button', { name: 'Toggle Favorite' })).toHaveAttribute('aria-pressed', 'true')
-    // The status filter now shows exactly this favorite
-    await page.locator('#filter-status').selectOption('favorite')
+    // The Favorites destination now lists exactly this favorite
+    await sidebarItem(page, 'Favorites').click()
     await expect(visibleLinkRows(page)).toHaveCount(1)
-    await page.locator('#filter-status').selectOption('')
+    await sidebarItem(page, 'All Links').click()
 
     // remove favorite
     await row.getByRole('button', { name: 'Toggle Favorite' }).click()
     await expect(row.getByRole('button', { name: 'Toggle Favorite' })).toHaveAttribute('aria-pressed', 'false')
-    // The status filter is empty again
-    await page.locator('#filter-status').selectOption('favorite')
+    // The Favorites destination is empty again
+    await sidebarItem(page, 'Favorites').click()
     await expect(visibleLinkRows(page)).toHaveCount(0)
-    await page.locator('#filter-status').selectOption('')
+    await sidebarItem(page, 'All Links').click()
   })
 
-  test('D. Important + Must Have independent', async ({ page }) => {
+  test('D. Favorite + Pin are the item states', async ({ page }) => {
     await page.goto('/')
     await saveLink(page, { url: 'https://example.com/status', title: 'Status Test' })
     const row = visibleLinkRows(page).first()
 
-    // Important is a permanent row control now
-    const importantBtn = row.getByRole('button', { name: 'Toggle Important' })
-    await expect(importantBtn).toHaveAttribute('aria-pressed', 'false')
-    await importantBtn.click()
-    await expect(importantBtn).toHaveAttribute('aria-pressed', 'true')
-    // the status is real: the current filter finds it
-    await page.locator('#filter-status').selectOption('important')
+    // P15.10: Favorite + Pin are the permanent item controls; the Important /
+    // Must Have toggles left the item surfaces (they live in the detail panel).
+    await expect(row.getByRole('button', { name: 'Toggle Important' })).toHaveCount(0)
+    await expect(row.getByRole('button', { name: 'Toggle Must Have' })).toHaveCount(0)
+    const pinBtn = row.getByRole('button', { name: 'Toggle Pin' })
+    await expect(pinBtn).toHaveAttribute('aria-pressed', 'false')
+    await pinBtn.click()
+    await expect(pinBtn).toHaveAttribute('aria-pressed', 'true')
+    // the pin state is real: the pinned filter finds it
+    await page.getByRole('button', { name: 'Show pinned links only' }).click()
     await expect(visibleLinkRows(page)).toHaveCount(1)
-    await page.locator('#filter-status').selectOption('')
-
-    // Must Have lives in the row's More actions menu
-    const openMore = async () => {
-      await row.getByRole('button', { name: 'More actions' }).click()
-      const menu = page.locator('.more-menu')
-      await expect(menu).toBeVisible()
-      return menu
-    }
-    let menu = await openMore()
-    const mustBtn = menu.getByRole('button', { name: 'Toggle Must Have' })
-    await expect(mustBtn).toHaveAttribute('aria-pressed', 'false')
-    await mustBtn.click()
-    await expect(mustBtn).toHaveAttribute('aria-pressed', 'true')
-    await page.keyboard.press('Escape')
-    await expect(menu).toBeHidden()
-    await page.locator('#filter-status').selectOption('must-have')
+    await page.getByRole('button', { name: 'Show pinned links only' }).click()
     await expect(visibleLinkRows(page)).toHaveCount(1)
-    await page.locator('#filter-status').selectOption('')
 
-    // independence: Important stayed on while Must Have was set
-    await expect(importantBtn).toHaveAttribute('aria-pressed', 'true')
-
-    // turn Important off: Must Have remains
-    await importantBtn.click()
-    await expect(importantBtn).toHaveAttribute('aria-pressed', 'false')
-    menu = await openMore()
-    await expect(menu.getByRole('button', { name: 'Toggle Must Have' })).toHaveAttribute('aria-pressed', 'true')
+    // the pinned quick-action menu no longer offers Must Have
+    await row.getByRole('button', { name: 'More actions' }).click()
+    const menu = page.locator('.more-menu')
+    await expect(menu).toBeVisible()
+    await expect(menu.getByRole('button', { name: 'Toggle Must Have' })).toHaveCount(0)
     await page.keyboard.press('Escape')
     await expect(menu).toBeHidden()
   })
@@ -150,51 +134,29 @@ test.describe('Save Links E2E', () => {
     await expect(visibleLinkRows(page)).toHaveCount(2)
   })
 
-  test('G. Status filter', async ({ page }) => {
-    await page.goto('/')
-    await saveLink(page, { url: 'https://example.com/imp', title: 'Important Link' })
-    await saveLink(page, { url: 'https://example.com/must', title: 'MustHave Link' })
-    await saveLink(page, { url: 'https://example.com/fav', title: 'Fav Link' })
+  test('G. Status flags persist as data', async ({ page }) => {
+    // P15.10: Important/Must Have have no UI control; the real data fields are
+    // seeded through the legacy-storage migration path and asserted at the
+    // store. Favorite keeps its real item toggle.
+    await seedLinks(page, [
+      linkRecord({ id: 'imp', url: 'https://example.com/imp', title: 'Important Link', important: true }),
+      linkRecord({ id: 'must', url: 'https://example.com/must', title: 'MustHave Link', mustHave: true }),
+      linkRecord({ id: 'fav', url: 'https://example.com/fav', title: 'Fav Link' }),
+    ])
+    await expect(visibleLinkRows(page)).toHaveCount(3)
 
-    // mark statuses with the current permanent controls
+    // the seeded flags are real persisted fields on their rows
+    const stored = await readStoredLinks(page)
+    expect(stored.find((l) => l.title === 'Important Link')?.important).toBe(true)
+    expect(stored.find((l) => l.title === 'MustHave Link')?.mustHave).toBe(true)
+
+    // Favorite is real: the item control and the Favorites destination agree
     await linkRowByTitle(page, 'Fav Link').getByRole('button', { name: 'Toggle Favorite' }).click()
-    const mustRow = linkRowByTitle(page, 'MustHave Link')
-    await mustRow.getByRole('button', { name: 'More actions' }).click()
-    const mustMenu = page.locator('.more-menu')
-    await expect(mustMenu).toBeVisible()
-    await mustMenu.getByRole('button', { name: 'Toggle Must Have' }).click()
-    await expect(mustMenu.getByRole('button', { name: 'Toggle Must Have' })).toHaveAttribute('aria-pressed', 'true')
-    await page.keyboard.press('Escape')
-    await expect(mustMenu).toBeHidden()
-    const importantRow = linkRowByTitle(page, 'Important Link')
-    await importantRow.getByRole('button', { name: 'Toggle Important' }).click()
-    await expect(importantRow.getByRole('button', { name: 'Toggle Important' })).toHaveAttribute('aria-pressed', 'true')
-
-    // Filter Important
-    await page.locator('#filter-status').selectOption('important')
-    await expect(visibleLinkRows(page)).toHaveCount(1)
-    await expect(visibleLinkRows(page).first()).toContainText('Important Link')
-
-    // Filter Must Have
-    await page.locator('#filter-status').selectOption('must-have')
-    await expect(visibleLinkRows(page)).toHaveCount(1)
-    await expect(visibleLinkRows(page).first()).toContainText('MustHave Link')
-
-    // Reset status, filter Favorites
-    await page.locator('#filter-status').selectOption('')
-    await page.locator('#filter-status').selectOption('favorite')
+    await expect(linkRowByTitle(page, 'Fav Link').getByRole('button', { name: 'Toggle Favorite' })).toHaveAttribute('aria-pressed', 'true')
+    await sidebarItem(page, 'Favorites').click()
     await expect(visibleLinkRows(page)).toHaveCount(1)
     await expect(visibleLinkRows(page).first()).toContainText('Fav Link')
-
-    // No favorite
-    await page.locator('#filter-status').selectOption('not-favorite')
-    await expect(visibleLinkRows(page)).toHaveCount(2) // imp + must
-    await expect(visibleLinkRows(page).first()).not.toContainText('Fav Link')
-
-    // No status (Important/Must Have) — Fav Link has favorite but no status, so should still show 1
-    await page.locator('#filter-status').selectOption('none')
-    await expect(visibleLinkRows(page)).toHaveCount(1)
-    await expect(visibleLinkRows(page).first()).toContainText('Fav Link')
+    await sidebarItem(page, 'All Links').click()
   })
 
   test('H. Edit', async ({ page }) => {
@@ -211,19 +173,71 @@ test.describe('Save Links E2E', () => {
     await form.getByLabel('Description').fill('Updated Desc')
     await form.getByLabel('Image URL').fill('https://example.com/new-image.jpg')
     await form.getByLabel('Tags (comma separated)').fill('x, y, z')
-    await form.locator('select').first().selectOption('GitHub')
+    await form.locator('#edit-category').selectOption('GitHub')
     await form.getByRole('button', { name: 'Save', exact: true }).click()
 
     await expect(row).toContainText('Updated Title')
-    // Description isn't rendered in the table; verified via the edit modal
-    // Tags: check via edit modal or saved state
-    await row.getByRole('button', { name: 'Edit link' }).click()
-    await expect(form.getByLabel('Description')).toHaveValue('Updated Desc')
-    await expect(form.getByLabel('Tags (comma separated)')).toHaveValue('x, y, z')
-    await expect(form.locator('select').first()).toHaveValue('GitHub')
-    await form.getByRole('button', { name: 'Cancel' }).click()
+    // Description isn't rendered in the table; verified via the edit form
+    // Tags: check via edit form or saved state
+    // P15.11: reopening goes through the item's ⋮ menu (the shared form)
+    const reopened = await openEditFormFor(page, 'Updated Title')
+    await expect(reopened.form.getByLabel('Description')).toHaveValue('Updated Desc')
+    await expect(reopened.form.getByLabel('Tags (comma separated)')).toHaveValue('x, y, z')
+    await expect(reopened.form.locator('#edit-category')).toHaveValue('GitHub')
+    await reopened.form.getByRole('button', { name: 'Cancel' }).click()
     // Category appears in table (column 2)
     // Note: URL cleaning assertions dropped - table shows domain only, not full URL
+  })
+
+  test('H2. Edit favorite and Auto type through the shared form', async ({ page }) => {
+    await page.goto('/')
+    await saveLink(page, { url: 'https://example.com/edit-fav', title: 'Edit Fav' })
+    await ensureCardView(page)
+
+    // Favorite switch: toggles the real flag and persists through the save path.
+    const { form } = await openEditFormFor(page, 'Edit Fav')
+    await form.locator('label.switch', { hasText: 'Favorite' }).click()
+    await form.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(page.getByText('Link updated')).toBeVisible()
+    await expect(page.locator('.grid > .card').first().getByRole('button', { name: 'Toggle Favorite' })).toHaveAttribute('aria-pressed', 'true')
+
+    // Auto stays explicitly selectable and re-detects from the URL on save.
+    const auto = await openEditFormFor(page, 'Edit Fav')
+    await expect(auto.form.locator('label.switch', { hasText: 'Favorite' }).getByRole('checkbox')).toBeChecked()
+    await auto.form.locator('.type-pill', { hasText: 'Auto' }).click()
+    await auto.form.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(page.getByText('Link updated')).toBeVisible()
+
+    const reopened = await openEditFormFor(page, 'Edit Fav')
+    await expect(reopened.form.locator('.type-pill[aria-checked="true"]')).toHaveText('Other')
+    await reopened.form.getByRole('button', { name: 'Cancel' }).click()
+    await expect(page.locator('.edit-form')).toHaveCount(0)
+  })
+
+  test('V. Fetch control fills metadata and never overwrites manual input', async ({ page }) => {
+    await page.goto('/')
+    await page.route('**/fetch-target', (route) => route.fulfill({
+      status: 200,
+      contentType: 'text/html',
+      headers: { 'access-control-allow-origin': '*' },
+      body: '<html><head><title>Fetched Title</title><meta name="description" content="Fetched description"><meta property="og:image" content="https://example.com/fetched.png"></head></html>',
+    }))
+    await ensureAddLinkOpen(page, { more: true })
+    await page.locator('#save-url').fill('https://example.com/fetch-target')
+    await page.locator('#save-title').fill('Manual title')
+
+    await page.getByRole('button', { name: 'Fetch', exact: true }).click()
+
+    // Empty fields are filled from the page metadata...
+    await expect(page.locator('#save-desc')).toHaveValue('Fetched description')
+    await expect(page.locator('#save-image')).toHaveValue('https://example.com/fetched.png')
+    // ...and manually typed text is never clobbered.
+    await expect(page.locator('#save-title')).toHaveValue('Manual title')
+
+    // Escape closes the modal without saving.
+    await page.keyboard.press('Escape')
+    await expect(page.locator('#add-form')).toHaveCount(0)
+    await expect(visibleLinkRows(page)).toHaveCount(0)
   })
 
   test('I. Delete', async ({ page }) => {
@@ -266,31 +280,19 @@ test.describe('Save Links E2E', () => {
     await page.goto('/')
     await saveLink(page, { url: 'https://example.com/persist', title: 'Persist Me' })
     const row = visibleLinkRows(page).first()
+    // P15.10: item surfaces persist Favorite + Pin.
     await row.getByRole('button', { name: 'Toggle Favorite' }).click()
-    await row.getByRole('button', { name: 'More actions' }).click()
-    const menu = page.locator('.more-menu')
-    await expect(menu).toBeVisible()
-    await menu.getByRole('button', { name: 'Toggle Must Have' }).click()
-    await expect(menu.getByRole('button', { name: 'Toggle Must Have' })).toHaveAttribute('aria-pressed', 'true')
-    await page.keyboard.press('Escape')
-    await expect(menu).toBeHidden()
-    await row.getByRole('button', { name: 'Toggle Important' }).click()
+    await row.getByRole('button', { name: 'Toggle Pin' }).click()
 
     await expect(row.getByRole('button', { name: 'Toggle Favorite' })).toHaveAttribute('aria-pressed', 'true')
-    await expect(row.getByRole('button', { name: 'Toggle Important' })).toHaveAttribute('aria-pressed', 'true')
+    await expect(row.getByRole('button', { name: 'Toggle Pin' })).toHaveAttribute('aria-pressed', 'true')
 
     await page.reload()
     const reloadedRow = visibleLinkRows(page).first()
     await expect(reloadedRow).toBeVisible()
     await expect(reloadedRow.getByText('Persist Me')).toBeVisible()
     await expect(reloadedRow.getByRole('button', { name: 'Toggle Favorite' })).toHaveAttribute('aria-pressed', 'true')
-    await expect(reloadedRow.getByRole('button', { name: 'Toggle Important' })).toHaveAttribute('aria-pressed', 'true')
-    await reloadedRow.getByRole('button', { name: 'More actions' }).click()
-    const reloadedMenu = page.locator('.more-menu')
-    await expect(reloadedMenu).toBeVisible()
-    await expect(reloadedMenu.getByRole('button', { name: 'Toggle Must Have' })).toHaveAttribute('aria-pressed', 'true')
-    await page.keyboard.press('Escape')
-    await expect(reloadedMenu).toBeHidden()
+    await expect(reloadedRow.getByRole('button', { name: 'Toggle Pin' })).toHaveAttribute('aria-pressed', 'true')
   })
 
   test('K. Original URL', async ({ page }) => {
@@ -347,7 +349,7 @@ test.describe('Save Links E2E', () => {
   await expect(page.locator('#save-url')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Save link' })).toBeVisible()
     await openView(page, 'folders')
-    await expect(page.locator('.folder-sidebar')).toBeVisible()
+    await expect(page.locator('[data-testid="sidebar-folder-new"]')).toBeVisible()
 
     // mobile: sidebar off-canvas, statistics separate view
     await page.setViewportSize({ width: 375, height: 667 })
@@ -358,9 +360,9 @@ test.describe('Save Links E2E', () => {
   await expect(page.locator('#add-form')).toBeVisible()
   await expect(page.locator('#save-url')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Save link' })).toBeVisible()
-    // the current views are separate surfaces (no links list on another view)
+    // the folder surface lives in the drawer tree (no separate page)
     await openView(page, 'folders')
-    await expect(page.locator('.folder-sidebar')).toBeVisible()
+    await expect(page.locator('[data-testid="sidebar-folder-new"]')).toBeVisible()
     // no horizontal scroll on mobile
     const noHS = await page.evaluate(() => document.scrollingElement.scrollWidth <= document.scrollingElement.clientWidth)
     expect(noHS).toBe(true)

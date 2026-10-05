@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { clearStorage, ensureAddLinkOpen, saveLink, visibleLinkRows, linkRowByTitle, installBackupCapture, clickExportAndCaptureBackup, openView } from './helpers.js'
+import { clearStorage, ensureAddLinkOpen, saveLink, seedLinks, linkRecord, visibleLinkRows, linkRowByTitle, installBackupCapture, clickExportAndCaptureBackup, openView, ensureCardView, readStoredLinks, readStoredProfile } from './helpers.js'
 
 test.describe('Backup E2E', () => {
   test.beforeEach(async ({ page }) => {
@@ -9,13 +9,30 @@ test.describe('Backup E2E', () => {
 
   test('1. Export Backup', async ({ page }) => {
     test.setTimeout(60000)
-    await page.goto('/')
+    // The full link record (including the UI-less Important/Must-Have flags) is
+    // seeded through the real legacy-storage migration path first, so the
+    // profile edits below are persisted afterwards and never overwritten.
+    await seedLinks(page, [linkRecord({
+      id: 'export-test',
+      url: 'https://example.com/export-test',
+      title: 'Export Title',
+      description: 'Export Desc',
+      image: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iI2NjYyIvPjwvc3ZnPg==',
+      tags: ['backup', 'test'],
+      category: 'GitHub',
+      important: true,
+      mustHave: true,
+    })])
+    await expect(visibleLinkRows(page)).toHaveCount(1)
+
     // local profile: navbar profile dropdown → Edit profile
     await page.locator('.identity-btn').click()
     await page.locator('.local-profile-edit').click()
     await page.locator('#lp-name').fill('Backup Tester')
     await page.locator('#lp-bio').fill('Local-first profile bio')
     await page.getByRole('button', { name: 'Save changes' }).click()
+    // The profile save is async: wait for the real kv write before reloading.
+    await expect.poll(() => readStoredProfile(page)).toMatchObject({ name: 'Backup Tester', bio: 'Local-first profile bio' })
     // reload: dismisses the panel and verifies the local profile name AND bio persisted
     await page.reload()
     await expect(page.locator('.identity-name')).toContainText('Backup Tester')
@@ -25,17 +42,7 @@ test.describe('Backup E2E', () => {
     await expect(page.locator('#lp-bio')).toHaveValue('Local-first profile bio')
     await page.keyboard.press('Escape')
 
-    // link with all flags
-    await saveLink(page, {
-      url: 'https://example.com/export-test',
-      title: 'Export Title',
-      description: 'Export Desc',
-      image: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iI2NjYyIvPjwvc3ZnPg==',
-      tags: 'backup, test',
-      category: 'GitHub',
-      important: true,
-      mustHave: true,
-    })
+    // Favorite keeps its real item toggle.
     const row = visibleLinkRows(page).first()
     await row.getByRole('button', { name: 'Toggle Favorite' }).click()
     await expect(row.getByRole('button', { name: 'Toggle Favorite' })).toHaveAttribute('aria-pressed', 'true')
@@ -154,15 +161,13 @@ test.describe('Backup E2E', () => {
     await expect(page.locator('.sidebar-menu-badge').first()).toHaveText('3')
     const imp1 = linkRowByTitle(page, 'Imported Title 1')
     await expect(imp1.getByRole('button', { name: 'Toggle Favorite' })).toHaveAttribute('aria-pressed', 'true')
-    await expect(imp1.getByRole('button', { name: 'Toggle Important' })).toHaveAttribute('aria-pressed', 'true')
     const imp2 = linkRowByTitle(page, 'Imported Title 2')
     await expect(imp2.getByRole('button', { name: 'Toggle Favorite' })).toHaveAttribute('aria-pressed', 'false')
-    await imp2.getByRole('button', { name: 'More actions' }).click()
-    const imp2Menu = page.locator('.more-menu')
-    await expect(imp2Menu).toBeVisible()
-    await expect(imp2Menu.getByRole('button', { name: 'Toggle Must Have' })).toHaveAttribute('aria-pressed', 'true')
-    await page.keyboard.press('Escape')
-    await expect(imp2Menu).toBeHidden()
+    // P15.10+: the Important/Must Have flags have no UI surface anymore; the
+    // imported values are still real persisted data (asserted at the store).
+    const stored = await readStoredLinks(page)
+    expect(stored.find((l) => l.title === 'Imported Title 1')?.important).toBe(true)
+    expect(stored.find((l) => l.title === 'Imported Title 2')?.mustHave).toBe(true)
   })
 
   test('4. Import cancel keeps existing data', async ({ page }) => {
@@ -188,7 +193,7 @@ test.describe('Backup E2E', () => {
       mimeType: 'application/json',
       buffer: Buffer.from(JSON.stringify(backup)),
     })
-    const importDialog = page.getByRole('dialog')
+    const importDialog = page.getByRole('dialog', { name: 'Import Backup' })
     await expect(importDialog).toBeVisible()
     await importDialog.getByRole('button', { name: 'Cancel' }).click()
 
@@ -308,8 +313,9 @@ test.describe('Backup E2E', () => {
     await openView(page, 'links')
     await expect(visibleLinkRows(page)).toHaveCount(1)
     await expect(visibleLinkRows(page).first()).toContainText('Good Link')
-    // ensure app didn't crash
-    await expect(page.getByText('Save Links', { exact: false }).first()).toBeVisible()
+    // ensure app didn't crash (P8: the brand lives in the topbar; the sidebar
+    // head is hidden on the desktop grid)
+    await expect(page.locator('.navbar-custom .mobile-brand')).toBeVisible()
   })
 
   test('10. Persistence after import', async ({ page }) => {
@@ -358,7 +364,9 @@ test.describe('Backup E2E', () => {
     await expect(page.getByText('Persist User')).toHaveCount(0)
     const persistedRow = visibleLinkRows(page).first()
     await expect(persistedRow.getByRole('button', { name: 'Toggle Favorite' })).toHaveAttribute('aria-pressed', 'true')
-    await expect(persistedRow.getByRole('button', { name: 'Toggle Important' })).toHaveAttribute('aria-pressed', 'true')
+    // P15.10+: flags without item/detail controls are asserted at the store.
+    const stored = await readStoredLinks(page)
+    expect(stored.find((l) => l.title === 'Persist Link')?.important).toBe(true)
     // stats on Statistics view
     await openView(page, 'links') // totals/flags are asserted from the current rows and badge
   })
@@ -425,6 +433,7 @@ test.describe('Backup E2E', () => {
     // empty store -> no duplicates -> immediate import (XSS payload NOT run)
     await expect(page.getByText(/Import complete/)).toBeVisible()
     await openView(page, 'links')
+    await ensureCardView(page) // P8: the description payload renders on the card
     const row = visibleLinkRows(page).first()
     // title should be rendered as text, not HTML
     await expect(row.getByText('<img src=x onerror=alert(1)>')).toBeVisible()
@@ -461,7 +470,9 @@ test.describe('Backup E2E', () => {
     await page.locator('.backup-card input[type="file"]').setInputFiles({
       name: 'backup.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(backup)),
     })
-    const dialog = page.getByRole('dialog')
+    // The import preview layers over the Settings modal (Backup & restore is
+    // the Data section now), so target the preview dialog by name.
+    const dialog = page.getByRole('dialog', { name: 'Import Backup' })
     await expect(dialog).toBeVisible()
     // Keep existing = skip (default radio)
     await dialog.getByRole('button', { name: 'Import', exact: true }).click()
@@ -495,7 +506,7 @@ test.describe('Backup E2E', () => {
     await page.locator('.backup-card input[type="file"]').setInputFiles({
       name: 'backup.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(backup)),
     })
-    const dialog = page.getByRole('dialog')
+    const dialog = page.getByRole('dialog', { name: 'Import Backup' })
     await expect(dialog).toBeVisible()
     // choose Replace
     await dialog.locator('input[name="import-strategy"][value="replace"]').check()

@@ -5,8 +5,8 @@ or scaffold file is changed by this document. This is the review-and-approve
 gate before any sync code is written.
 
 **Basis:** Read from the actual repository (`master` `608209e` + the preserved
-working state `5fe38b4`): `.opencode/architecture.md`, `.opencode/project.md`,
-`SECURITY.md`, `AGENTS.md`, `worker/auth.js`, `worker/api.js`, `worker/index.js`,
+working state `5fe38b4`): `SECURITY.md`, `worker/auth.js`, `worker/api.js`,
+`worker/index.js`,
 `worker/db/store.js`, `worker/db/store.test.js` (read-only), `worker/oauth/*`,
 `migrations/0001..0003`, `src/domain/link.js`, `src/storage/indexeddb.js`,
 `src/storage/repository.js`, `src/auth/*` (session, accountService,

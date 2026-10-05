@@ -47,5 +47,7 @@ build/
 out/
 coverage/
 
-# Local-only third-party OpenCode skills (Emil Kowalski; never commit)
-.opencode/skills/
+# Local development/AI tooling - kept on disk, never committed
+.opencode/
+/AGENTS.md
+/opencode.json

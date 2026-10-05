@@ -73,8 +73,11 @@ function close() {
 function pick(option) {
   close()
   triggerEl.value?.focus()
-  if (String(option.value) === String(props.modelValue ?? '')) return
-  emit('update:modelValue', option.value)
+  // `change` always fires for an explicit pick (the user's action), while the
+  // bound value only updates when it actually changes. The Date chip relies on
+  // this to re-open the custom-range dialog while "Custom…" is already active.
+  const changed = String(option.value) !== String(props.modelValue ?? '')
+  if (changed) emit('update:modelValue', option.value)
   emit('change', option.value)
 }
 

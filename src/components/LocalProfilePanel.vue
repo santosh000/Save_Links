@@ -111,6 +111,8 @@ function save() {
   inset: 0;
   z-index: var(--z-panel);
   background: var(--overlay);
+  backdrop-filter: blur(var(--overlay-blur));
+  -webkit-backdrop-filter: blur(var(--overlay-blur));
   display: grid;
   place-items: center;
   padding: 16px;

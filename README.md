@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="public/logo.png" alt="Save_Links" width="140" />
+  <img src="public/logo.png" alt="Save_Links" width="120" />
 </p>
 
 <h1 align="center">Save_Links</h1>
@@ -9,15 +9,15 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/hero.png" alt="Save Links bookmark manager desktop and mobile interface" width="100%" />
-</p>
-
-<p align="center">
   <a href="https://savelinks.cc.cd"><b>Open the app</b></a>
   &nbsp;·&nbsp;
   <a href="#development">Run it locally</a>
   &nbsp;·&nbsp;
   <a href="#roadmap">Roadmap</a>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/hero.png" alt="Save Links desktop library with sidebar folders, tags, filters and the link detail panel" width="100%" />
 </p>
 
 ## What is Save_Links?
@@ -35,13 +35,17 @@ Save_Links is a browser-based bookmark manager that keeps your data on your devi
 - **Save links** with automatic metadata (title, description, preview image) when the site provides it, and full manual editing.
 - **URL cleaning** - common tracking parameters are removed before saving.
 - **Duplicate detection** - saving an existing link offers Replace existing / Add another / Cancel.
-- **Folders** with live counts and an Unfiled group; move links between folders from the card menu.
-- **Favorites, Important and Must Have** - per-link status flags; Favorites and Important are one-click card controls, Must Have lives in the card's quick-action menu.
-- **Search** across titles, URLs, descriptions and tags, with the **Ctrl/⌘+K** shortcut.
-- **Filters** by category, status and folder, shown as clearable chips.
+- **Folders** with live counts and an Unfiled group, including nested subfolders managed from the sidebar folder tree; move links between folders from the card menu.
+- **Favorites and Pin** - one-click item controls on every card and row; Favorites and Pinned each have their own filter.
+- **Tags** - add, edit and remove tags on any link, and filter by tag from the sidebar tag cloud.
+- **Recently Added** - a Today + Yesterday destination alongside All Links and Favorites.
+- **Search** across titles, URLs, domains, descriptions, categories, folders and tags. **Ctrl/⌘+K** opens the command palette, where **Search links** is the default command.
+- **Filters** by date, category, type and pinned state, plus folder selection from the sidebar tree and tag filtering from the tag cloud - active filters appear as clearable chips.
 - **Sorting** - Newest, Oldest, Title A-Z and Title Z-A.
 - **Card, List and Compact** views.
 - **Inline editing** from the card or row, without leaving the list.
+- **Link detail panel** - a desktop rail / mobile sheet with the full link, folder move, copy/share, inline tag editing and favorite/pin controls.
+- **Bulk actions** - select individual or all visible links to move, favorite, pin or delete in one action.
 - **Responsive UI** for desktop, tablet and mobile, including a compact mobile shell with a four-item bottom navigation.
 - **Light, Dark and System** appearance, plus accent color schemes (None, Ocean, Forest, Lavender, Warm Amber).
 - **Backup and restore** with JSON export/import.
@@ -49,10 +53,14 @@ Save_Links is a browser-based bookmark manager that keeps your data on your devi
 
 ## Feature showcase
 
-An overview of the main features - saved links, folders, appearance settings, search and filtering, link actions, and the mobile layout.
+Detailed link management with the Link Detail Panel, appearance and accent customization, and the responsive mobile experience.
+
+![Save Link detail panel with link metadata, folder, tags, favorite and pin controls, and actions (dark theme, Ocean accent)](docs/screenshots/feature-detail.png)
 
 <p align="center">
-  <img src="docs/screenshots/feature-showcase.png" alt="Save Links feature showcase: saved links, folders, appearance settings, search, link actions and the mobile layout" width="100%" />
+  <img src="docs/screenshots/appearance.png" alt="Appearance settings with Light, Dark and System themes and accent color choices" width="49%" />
+  &nbsp;&nbsp;
+  <img src="docs/screenshots/mobile.png" alt="Save Link mobile library with link cards, filters, favorite and pin controls, and the bottom navigation" width="18%" />
 </p>
 
 ## Local-first and privacy
@@ -159,15 +167,19 @@ The dev server is available at `http://localhost:5173` by default.
 - `npm run build` - create a production build in `dist/`
 - `npm run preview` - preview the production build locally
 
+### Deployment and release
+
+Deployment and release procedures are documented in [MAINTAINERS.md](MAINTAINERS.md). The supported scripts are:
+
+- `npm run deploy:worker` - build and deploy the production Cloudflare Worker
+- `npm run deploy:pages` - deploy the static build to the Pages project's production branch
+- `npm run deploy:pages:preview` - create a temporary preview deployment
+
 ### Tech stack
 
 Save_Links is built with **Vue 3** and **Vite**, stores data in the browser's **IndexedDB**, and uses a **service worker and PWA manifest** for installation and offline support. Unit tests use **Vitest**, and end-to-end tests use **Playwright**.
 
 Authentication and cloud synchronization use **Cloudflare Workers**, **D1 (SQLite)**, and **OAuth (Google primary, GitHub)**.
-
-## Development with OpenCode
-
-Save_Links is developed with OpenCode as an AI-assisted development tool. Project-specific development instructions, architecture notes, and workflow guidance are maintained in `.opencode/`. Changes are validated with automated unit, end-to-end, and build checks.
 
 ## Roadmap
 
@@ -182,6 +194,7 @@ Save_Links is developed with OpenCode as an AI-assisted development tool. Projec
 - [x] Backup and restore, including older backup formats
 - [x] Offline use, installation, and safe migration of older data
 - [x] Responsive desktop, tablet, and mobile layouts
+- [x] Bulk actions (move, favorite, pin, delete)
 - [x] GitHub OAuth authentication
 - [x] Google OAuth authentication
 - [x] Session management with rotation
@@ -199,7 +212,6 @@ Planned (local improvements):
 - [ ] Smart tag suggestions
 - [ ] Improved metadata coverage and a way to refresh it
 - [ ] Link health checking
-- [ ] Bulk actions
 
 Later (enhancements):
 

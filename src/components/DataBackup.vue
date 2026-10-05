@@ -1,13 +1,11 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import Icon from './Icon.vue'
 import {
   createBackupPayload,
-  parseBackupText,
-  validateBackupPayload,
-  normalizeBackupData,
+  prepareImport,
+  downloadBackupFile,
   getLastBackupAt,
-  setLastBackupAt,
-  mergeImportData,
 } from '../utils/backup.js'
 
 const props = defineProps({
@@ -74,21 +72,8 @@ onMounted(() => {
 function triggerExport() {
   error.value = ''
   try {
-    const payload = createBackupPayload({ links: props.links, profile: props.profile, folders: props.folders, appearance: props.appearance, colorScheme: props.colorScheme })
-    const json = JSON.stringify(payload, null, 2)
-    const blob = new Blob([json], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    const date = new Date().toISOString().slice(0, 10)
-    a.download = `save-links-backup-${date}.json`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
-    const now = new Date().toISOString()
-    setLastBackupAt(now)
-    lastBackupAt.value = now
+    downloadBackupFile({ links: props.links, profile: props.profile, folders: props.folders, appearance: props.appearance, colorScheme: props.colorScheme })
+    lastBackupAt.value = getLastBackupAt()
     emit('show-toast', 'Backup exported')
   } catch (e) {
     error.value = e?.message || 'Export failed'
@@ -127,48 +112,25 @@ async function handleImport(event) {
     return
   }
 
-  const { data, error: parseError } = parseBackupText(text)
-  if (parseError) {
-    error.value = parseError
-    emit('show-toast', parseError)
+  const result = prepareImport(text, { links: props.links, folders: props.folders })
+  if (result.error) {
+    error.value = result.error
+    emit('show-toast', result.error)
     return
   }
 
-  const validation = validateBackupPayload(data)
-  if (!validation.valid) {
-    error.value = validation.error
-    emit('show-toast', validation.error)
-    return
-  }
-
-  // normalize (handles malformed records safely)
-  let normalized
-  try {
-    normalized = normalizeBackupData(data)
-  } catch {
-    error.value = 'Invalid backup: malformed records'
-    emit('show-toast', error.value)
-    return
-  }
-
-  // Check for duplicates using mergeImportData
-  const preview = mergeImportData(
-    props.links,
-    props.folders,
-    normalized.links,
-    normalized.folders
-  )
+  const { data, preview } = result
 
   // If no duplicates, proceed directly with skip strategy (additive import)
   if (preview.counts.links.duplicate === 0 && preview.counts.folders.duplicate === 0) {
-    pendingImport.value = { data: normalized, strategy: 'skip' }
+    pendingImport.value = { data, strategy: 'skip' }
     importPreview.value = null
-    emit('import-request', { data: normalized, strategy: 'skip' })
+    emit('import-request', { data, strategy: 'skip' })
     return
   }
 
   // Duplicates found - show preview modal
-  pendingImport.value = { data: normalized }
+  pendingImport.value = { data }
   importPreview.value = preview
 }
 
@@ -209,11 +171,20 @@ function handleImportClick() {
     <h4>Data & Backup</h4>
     <p class="muted">Protect your saved links.</p>
     <div class="actions">
-<button class="btn secondary" @click="triggerExport">Export Backup</button>
-        <button class="btn secondary" @click="triggerImport">Import Backup</button>
+      <button class="btn secondary" @click="triggerExport">
+        <Icon name="download" size="md" />
+        <span>Export Backup</span>
+      </button>
+      <button class="btn secondary" @click="triggerImport">
+        <Icon name="upload" size="md" />
+        <span>Import Backup</span>
+      </button>
       <input ref="fileInput" type="file" accept=".json,application/json" style="display:none" @change="handleImport" />
     </div>
-    <p v-if="lastBackupAt" class="muted small">Last backup: {{ formattedLastBackup }}</p>
+    <p v-if="lastBackupAt" class="backup-status">
+      <span class="status-dot" aria-hidden="true"><span class="status-dot-ping"></span></span>
+      <span>Last backup: {{ formattedLastBackup }}</span>
+    </p>
     <p v-if="error" class="error small">{{ error }}</p>
   </section>
 
@@ -274,31 +245,96 @@ function handleImportClick() {
   padding: 0;
 }
 .backup-card h4 {
-  margin: 0 0 6px;
-  font-size: var(--text-sm);
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-semibold);
+  line-height: 1.2;
   color: var(--text-h);
 }
 .muted {
   color: var(--muted);
   font-size: var(--text-sm);
-  margin: 0;
-}
-.muted.small {
-  font-size: var(--text-xs);
-  margin-top: 10px;
+  margin: 0 0 40px;
 }
 .actions {
   display: flex;
-  gap: var(--space-2);
-  margin-top: 12px;
+  gap: var(--space-4);
   flex-wrap: wrap;
+  margin-bottom: 32px;
 }
-/* Button visuals come from the shared control language (src/app-overrides.css):
-   the backup actions are secondary buttons, not one-off local styling. */
+/* Reference action buttons: 48px tall, 12px radius, 24px horizontal padding. */
+.actions .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: calc(var(--control-height) + var(--space-2));
+  padding: 0 var(--space-5);
+  border-radius: var(--radius);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  transition: background-color 0.3s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1), color 0.3s cubic-bezier(0.4, 0, 0.2, 1), transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.actions .btn svg { transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+@media (hover: hover) and (pointer: fine) {
+  /* Reference behavior: only the icon moves — the Export icon lifts, the
+     Import icon drops. */
+  .actions .btn:first-of-type:hover svg { transform: translateY(calc(var(--space-1) * -1)); }
+  .actions .btn:last-of-type:hover svg { transform: translateY(var(--space-1)); }
+}
+/* Press feedback stays the shared .btn recipe (no extra override). */
+/* Last-backup status: semantic success treatment with the reference pulse
+   (SaveLink --success, no reference palette). */
+.backup-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: fit-content;
+  margin: 0;
+  padding: var(--space-4) 20px;
+  border: 1px solid color-mix(in srgb, var(--success) 35%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--success) 6%, var(--bg));
+  color: var(--text);
+  font-size: var(--text-sm);
+}
+.status-dot {
+  position: relative;
+  width: var(--space-3);
+  height: var(--space-3);
+  flex-shrink: 0;
+}
+/* The solid center dot paints last (pseudo-element), so the pulse can never
+   dim or hide it. */
+.status-dot::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--success);
+}
+.status-dot-ping {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--success);
+  opacity: .75;
+  animation: status-ping 1s cubic-bezier(0, 0, .2, 1) infinite;
+}
+/* The reference ping: expand to 2× and fade out, repeating indefinitely. */
+@keyframes status-ping {
+  75%, 100% { transform: scale(2); opacity: 0; }
+}
 .error {
   color: var(--error);
   font-size: var(--text-xs);
   margin-top: 8px;
+}
+/* Reduced motion: no pulse, no button/icon movement. */
+@media (prefers-reduced-motion: reduce) {
+  .status-dot-ping { animation: none; }
+  .actions .btn:hover, .actions .btn:active,
+  .actions .btn:first-of-type:hover svg,
+  .actions .btn:last-of-type:hover svg { transform: none; }
 }
 
 /* Import Preview Modal */
@@ -307,6 +343,8 @@ function handleImportClick() {
   inset: 0;
   z-index: var(--z-panel);
   background: var(--overlay);
+  backdrop-filter: blur(var(--overlay-blur));
+  -webkit-backdrop-filter: blur(var(--overlay-blur));
   display: grid;
   place-items: center;
   padding: 16px;
@@ -390,7 +428,7 @@ function handleImportClick() {
 }
 }
 .import-preview-radio input[type="radio"] {
-  accent-color: var(--accent);
+  accent-color: var(--accent-strong);
   width: 16px;
   height: 16px;
   flex-shrink: 0;

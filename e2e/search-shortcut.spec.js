@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { clearStorage, ensureAddLinkOpen, saveLink } from './helpers.js'
+import { clearStorage, ensureAddLinkOpen, saveLink, ensureCardView } from './helpers.js'
 
 // Step 2C-5 contract: the Search shortcut (Ctrl+K / ⌘K) reuses the existing
 // search-opening path, never fires from editable controls, and is discoverable
@@ -14,13 +14,17 @@ test.describe('Search shortcut + keycap (Step 2C-5)', () => {
     await clearStorage(page)
   })
 
-  test('Ctrl+K focuses the existing search field', async ({ page }) => {
+  test('Ctrl+K opens the command palette; Search links focuses the field', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.goto('/')
     await expect(page.locator(SEARCH)).not.toBeFocused()
     await page.keyboard.press('Control+k')
+    const paletteInput = page.locator('.command-palette .command-input')
+    await expect(paletteInput).toBeFocused()
+    await expect(paletteInput).toHaveAttribute('aria-keyshortcuts', 'Control+K Meta+K')
+    // The first command is Search links: Enter reaches the existing field.
+    await page.keyboard.press('Enter')
     await expect(page.locator(SEARCH)).toBeFocused()
-    await expect(page.locator(SEARCH)).toHaveAttribute('aria-keyshortcuts', 'Control+K Meta+K')
   })
 
   test('Meta+K behaves the same way (macOS modifier)', async ({ page }) => {
@@ -31,7 +35,7 @@ test.describe('Search shortcut + keycap (Step 2C-5)', () => {
     await expect(page.locator(SEARCH)).toBeVisible()
     await expect(page.locator(SEARCH)).not.toBeFocused()
     await page.keyboard.press('Meta+k')
-    await expect(page.locator(SEARCH)).toBeFocused()
+    await expect(page.locator('.command-palette .command-input')).toBeFocused()
   })
 
   test('the shortcut is ignored while an editable control has focus', async ({ page }) => {
@@ -52,9 +56,11 @@ test.describe('Search shortcut + keycap (Step 2C-5)', () => {
     await page.goto('/')
     await saveLink(page, { url: 'https://example.com/alpha', title: 'Alpha Link' })
     await saveLink(page, { url: 'https://example.com/beta', title: 'Beta Link' })
+    await ensureCardView(page) // P8: the library boots in Compact
     await expect(page.locator('.grid > .card')).toHaveCount(2)
 
     await page.keyboard.press('Control+k')
+    await page.keyboard.press('Enter') // Search links (first command)
     await page.locator(SEARCH).fill('alpha')
     await expect(page.locator('.grid > .card')).toHaveCount(1)
     await page.keyboard.press('Escape')
@@ -79,12 +85,12 @@ test.describe('Search shortcut + keycap (Step 2C-5)', () => {
 
     // has text (blurred) -> hidden
     await page.locator(SEARCH).fill('alpha')
-    await page.locator('.page-title').click()
+    await page.locator('.navbar-custom').click({ position: { x: 4, y: 4 } })
     await expect(kbd).toBeHidden()
 
     // empty again and unfocused -> visible
     await page.locator(SEARCH).fill('')
-    await page.locator('.page-title').click()
+    await page.locator('.navbar-custom').click({ position: { x: 4, y: 4 } })
     await expect(kbd).toBeVisible()
   })
 
@@ -92,13 +98,14 @@ test.describe('Search shortcut + keycap (Step 2C-5)', () => {
     await page.setViewportSize({ width: 390, height: 844 })
     await page.goto('/')
     await expect(page.locator(KBD)).toBeHidden()
-    // the existing collapsed search still opens and focuses as before
-    await page.locator('.navbar-search-toggle').click()
+    // P15 Group 2: the field itself is inline at every width (no collapsed
+    // affordance), and Ctrl/Cmd+K still focuses it through the palette.
+    await expect(page.locator(SEARCH)).toBeVisible()
+    await expect(page.locator('.navbar-search-toggle')).toHaveCount(0)
+    await page.keyboard.press('Control+k')
+    await page.keyboard.press('Enter')
     await expect(page.locator(SEARCH)).toBeFocused()
     await expect(page.locator(KBD)).toBeHidden()
-    // and Escape still collapses it (pre-existing mobile behaviour)
-    await page.keyboard.press('Escape')
-    await expect(page.locator('.navbar-search-wrapper')).toBeHidden()
   })
 
   test('macOS platforms label the keycap with the command glyph', async ({ page }) => {
@@ -117,26 +124,28 @@ test.describe('Search shortcut + keycap (Step 2C-5)', () => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.goto('/')
     await saveLink(page, { url: 'https://example.com/alpha', title: 'Alpha Link' })
+    await ensureCardView(page) // P8: the library boots in Compact
 
     const card = page.locator('.grid > .card').first()
     // removed: tooltips that only repeated a visible label or the accessible name
-    await expect(card.locator('.pill[title]')).toHaveCount(0)
-    await expect(card.locator('.icon-btn[aria-controls][title]')).toHaveCount(0)
-    expect(await page.locator('.toolbar-export[title]').count()).toBe(0)
+    await expect(card.locator('.banner-action[aria-controls][title]')).toHaveCount(0)
+    expect(await page.locator('.library-controls').getByRole('button', { name: 'Export links' }).count()).toBe(0)
 
     // kept: accessible names, icon-only tooltips and the truncated-content tooltip
-    await expect(card.getByRole('button', { name: 'Toggle Important' })).toBeVisible()
+    // (P15.10: Important/Must Have left the item surfaces; P15.11: the banner
+    // cluster carries favourite + pin + the item menu)
     await expect(card.getByRole('button', { name: 'Toggle Favorite' })).toBeVisible()
-    await expect(card.getByRole('button', { name: 'Toggle Must Have' })).toHaveCount(0) // lives in the menu (2C-3)
-    await expect(card.locator('.url[title]')).toHaveCount(1)
-    await expect(card.locator('.icon-btn[aria-label="Edit link"]')).toHaveAttribute('title', 'Edit')
+    await expect(card.getByRole('button', { name: 'Toggle Pin' })).toBeVisible()
+    await expect(card.getByRole('button', { name: 'Toggle Important' })).toHaveCount(0)
+    await expect(card.getByRole('button', { name: 'Toggle Must Have' })).toHaveCount(0)
+    await expect(card.locator('.card-domain-text[title]')).toHaveCount(1)
 
     // list view keeps the icon-only row toggles' tooltips
     await page.locator('.view-btn').nth(1).click()
     const row = page.locator('.row-list > .link-row').first()
-    await expect(row.getByRole('button', { name: 'Toggle Important' })).toHaveAttribute('title', 'Important')
     await expect(row.getByRole('button', { name: 'Toggle Favorite' })).toHaveAttribute('title', 'Favorite')
-    await expect(row.locator('.icon-btn[aria-controls][title]')).toHaveCount(0)
+    await expect(row.getByRole('button', { name: 'Toggle Pin' })).toHaveAttribute('title', 'Pin')
+    await expect(row.locator('.item-action[aria-controls][title]')).toHaveCount(0)
     await expect(row.locator('.row-main[title]')).toHaveCount(1)
   })
 })

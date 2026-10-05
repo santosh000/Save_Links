@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { clearStorage, ensureAddLinkOpen, saveLink, visibleLinkRows, linkRowByTitle, openView, createFolder } from './helpers.js'
+import { clearStorage, openView, saveLink, visibleLinkRows, linkRowByTitle, createFolder } from './helpers.js'
 
 // Read the titles of the visible rows in render order. Cards lead with their
 // title (card hierarchy) and list/compact rows do the same.
@@ -9,23 +9,15 @@ async function rowTitles(page) {
   )
 }
 
-// The toolbar sits behind its disclosure on the mobile shell.
-async function revealToolbar(page) {
-  const disclosure = page
-    .getByRole('button', { name: /sort\s*(&|and)?\s*filter/i })
-    .or(page.locator('.toolbar-controls button[aria-expanded]'))
-    .first()
-  if (await disclosure.isVisible().catch(() => false)) {
-    if ((await disclosure.getAttribute('aria-expanded')) !== 'true') await disclosure.click()
-  }
-}
-
-test.describe('Sorting', () => {
+// P15.10: the user-facing sort control is gone (mockup contract). The library
+// keeps its deterministic pinned-first / newest-first display order, so these
+// tests now pin that behaviour and its composition with the real filters.
+test.describe('Display order (P15.10: newest-first, no sort UI)', () => {
   test.beforeEach(async ({ page }) => {
     await clearStorage(page)
   })
 
-  test('sort control exists and switches display order', async ({ page }) => {
+  test('the library renders newest first and offers no sort control', async ({ page }) => {
     await page.goto('/')
     // sequential saves -> ascending createdAt: A, B, C (C newest)
     await saveLink(page, { url: 'https://example.com/alpha', title: 'Alpha Link' })
@@ -33,31 +25,16 @@ test.describe('Sorting', () => {
     await saveLink(page, { url: 'https://example.com/gamma', title: 'Gamma Link' })
     await expect(visibleLinkRows(page)).toHaveCount(3)
 
-    // default: newest first (Gamma, Beta, Alpha)
+    // deterministic newest first (Gamma, Beta, Alpha)
     expect(await rowTitles(page)).toEqual(['Gamma Link', 'Beta Link', 'Alpha Link'])
 
-    const sortSelect = page.locator('#filter-sort')
-    await expect(sortSelect).toBeVisible()
-    await expect(sortSelect).toHaveValue('newest')
-
-    // Oldest first -> Alpha, Beta, Gamma
-    await sortSelect.selectOption('oldest')
-    expect(await rowTitles(page)).toEqual(['Alpha Link', 'Beta Link', 'Gamma Link'])
-
-    // Title A-Z -> Alpha, Beta, Gamma
-    await sortSelect.selectOption('title-az')
-    expect(await rowTitles(page)).toEqual(['Alpha Link', 'Beta Link', 'Gamma Link'])
-
-    // Title Z-A -> Gamma, Beta, Alpha
-    await sortSelect.selectOption('title-za')
-    expect(await rowTitles(page)).toEqual(['Gamma Link', 'Beta Link', 'Alpha Link'])
-
-    // Back to newest
-    await sortSelect.selectOption('newest')
-    expect(await rowTitles(page)).toEqual(['Gamma Link', 'Beta Link', 'Alpha Link'])
+    // no sort control remains anywhere in the library surface
+    await expect(page.locator('#filter-sort')).toHaveCount(0)
+    await expect(page.getByRole('combobox', { name: 'Sort by' })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: /sort\s*(&|and)?\s*filter/i })).toHaveCount(0)
   })
 
-  test('sorting works together with search', async ({ page }) => {
+  test('order is stable together with search', async ({ page }) => {
     await page.goto('/')
     await saveLink(page, { url: 'https://example.com/apple', title: 'Apple Pie' })
     await saveLink(page, { url: 'https://example.com/banana', title: 'Banana Split' })
@@ -69,15 +46,10 @@ test.describe('Sorting', () => {
 
     await page.getByLabel('Search links').fill('')
     await expect(visibleLinkRows(page)).toHaveCount(3)
-
-    await page.locator('#filter-sort').selectOption('title-az')
-    expect(await rowTitles(page)).toEqual(['Apple Pie', 'Apricot Jam', 'Banana Split'])
-
-    await page.locator('#filter-sort').selectOption('title-za')
-    expect(await rowTitles(page)).toEqual(['Banana Split', 'Apricot Jam', 'Apple Pie'])
+    expect(await rowTitles(page)).toEqual(['Apricot Jam', 'Banana Split', 'Apple Pie'])
   })
 
-  test('sorting works together with a folder', async ({ page }) => {
+  test('order is stable together with a folder filter', async ({ page }) => {
     await page.goto('/')
     // create a folder via Folders view
     await openView(page, 'folders')
@@ -99,39 +71,30 @@ test.describe('Sorting', () => {
       await expect(menu).toBeHidden()
     }
 
-    // filter to the Work folder (via Folders view)
+    // filter to the Work folder from the sidebar tree
     await openView(page, 'folders')
-    await page.getByRole('button', { name: 'Show folder Work' }).click()
+    await page.locator('[data-testid="sidebar-folder-row"]', { hasText: 'Work' }).click()
 
     await expect(visibleLinkRows(page)).toHaveCount(2)
-
-    await revealToolbar(page)
-    await page.locator('#filter-sort').selectOption('title-az')
-    expect(await rowTitles(page)).toEqual(['Work Alpha', 'Work Beta'])
-
-    await page.locator('#filter-sort').selectOption('title-za')
     expect(await rowTitles(page)).toEqual(['Work Beta', 'Work Alpha'])
   })
 
-  test('sorting works together with a status filter', async ({ page }) => {
+  test('order is stable together with a filter', async ({ page }) => {
     await page.goto('/')
     await saveLink(page, { url: 'https://example.com/imp-1', title: 'Imp First' })
     await saveLink(page, { url: 'https://example.com/imp-2', title: 'Imp Second' })
     await saveLink(page, { url: 'https://example.com/regular', title: 'Regular' })
 
-    // mark the two Imp links as Important with the permanent row control
-    await linkRowByTitle(page, 'Imp First').getByRole('button', { name: 'Toggle Important' }).click()
-    await linkRowByTitle(page, 'Imp Second').getByRole('button', { name: 'Toggle Important' }).click()
+    // mark the two Imp links with the permanent row pin control
+    await linkRowByTitle(page, 'Imp First').getByRole('button', { name: 'Toggle Pin' }).click()
+    await linkRowByTitle(page, 'Imp Second').getByRole('button', { name: 'Toggle Pin' }).click()
 
-    await revealToolbar(page)
-    await page.locator('#filter-status').selectOption('important')
+    await page.getByRole('button', { name: 'Show pinned links only' }).click()
     await expect(visibleLinkRows(page)).toHaveCount(2)
-
-    await page.locator('#filter-sort').selectOption('oldest')
-    expect(await rowTitles(page)).toEqual(['Imp First', 'Imp Second'])
+    expect(await rowTitles(page)).toEqual(['Imp Second', 'Imp First'])
   })
 
-  test('sorting responsive: control usable at 375px, 768px and desktop', async ({ page }) => {
+  test('pinned links surface first at 375px, 768px and desktop', async ({ page }) => {
     for (const width of [375, 768, 1280]) {
       await clearStorage(page)
       await page.setViewportSize({ width, height: 800 })
@@ -139,13 +102,8 @@ test.describe('Sorting', () => {
       await saveLink(page, { url: 'https://example.com/zebra', title: 'Zebra' })
       await saveLink(page, { url: 'https://example.com/apple', title: 'Apple' })
 
-      await revealToolbar(page)
-      const sortSelect = page.locator('#filter-sort')
-      await expect(sortSelect).toBeVisible()
-      await expect(page.getByRole('combobox', { name: 'Sort by' })).toBeVisible()
-      await sortSelect.selectOption('title-az')
-      expect(await rowTitles(page)).toEqual(['Apple', 'Zebra'])
-      await sortSelect.selectOption('title-za')
+      // pin the older link: it must jump above the newer one
+      await linkRowByTitle(page, 'Zebra').getByRole('button', { name: 'Toggle Pin' }).click()
       expect(await rowTitles(page)).toEqual(['Zebra', 'Apple'])
 
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)

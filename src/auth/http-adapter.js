@@ -2,7 +2,7 @@
 // double with the existing Cloudflare Worker OAuth + session endpoints.
 // Implements the adapter contract consumed by src/auth/session.js.
 //
-// Boundary rules preserved (AGENTS.md / SECURITY.md / .opencode/architecture.md):
+// Boundary rules preserved (SECURITY.md):
 //   - The browser sends its HttpOnly session cookie automatically on same-origin
 //     requests; fetch always uses credentials:'same-origin' and navigation is
 //     a plain location.assign — no token is ever read, stored, or sent by app code.
